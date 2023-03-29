@@ -1,0 +1,34 @@
+
+gcp;
+
+[fns dr] = uigetfile('D:\slap2Data\*.tif', 'multiselect', 'on');
+if ~iscell(fns)
+    fns = {fns};
+end
+
+for f_ix = 1:length(fns)
+    A = ScanImageTiffReader([dr filesep fns{f_ix}]);
+    Y = permute(single(A.data), [2 1 3]);
+    Y = single(Y);                 % convert to single precision
+    Y = Y(:,:,1:2:(2*floor(end/2))) + Y(:,:,2:2:(2*floor(end/2)));
+    T = size(Y,ndims(Y));
+    Y = Y - min(Y(:));
+
+    options_rigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'bin_width',200,'max_shift',15,'us_fac',4,'init_batch',200);
+
+    tic; [M1,shifts1,template1,options_rigid] = normcorre(Y,options_rigid); toc
+
+
+    %downsample in time
+    M2 = M1;
+    dsiter = 2;
+    for ix = 1:dsiter
+        M2 = M2(:,:,1:2:(2*floor(end/2)))+ M2(:,:,2:2:end);
+    end
+
+    saveastiff()
+end
+% %% now try non-rigid motion correction (also in parallel)
+% options_nonrigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'grid_size',[32,32],'mot_uf',4,'bin_width',200,'max_shift',15,'max_dev',3,'us_fac',50,'init_batch',200);
+% tic; [M2,shifts2,template2,options_nonrigid] = normcorre_batch(Y,options_nonrigid); toc
+
