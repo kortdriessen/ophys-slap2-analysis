@@ -228,6 +228,9 @@ classdef spineAnalysis < handle
 %                 end
 
                 %compile output
+                sData.frametime = obj.aData.frametime;
+                sData.dsFac = obj.dsFac;
+                
                 sData.trace0(selframes, rix) = trace0; %raw ROI, without decorrelating motion variables
                 sData.n0(rix) = estimatenoise(trace0); %noise for trace0
                 sData.trace1(selframes, rix) = trace1; %raw ROI, with motion variables decorrelated
@@ -235,7 +238,7 @@ classdef spineAnalysis < handle
                 sData.trace2(selframes, rix) = trace2; %NMF-based traces
                 sData.n2(rix) = estimatenoise(trace2); %noise for trace2
                 
-                sData.bleach = obj.bleach; %bleaching curve for this field of view
+                sData.bleach = obj.bleach; %bleaching curve for this field of view, in downsampled time
                 
                 sData.contamination(rix) = 1-corr(trace0', trace2'); %a measure of how contaminated the raw trace is by other factors/noise
             end
@@ -263,6 +266,7 @@ classdef spineAnalysis < handle
                 obj.drsave = obj.dr;
             end
             [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.mat']);
+            save([obj.drsave filesep obj.fnsave], 'sData')
         end
 
         function saveROIs (obj, arg1, arg2)
