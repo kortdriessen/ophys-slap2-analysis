@@ -1,16 +1,10 @@
 simulation = false;
 robust = false;
 b = 3;
-maxSuperPixels = 2000;
 
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_666161_2023-03-28_16-07-46\zstack_20230328_163403_DMD1-REFERENCE_CH1.tif");
+[fns, dr] = uigetfile('*.tif', 'Select Reference Stack', 'multiselect', 'on');
+refStack = tiffreadVolume([dr fns]);
 
-refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD1-REFERENCE_CH2.tif");
-
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD1-REFERENCE_CH2.tif");
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD2-REFERENCE_CH2.tif");
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-15_11-56-43\refStack1_20230315_130400_DMD1-REFERENCE_CH2.tif");
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-15_11-56-43\refStack2_20230315_130853_DMD1-REFERENCE_CH2.tif");
 size(refStack)
 
 hDataViewer = slap2.Slap2DataViewer();
@@ -38,8 +32,6 @@ for lineSweepIdx = 1:numLinesPerCycle
     
     spIDs = superPixIdxs*100+zIdx;
     allSuperPixelIDs = [allSuperPixelIDs; spIDs];
-
-%     if mod(lineSweepIdx,10000) == 0; disp(length(allSuperPixelIDs)); allSuperPixelIDs = unique(allSuperPixelIDs); end;
 end
 
 [allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
@@ -50,57 +42,11 @@ fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
 
 %% get roiMasks
 
-spToUse = 1:length(allSuperPixelIDs);
-
-% if length(allSuperPixelIDs) > maxSuperPixels
-%     roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs,1);
-%     
-%     fprintf("Too many superpixels - limiting to %d\n", maxSuperPixels);
-%     s = RandStream('mlfg6331_64'); 
-%     cellLocation = [381 755];
-%     captureRadius = 25;
-%     ct = 1;
-%     for i = 1:length(allSuperPixelIDs)
-%         if ct > (2*captureRadius+1)^2; spToUse(spToUse >= i) = []; break; end
-%         sp = allSuperPixelIDs(i);
-%         zIdx = rem(sp,100);
-%         superPixIdx = (sp - zIdx) / 100;
-%     
-%         pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-%         pixelReplacementMap = pixelReplacementMap{zIdx};
-%     
-%         tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
-%         tmp(superPixIdx+1) = 1;
-%         tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
-% 
-%         if sum(tmp(cellLocation(2)-captureRadius:cellLocation(2)+captureRadius, cellLocation(1)-captureRadius:cellLocation(1)+captureRadius), 'all') < 1;
-%             spToUse(spToUse == i) = [];
-%             continue;
-%         end
-% 
-%         roiMasks(:,:,zIdx,ct) = tmp(:,1:dmdPixelsPerColumn)';
-%         ct = ct + 1;
-%     end
-% else
-%     roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs,length(spToUse));
-%     
-%     for i = 1:length(allSuperPixelIDs)
-%         sp = allSuperPixelIDs(i);
-%         zIdx = rem(sp,100);
-%         superPixIdx = (sp - zIdx) / 100;
-%     
-%         pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-%         pixelReplacementMap = pixelReplacementMap{zIdx};
-%     
-%         tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
-%         tmp(superPixIdx+1) = 1;
-%         tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
-%     
-%         roiMasks(:,:,zIdx,i) = tmp(:,1:dmdPixelsPerColumn)';
-%     end
-% end
-
-% sparse matrix
+% using sparse matrix
+fprintf("Calculating ROI Masks... ");
+tic;
+sparseMaskInds = [];
+allPixelReplacementMaps = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
 
 for i = 1:length(allSuperPixelIDs)
     tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
@@ -108,23 +54,18 @@ for i = 1:length(allSuperPixelIDs)
     sp = allSuperPixelIDs(i);
     zIdx = rem(sp,100);
     superPixIdx = (sp - zIdx) / 100;
+    pixelReplacementMap = allPixelReplacementMaps{zIdx};
 
-    pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-    pixelReplacementMap = pixelReplacementMap{zIdx};
+    open = double(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
+    openR = floor((open-1) /dmdPixelsPerRow)+1;
+    openC = open - (openR-1) * dmdPixelsPerRow;
+    openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
 
-    tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
-    tmp(superPixIdx+1) = 1;
-    tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
-
-    tmpMask(:,:,zIdx) = tmp(:,1:dmdPixelsPerColumn)';
-
-    if i == 1
-        roiMasks = sparse(reshape(tmpMask,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,1));
-    else
-        roiMasks = [roiMasks sparse(reshape(tmpMask,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,1))];
-    end
+    sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
 end
 clear('tmpMask');
+roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
+fprintf('done - took %f sec\n', toc);
 
 %% make sure refStack is larger than imaged frame
 
@@ -148,20 +89,34 @@ end
 xPre = 40; xPost = 40;
 yPre = 40; yPost = 40;
 
+zPre = 5;
+zPost = 5;
+blCropZ = bl(:,:,1+zPre:end-zPost);
+
 xMotRange = xPre + xPost + 1;
 yMotRange = yPre + yPost + 1;
-zMotRange = size(bl,3) - numFastZs + 1;
+zMotRange = size(blCropZ,3) - numFastZs + 1;
+
+paddedBL = padarray(padarray(blCropZ,[yPre,xPre,0],mean(blCropZ(:)),'pre'),[yPost,xPost,0],'post');
+paddedSz = size(paddedBL);
 
 fname = hLowLevelDataFile.filename;
-if ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file') % length(allSuperPixelIDs) > maxSuperPixels ||
+if ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file')
     fprintf("Calculating lookup table... ")
     
     tic;
 
-    likelihood_means = single(zeros(yMotRange, xMotRange, zMotRange,length(spToUse))); % X x Y x Z x no. of superpixels
-    parfor n = 1:length(spToUse)
-        tmpMask = reshape(full(roiMasks(:,n)),[dmdPixelsPerColumn, dmdPixelsPerRow, numFastZs]);
-        likelihood_means(:,:,:,n) = single(convn(padarray(padarray(bl,[yPre,xPre,0],mean(bl(:)),'pre'),[yPost,xPost,0],'post'),tmpMask(end:-1:1,end:-1:1,end:-1:1),'valid'));
+    likelihood_means = single(zeros(yMotRange, xMotRange, zMotRange,length(allSuperPixelIDs))); % X x Y x Z x no. of superpixels
+    parfor n = 1:length(allSuperPixelIDs)
+        openPixs = sparseMaskInds(sparseMaskInds(:,2) == n, 1);
+        [r, c, d] = ind2sub([dmdPixelsPerColumn dmdPixelsPerRow numFastZs], openPixs);
+        for y = 1:yMotRange
+            for x = 1:xMotRange
+                for z = 1:zMotRange
+                    likelihood_means(y,x,z,n) = sum(paddedBL((d+z-2)*paddedSz(1)*paddedSz(2)+(c+x-2)*paddedSz(1)+(r+y-1)));
+                end
+            end
+        end
     end
     clear('tmpMask');
     
@@ -189,8 +144,8 @@ My = -1;
 Mz = -1;
 searchRadius = 2;
 
-dataMatrix = zeros(length(spToUse),numCycles);
-expectedMatrix = zeros(length(spToUse),numCycles);
+dataMatrix = zeros(length(allSuperPixelIDs),numCycles);
+expectedMatrix = zeros(length(allSuperPixelIDs),numCycles);
 
 fprintf("Inferring motion... ")
 tic
@@ -198,7 +153,7 @@ tic
 for cycleIdx = 1:numCycles
     if simulation; data = spData(:,cycleIdx) ./ 100;
     else
-        data = zeros(length(spToUse),1);
+        data = zeros(length(allSuperPixelIDs),1);
         allLineData = hLowLevelDataFile.getLineData(1:numLinesPerCycle, cycleIdx);
         for lineSweepIdx = 1:numLinesPerCycle
     
@@ -210,11 +165,11 @@ for cycleIdx = 1:numCycles
             zIdx = hLowLevelDataFile.lineFastZIdxs(lineSweepIdx);
     
             spID = superPixIdxs*100 + uint32(zIdx);
-            [~,spIdx] = ismember(spID,allSuperPixelIDs(spToUse));
+            [~,spIdx] = ismember(spID,allSuperPixelIDs);
     
             data(spIdx(spIdx>0)) = data(spIdx(spIdx>0)) + single(lineData(spIdx>0));
         end
-        data = data ./ spSampleCt(spToUse) ./ 100;
+        data = data ./ spSampleCt ./ 100;
     end
 
     if cycleIdx == 1 
@@ -226,16 +181,13 @@ for cycleIdx = 1:numCycles
         ySearch = max(1,motion(cycleIdx-1,1) - searchRadius):min(xMotRange,motion(cycleIdx-1,1) + searchRadius);
         xSearch = max(1,motion(cycleIdx-1,2) - searchRadius):min(yMotRange,motion(cycleIdx-1,2) + searchRadius);
         zSearch = max(1,motion(cycleIdx-1,3) - searchRadius):min(zMotRange,motion(cycleIdx-1,3) + searchRadius);
-        [Ys, Xs, Zs] = meshgrid(ySearch - motion(cycleIdx-1,1),xSearch - motion(cycleIdx-1,2),zSearch - motion(cycleIdx-1,3));
+        [Xs, Ys, Zs] = meshgrid(xSearch - motion(cycleIdx-1,2),ySearch - motion(cycleIdx-1,1),zSearch - motion(cycleIdx-1,3));
         motionLimits = ~((Xs) .^ 2 + (Ys) .^ 2 + (Zs) .^ 2 <= searchRadius .^ 2);
     end
 
     sub_likelihood_means = likelihood_means(ySearch,xSearch,zSearch,:);
     sub_sqrt_means = sqrt_means(:,ySearch,xSearch,zSearch);
     sub_log_means = log_means(ySearch,xSearch,zSearch,:);
-
-    
-%     scalingFactor = sqrt(reshape(likelihood_means,[xMotRange*yMotRange*zMotRange length(data)]))' \ sqrt(data);
 
     scalingFactor = ones(size(sub_likelihood_means,1:3));
     for y = 1:length(ySearch)
@@ -249,18 +201,11 @@ for cycleIdx = 1:numCycles
     end
     scaled_likelihood_means = scalingFactor .* sub_likelihood_means;
     scaled_log_means = log(scalingFactor) + sub_log_means;
-    
-%     tmp_lh_means = likelihood_means;
-%     tmp_lh_means(tmp_lh_means < 0.25) = 0;
-% 
-%     scaled_likelihood_means = likelihood_means ./ sum(tmp_lh_means,4) .* sum(data);
-%     scaled_likelihood_means(likelihood_means < 0.25) = likelihood_means(likelihood_means < 0.25);
-%     scaled_log_means = log(scaled_likelihood_means);
 
     if robust
         log_likelihood = sum(abs(max(-b, min(b,(reshape(data,[1,1,1,length(data)]) - likelihood_means) ./ sqrt(likelihood_means)))),4);
     else
-        log_likelihood = sum(bsxfun(@times,reshape(data,[1,1,1,length(data)]),scaled_log_means) - scaled_likelihood_means,4);
+        log_likelihood = sum(reshape(data,[1,1,1,length(data)]) .* scaled_log_means - scaled_likelihood_means,4);
     end
 
     log_likelihood(log_likelihood >= Inf) = -1e8;
@@ -276,10 +221,6 @@ for cycleIdx = 1:numCycles
     [My, Mx, Mz, scale] = ind2sub(size(mat),I);
     motion(cycleIdx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
     brightness(cycleIdx) = scalingFactor(My, Mx, Mz);
-%     if cycleIdx > 1 && abs(motion(cycleIdx,1) - motion(cycleIdx - 1,1)) > r
-%         disp('debug');
-%     end
-%     disp(motion(cycleIdx,:));
 
     dataMatrix(:,cycleIdx) = data;
     expectedMatrix(:,cycleIdx) = scaled_likelihood_means(My,Mx,Mz,:);
