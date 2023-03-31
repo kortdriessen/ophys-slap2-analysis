@@ -276,9 +276,12 @@ classdef spineAnalysis < handle
             pos = {}; labels = {};
             for rix = 1:length(obj.hROIs)
                 try
-                    %convert the ROI to saveable data
-                    pos = [pos {get(obj.hROIs(rix), 'position')}];
-                    labels = [labels {get(obj.hROIs(rix), 'Label')}];
+                    posTmp = get(obj.hROIs(rix), 'position');
+                    if ~isempty(posTmp)
+                        %convert the ROI to saveable data
+                        pos = [pos {posTmp}];
+                        labels = [labels {get(obj.hROIs(rix), 'Label')}];
+                    end
                 catch
                     %this object didn't exist
                 end
