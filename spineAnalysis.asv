@@ -235,8 +235,6 @@ classdef spineAnalysis < handle
                 sData.trace2(selframes, rix) = trace2; %NMF-based traces
                 sData.n2(rix) = estimatenoise(trace2); %noise for trace2
                 
-                sData.bleach = obj.bleach; %bleaching curve for this field of view
-                
                 sData.contamination(rix) = 1-corr(trace0', trace2'); %a measure of how contaminated the raw trace is by other factors/noise
             end
 
