@@ -3,9 +3,9 @@ robust = false;
 b = 3;
 maxSuperPixels = 2000;
 
-refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_666161_2023-03-28_16-07-46\zstack_20230328_163403_DMD1-REFERENCE_CH1.tif");
+% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_666161_2023-03-28_16-07-46\zstack_20230328_163403_DMD1-REFERENCE_CH1.tif");
 
-% refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD1-REFERENCE_CH2.tif");
+refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD1-REFERENCE_CH2.tif");
 
 % refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD1-REFERENCE_CH2.tif");
 % refStack = tiffreadVolume("Z:\ophys\SLAP2\exp data\Mice\slap2_664321_2023-03-22_10-02-10\refStack_20230322_124704_DMD2-REFERENCE_CH2.tif");
@@ -23,6 +23,7 @@ numCycles = hLowLevelDataFile.numCycles;
 
 dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
 dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
+numFastZs = length(hLowLevelDataFile.fastZs);
 
 %% get list of superpixels and extract data
 
@@ -51,74 +52,96 @@ fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
 
 spToUse = 1:length(allSuperPixelIDs);
 
-if length(allSuperPixelIDs) > maxSuperPixels
-    roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,length(hLowLevelDataFile.fastZs),1);
-    
-    fprintf("Too many superpixels - limiting to %d\n", maxSuperPixels);
-    s = RandStream('mlfg6331_64'); 
-    cellLocation = [381 755];
-    captureRadius = 25;
-    ct = 1;
-    for i = 1:length(allSuperPixelIDs)
-        if ct > (2*captureRadius+1)^2; spToUse(spToUse >= i) = []; break; end
-        sp = allSuperPixelIDs(i);
-        zIdx = rem(sp,100);
-        superPixIdx = (sp - zIdx) / 100;
-    
-        pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-        pixelReplacementMap = pixelReplacementMap{zIdx};
-    
-        tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
-        tmp(superPixIdx+1) = 1;
-        tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
-
-        if sum(tmp(cellLocation(2)-captureRadius:cellLocation(2)+captureRadius, cellLocation(1)-captureRadius:cellLocation(1)+captureRadius), 'all') < 1;
-            spToUse(spToUse == i) = [];
-            continue;
-        end
-
-        roiMasks(:,:,zIdx,ct) = tmp(:,1:dmdPixelsPerColumn)';
-        ct = ct + 1;
-    end
-else
-    roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,length(hLowLevelDataFile.fastZs),length(spToUse));
-    
-    for i = 1:length(allSuperPixelIDs)
-        sp = allSuperPixelIDs(i);
-        zIdx = rem(sp,100);
-        superPixIdx = (sp - zIdx) / 100;
-    
-        pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-        pixelReplacementMap = pixelReplacementMap{zIdx};
-    
-        tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
-        tmp(superPixIdx+1) = 1;
-        tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
-    
-        roiMasks(:,:,zIdx,i) = tmp(:,1:dmdPixelsPerColumn)';
-    end
-end
+% if length(allSuperPixelIDs) > maxSuperPixels
+%     roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs,1);
+%     
+%     fprintf("Too many superpixels - limiting to %d\n", maxSuperPixels);
+%     s = RandStream('mlfg6331_64'); 
+%     cellLocation = [381 755];
+%     captureRadius = 25;
+%     ct = 1;
+%     for i = 1:length(allSuperPixelIDs)
+%         if ct > (2*captureRadius+1)^2; spToUse(spToUse >= i) = []; break; end
+%         sp = allSuperPixelIDs(i);
+%         zIdx = rem(sp,100);
+%         superPixIdx = (sp - zIdx) / 100;
+%     
+%         pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+%         pixelReplacementMap = pixelReplacementMap{zIdx};
+%     
+%         tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
+%         tmp(superPixIdx+1) = 1;
+%         tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
+% 
+%         if sum(tmp(cellLocation(2)-captureRadius:cellLocation(2)+captureRadius, cellLocation(1)-captureRadius:cellLocation(1)+captureRadius), 'all') < 1;
+%             spToUse(spToUse == i) = [];
+%             continue;
+%         end
+% 
+%         roiMasks(:,:,zIdx,ct) = tmp(:,1:dmdPixelsPerColumn)';
+%         ct = ct + 1;
+%     end
+% else
+%     roiMasks = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs,length(spToUse));
+%     
+%     for i = 1:length(allSuperPixelIDs)
+%         sp = allSuperPixelIDs(i);
+%         zIdx = rem(sp,100);
+%         superPixIdx = (sp - zIdx) / 100;
+%     
+%         pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+%         pixelReplacementMap = pixelReplacementMap{zIdx};
+%     
+%         tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
+%         tmp(superPixIdx+1) = 1;
+%         tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
+%     
+%         roiMasks(:,:,zIdx,i) = tmp(:,1:dmdPixelsPerColumn)';
+%     end
+% end
 
 % sparse matrix
+
+for i = 1:length(allSuperPixelIDs)
+    tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
+
+    sp = allSuperPixelIDs(i);
+    zIdx = rem(sp,100);
+    superPixIdx = (sp - zIdx) / 100;
+
+    pixelReplacementMap = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+    pixelReplacementMap = pixelReplacementMap{zIdx};
+
+    tmp = zeros(dmdPixelsPerRow, dmdPixelsPerColumn*2);
+    tmp(superPixIdx+1) = 1;
+    tmp(pixelReplacementMap(:,1)+1) = tmp(pixelReplacementMap(:,2)+1);
+
+    tmpMask(:,:,zIdx) = tmp(:,1:dmdPixelsPerColumn)';
+
+    if i == 1
+        roiMasks = sparse(reshape(tmpMask,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,1));
+    else
+        roiMasks = [roiMasks sparse(reshape(tmpMask,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,1))];
+    end
+end
+clear('tmpMask');
 
 %% make sure refStack is larger than imaged frame
 
 bl = single(refStack)/100; %  reference image (X x Y x Z)
-bl = padarray(bl,[floor((max(size(bl,1),size(roiMasks,1))-size(bl,1))/2),...
-                  floor((max(size(bl,2),size(roiMasks,2))-size(bl,2))/2),...
-                  floor((max(size(bl,2),size(roiMasks,2))-size(bl,2))/2)],...
+bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
+                  floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
+                  floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
               mean(bl(:)),...
               'both');
 
-if size(bl,1) < size(roiMasks,1)
+if size(bl,1) < dmdPixelsPerColumn
     bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
 end
 
-if size(bl,2) < size(roiMasks,2)
+if size(bl,2) < dmdPixelsPerRow
     bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
 end
-
-% bl = padarray(padarray(bl(1:end-20,201:end,:),[0 200 0],mean(bl(:)),'post'),[20 0 0], mean(bl(:)),'pre');
 
 %% Calculate lookup table
 
@@ -127,7 +150,7 @@ yPre = 40; yPost = 40;
 
 xMotRange = xPre + xPost + 1;
 yMotRange = yPre + yPost + 1;
-zMotRange = size(bl,3) - size(roiMasks,3) + 1;
+zMotRange = size(bl,3) - numFastZs + 1;
 
 fname = hLowLevelDataFile.filename;
 if ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file') % length(allSuperPixelIDs) > maxSuperPixels ||
@@ -137,8 +160,10 @@ if ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file') % length(allSuperPixelIDs)
 
     likelihood_means = single(zeros(yMotRange, xMotRange, zMotRange,length(spToUse))); % X x Y x Z x no. of superpixels
     parfor n = 1:length(spToUse)
-        likelihood_means(:,:,:,n) = single(convn(padarray(padarray(bl,[yPre,xPre,0],mean(bl(:)),'pre'),[yPost,xPost,0],'post'),roiMasks(end:-1:1,end:-1:1,end:-1:1,n),'valid'));
+        tmpMask = reshape(full(roiMasks(:,n)),[dmdPixelsPerColumn, dmdPixelsPerRow, numFastZs]);
+        likelihood_means(:,:,:,n) = single(convn(padarray(padarray(bl,[yPre,xPre,0],mean(bl(:)),'pre'),[yPost,xPost,0],'post'),tmpMask(end:-1:1,end:-1:1,end:-1:1),'valid'));
     end
+    clear('tmpMask');
     
     fprintf('done - took %f sec\n', toc);
     
