@@ -11,6 +11,7 @@ hDataViewer = slap2.Slap2DataViewer();
 
 %%
 hLowLevelDataFile = hDataViewer.hDataFile.hDataFile;
+fname = hLowLevelDataFile.filename;
 
 numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
 numCycles = hLowLevelDataFile.numCycles;
@@ -100,7 +101,6 @@ zMotRange = size(blCropZ,3) - numFastZs + 1;
 paddedBL = padarray(padarray(blCropZ,[yPre,xPre,0],mean(blCropZ(:)),'pre'),[yPost,xPost,0],'post');
 paddedSz = size(paddedBL);
 
-fname = hLowLevelDataFile.filename;
 if ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file')
     fprintf("Calculating lookup table... ")
     
@@ -248,3 +248,12 @@ plot(motion(:,3)); hold on;
 if simulation; plot(mot_hist(:,3)-mot_hist(1,3),'-.'); end; hold off;
 title('z motion')
 legend('inferred','true')
+
+%% Save out data
+
+inferMotionOut.motion = motion;
+inferMotionOut.brightness = brightness;
+inferMotionOut.dataMatrix = dataMatrix;
+inferMotionOut.expectedMatrix = expectedMatrix;
+
+save([fname(1:end-5) '_INFER_MOTION_OUTPUT.mat'],'inferMotionOut','-v7.3');
