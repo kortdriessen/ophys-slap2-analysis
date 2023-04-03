@@ -179,6 +179,9 @@ classdef spineAnalysis < handle
             end
             end
 
+            sData.trace0 = nan(nframes, nROIs);
+            sData.trace1 = nan(nframes, nROIs);
+            sData.trace2 = nan(nframes, nROIs);
             for rix = 1:nROIs
                 Dsz = size(D{rix});
                 DD = double(reshape(D{rix}, [], Dsz(3)));
@@ -230,7 +233,7 @@ classdef spineAnalysis < handle
                 %compile output
                 sData.frametime = obj.aData.frametime;
                 sData.dsFac = obj.dsFac;
-                
+
                 sData.trace0(selframes, rix) = trace0; %raw ROI, without decorrelating motion variables
                 sData.n0(rix) = estimatenoise(trace0); %noise for trace0
                 sData.trace1(selframes, rix) = trace1; %raw ROI, with motion variables decorrelated
