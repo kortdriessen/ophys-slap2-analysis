@@ -15,14 +15,14 @@ for f_ix = 1:length(fns)
 
     %compute the framerate from the metadata
     desc = A.descriptions;
-    for frame = 1:10
+    for frame = 10:-1:1
         meta = jsondecode(desc{frame});
         ts(frame) = meta.timestamp;
     end
     frametime = median(diff(ts));
 
     %downsample to align
-    ds_time = 4; % the movie is downsampled using averaging in time by a factor of 2^ds_time
+    ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
     ds_space = 0;% the movie is downsampled using averaging in space by a factor of 2^ds_space
     for ix = 1:ds_time
         Y = Y(:,:,1:2:(2*floor(end/2)))+ Y(:,:,2:2:end);
@@ -51,6 +51,7 @@ for f_ix = 1:length(fns)
     %alignedY = nan(2*maxshift+szY(1), 2*maxshift+szY(2), nDSframes);
     initR = 0; initC = 0;
     motionDSr = nan(1,nDSframes); motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
+    aErrorDS = nan(1,nDSframes);
     [viewR, viewC] = ndgrid((1:(szY(1)+2*maxshift))-maxshift, (1:(szY(2)+2*maxshift))-maxshift); %view matrices for interpolation
     for DSframe = 1:nDSframes 
         M = Yhp(:,:,DSframe);

@@ -179,9 +179,6 @@ classdef spineAnalysis < handle
             end
             end
 
-            sData.trace0 = nan(nframes, nROIs);
-            sData.trace1 = nan(nframes, nROIs);
-            sData.trace2 = nan(nframes, nROIs);
             for rix = 1:nROIs
                 Dsz = size(D{rix});
                 DD = double(reshape(D{rix}, [], Dsz(3)));
@@ -231,17 +228,12 @@ classdef spineAnalysis < handle
 %                 end
 
                 %compile output
-                sData.frametime = obj.aData.frametime;
-                sData.dsFac = obj.dsFac;
-
                 sData.trace0(selframes, rix) = trace0; %raw ROI, without decorrelating motion variables
                 sData.n0(rix) = estimatenoise(trace0); %noise for trace0
                 sData.trace1(selframes, rix) = trace1; %raw ROI, with motion variables decorrelated
                 sData.n1(rix) = estimatenoise(trace1); %noise for trace1
                 sData.trace2(selframes, rix) = trace2; %NMF-based traces
                 sData.n2(rix) = estimatenoise(trace2); %noise for trace2
-                
-                sData.bleach = obj.bleach; %bleaching curve for this field of view, in downsampled time
                 
                 sData.contamination(rix) = 1-corr(trace0', trace2'); %a measure of how contaminated the raw trace is by other factors/noise
             end
@@ -269,7 +261,6 @@ classdef spineAnalysis < handle
                 obj.drsave = obj.dr;
             end
             [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.mat']);
-            save([obj.drsave filesep obj.fnsave], 'sData')
         end
 
         function saveROIs (obj, arg1, arg2)
@@ -283,12 +274,9 @@ classdef spineAnalysis < handle
             pos = {}; labels = {};
             for rix = 1:length(obj.hROIs)
                 try
-                    posTmp = get(obj.hROIs(rix), 'position');
-                    if ~isempty(posTmp)
-                        %convert the ROI to saveable data
-                        pos = [pos {posTmp}];
-                        labels = [labels {get(obj.hROIs(rix), 'Label')}];
-                    end
+                    %convert the ROI to saveable data
+                    pos = [pos {get(obj.hROIs(rix), 'position')}];
+                    labels = [labels {get(obj.hROIs(rix), 'Label')}];
                 catch
                     %this object didn't exist
                 end
