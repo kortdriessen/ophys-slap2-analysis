@@ -200,7 +200,7 @@ for k in range(maxK):
     allPhi = torch.zeros((numCycles, k+1))
     spOverlapMetric = torch.zeros((numCycles,1)) # measures overlap of A and superpixels (SPs)
 
-    maskSize = 10
+    maskSize = 5
     mask = torch.zeros((dmdPixelsPerColumn, dmdPixelsPerRow))
     mask[colCenter-maskSize:colCenter+maskSize+1,rowCenter-maskSize:rowCenter+maskSize+1] = 1
     mask = mask.reshape((nPixels,1))
