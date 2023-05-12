@@ -17,7 +17,7 @@ if ~simulation
     
     numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
     totalCycles = hLowLevelDataFile.numCycles;
-    numCycles = totalCycles / 2^ds;
+    numCycles = floor(totalCycles / 2^ds);
     
     dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
     dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
@@ -104,7 +104,7 @@ zMotRange = size(blCropZ,3) - numFastZs + 1;
 
 [lookupFile, lookupDir] = uigetfile('*.mat', 'Select Lookup Table');
 
-if sum(lookupFile == 0) && ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file')
+if (sum(lookupFile == 0) && simulation) || (sum(lookupFile == 0) && ~exist([fname(1:end-5) '_LOOKUPTABLE.mat'],'file'))
     paddedBL = padarray(padarray(blCropZ,[yPre,xPre,0],mean(blCropZ(:)),'pre'),[yPost,xPost,0],'post');
     paddedSz = size(paddedBL);
 
