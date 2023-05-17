@@ -47,6 +47,8 @@ def read_data(dsets: str, dstore: str):
             "file number": ds_row["file number"], 
             "file name": ds_row["file name"],
             "ROI field": ds_row["ROI field"],
+            "construct": ds_row["construct"],
+            "expression time": ds_row["expression time (days)"],
             "ROI": roi,
             "frametime": m["sData"]["frametime"][0,0][0,0],
             "dsFac": m["sData"]["dsFac"][0,0][0,0],
@@ -59,9 +61,10 @@ def read_data(dsets: str, dstore: str):
             "bleach": m["sData"]["bleach"][0,0][0,:],
             "time": np.arange(len(m["sData"]["trace0"][0,0][:,roi_idx]))*m["sData"]["frametime"][0,0][0,0],
             "dstime": np.arange(len(m["sData"]["bleach"][0,0][0,:]))*m["sData"]["frametime"][0,0][0,0]*m["sData"]["dsFac"][0,0][0,0]
-        } for roi_idx,roi in enumerate(m["sData"]["names"][0,0].astype(int).flatten())]) for m, ds_row in 
+        } for roi_idx,roi in enumerate(m["sData"]["names"][0,0].astype(int).flatten()) ]) for m, ds_row in 
                 [(loadmat(os.path.join(dstore, ds_row["file name"])), ds_row) for _, ds_row in dsets_df.iterrows() if ds_row["include"]]]
     )
+    data.reset_index(inplace = True, drop = True)
     # exclude ROIs from recordings
     drop_rois = [(row["file name"], int(row["exclude ROI"])) for row_idx, row in dsets_df[~dsets_df["exclude ROI"].isnull()].iterrows()]
     for x in drop_rois:
@@ -69,7 +72,6 @@ def read_data(dsets: str, dstore: str):
         data.drop(drop_idxs, inplace = True)
     
     return data
-
 def df_to_feather(df: pd.DataFrame, fpath: str):
     """
     Save a DataFrame to feather format.
@@ -82,3 +84,42 @@ def df_to_feather(df: pd.DataFrame, fpath: str):
         File path and name where to store the data.
     """
     df.reset_index(drop = True).to_feather(fpath)
+def get_sweep(df: pd.DataFrame, fnum_roi : tuple[int,int], col_name : str):
+    """
+    Get a property from a single fluorescence sweep given a file and ROI number.
+    """
+    return df[(df["file number"] == fnum_roi[0]) & (df["ROI"] == fnum_roi[1])].iloc[0][col_name]
+def set_default_keys(src, trgt):
+    """
+    Helper function to set key values in a target dict if keys don't exist using
+    values from a source dict.
+
+    Parameters
+    ----------
+    src, trgt : dict
+        Source and target dict.
+
+    Returns
+    -------
+    None
+    """
+    for src_key, src_val in src.items():
+        if src_key not in trgt:
+            trgt[src_key] = src_val
+def del_list_idxs(l, idxs):
+    """
+    Removes elements from a list in place with given indices, which may repeat.
+
+    Parameters
+    ----------
+    l : list
+        List to remove elements from.
+    idxs : list
+        List indices to remove.
+
+    Returns
+    -------
+    None
+    """
+    for idx in sorted(set(idxs), reverse = True):
+        del l[idx]
