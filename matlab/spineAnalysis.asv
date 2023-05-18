@@ -282,16 +282,20 @@ classdef spineAnalysis < handle
             T = obj.aData.frametime * (1:size(sData.trace0,1)); %time vector
             figure,
             for pix = 1:nROIs
-                for cix = 1:obj.numChannels
-                    hAx(pix,cix) = subplot(nROIs*obj.numChannels, 1, (pix-1)*obj.numChannels+cix);
-                    tNorm = sData.trace2(:,pix,cix)./sData.n2(rix,cix); %normalized trace
-                    plot(T, tNorm, 'color', sqrt(colors(cix,:))); hold on;
-                    plot(T, nanfastsmooth(tNorm, 7, 3, 0.5), 'color', colors(cix,:), 'linewidth', 2);
+                
+                for cix = obj.numChannels:-1:1
+                    hAx(pix,cix) = subplot([nROIs*obj.numChannels, 1], (pix-1)*obj.numChannels+cix));
+                    tNorm(:,cix) = sData.trace2(:,pix,cix)./sData.n2(rix,cix); %normalized trace
+                    plot(T, nanfastsmooth(tNorm(:,cix), 11, 3, 0.5), 'color', colors(cix,:));
+                    %                     plot(T, tNorm(:,cix), 'color', sqrt(colors(cix,:)));
+                    %                     hold on
                     ylabel([sData.names{pix} ' - Ch' int2str(cix)]);
                     if pix<nROIs
-                        set(hAx(pix,cix), 'xticklabel', [], 'tickdir', 'out');
+                        set(hAx(pix), 'xticklabel', [], 'tickdir', 'out');
                     end
                 end
+
+
             end
             xlabel('time (s)');
             linkaxes(hAx, 'x');
