@@ -166,7 +166,7 @@ for cycleIdx = 1:numCycles
     else
         data = zeros(length(allSuperPixelIDs),1);
         for c = 1:2^ds
-            allLineData = hLowLevelDataFile.getLineData(1:numLinesPerCycle, (cycleIdx-1)*2^ds+c);
+            allLineData = hLowLevelDataFile.getLineData(1:numLinesPerCycle, ((cycleIdx-1)*2^ds+c)*ones(numLinesPerCycle,1));
             for lineSweepIdx = 1:numLinesPerCycle
         
                 superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineSweepIdx};
@@ -244,6 +244,14 @@ end
 
 disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
 
+%% Upsample if downsampled
+
+frames = 1:totalCycles;
+dsFrames = frames((2^ds+1):2^ds:totalCycles);
+
+dsMotion = motion;
+motion = interp1(dsFrames,dsMotion,frames);
+
 %% Plot results
 
 figure(401); clf;
@@ -273,5 +281,5 @@ inferMotionOut.dataMatrix = dataMatrix;
 inferMotionOut.expectedMatrix = expectedMatrix;
 inferMotionOut.sparseMaskInds = sparseMaskInds;
 
-% save([fname(1:end-5) sprintf('_INFER_MOTION_OUTPUT_DS_%dx.mat',2^ds)],'inferMotionOut','-v7.3');
-save('INFER_MOTION_OUT.mat','inferMotionOut','-v7.3');
+save([fname(1:end-5) sprintf('_INFER_MOTION_OUTPUT_DS_%dx.mat',2^ds)],'inferMotionOut','-v7.3');
+% save('INFER_MOTION_OUT.mat','inferMotionOut','-v7.3');
