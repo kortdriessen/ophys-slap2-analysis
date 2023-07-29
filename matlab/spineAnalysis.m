@@ -5,11 +5,12 @@ classdef spineAnalysis < handle
         hF; %figure handle
         hGrid;
         hAx; %axes handle
-        hButton1;
+        hButton1; hButton1c;
         hButton2;
         hButton3;
         hButton4;
         hButtonCh;
+        hEditCh;
 
         hROIs;
         hIm; %image object
@@ -36,6 +37,7 @@ classdef spineAnalysis < handle
         fnsave;
         fnStem;
 
+        defaultChLabels = {'iGluSnFr', 'jRGECO'};
         Clevel = 3; %adjustable threshold for display of correlation image, in standard deviations
     end
 
@@ -43,8 +45,9 @@ classdef spineAnalysis < handle
         function obj = spineAnalysis(arg1)
             if ~nargin || isempty(arg1)
                 [obj.fn, obj.dr] = uigetfile('*DOWNSAMPLED*.tif');
-            elseif isstring(arg1)
-                [obj.dr, obj.fn] = fileparts(arg1);
+            elseif isstring(arg1) || ischar(arg1)
+                [obj.dr, fn] = fileparts(arg1);
+                obj.fn = [fn '.tif'];
             else
                 error('incorrect input!')
             end
@@ -66,7 +69,7 @@ classdef spineAnalysis < handle
             end
 
             %load image data
-            A = ScanImageTiffReader([obj.dr obj.fn]);
+            A = ScanImageTiffReader([obj.dr filesep obj.fn]);
             IM = A.data;
             %obj.IM = permute(IM, [2 1 3]); %assume 1 Channel
             IM = reshape(IM, size(IM,1), size(IM,2), obj.numChannels, []); %deinterleave;
@@ -135,21 +138,21 @@ classdef spineAnalysis < handle
 
             obj.hButtonPanel = uigridlayout(obj.hGrid);
             obj.hButtonPanel.RowHeight = {'1x'};
-            obj.hButtonPanel.ColumnWidth = {100,100,100,100,100, 100, 100};
-            obj.hButton1 = uibutton(obj.hButtonPanel, 'Text', 'Add ROI', 'ButtonPushedFcn', @obj.drawPolygon);
+            obj.hButtonPanel.ColumnWidth = {100,100,100,100,100,100, 100,100,100};
+            obj.hButton1 = uibutton(obj.hButtonPanel, 'Text', 'Draw Polygon', 'ButtonPushedFcn', @obj.drawPolygon);
+            obj.hButton1c = uibutton(obj.hButtonPanel, 'Text', 'Draw Circle', 'ButtonPushedFcn', @obj.drawCircle);
             obj.hButton2 = uibutton(obj.hButtonPanel, 'Text', 'Save ROIs', 'ButtonPushedFcn', @obj.saveROIs);
             obj.hButton3 = uibutton(obj.hButtonPanel, 'Text', 'Load ROIs', 'ButtonPushedFcn', @obj.loadROIs);
             obj.hButton4 = uibutton(obj.hButtonPanel, 'Text', 'Analyze', 'ButtonPushedFcn', @obj.analyze);
-            if obj.numChannels>1
-                for chIx = 1:obj.numChannels
-                    obj.hButtonCh(chIx) = uibutton(obj.hButtonPanel, 'Text', ['Ch' num2str(chIx)], 'ButtonPushedFcn', @(x1,x2)(obj.setCh(chIx)));
-                end
+            for chIx = 1:obj.numChannels
+                obj.hButtonCh(chIx) = uibutton(obj.hButtonPanel, 'Text', ['Show Ch' num2str(chIx) ':'], 'ButtonPushedFcn', @(x1,x2)(obj.setCh(chIx)));
+                obj.hEditCh(chIx) = uieditfield(obj.hButtonPanel, 'Value', obj.defaultChLabels{chIx});
             end
+
             obj.hAx = uiaxes(obj.hGrid);
             obj.hIm = imshow(cat(3, obj.IMc(:,:,obj.showChannel)./obj.Clevel, obj.IMavg(:,:,obj.showChannel), obj.IMavg(:,:,obj.showChannel)),'parent', obj.hAx);
             set(obj.hIm, 'HitTest', 'off', 'pickableparts', 'none', 'clipping', 'on')
             set(obj.hAx, 'hittest', 'off', 'PickableParts', 'all')
-            %imshow(cat(3, obj.IMc./obj.Clevel, obj.IMavg, obj.IMavg),'parent', obj.hAx);
         end
 
         function setCh(obj,chIx)
@@ -168,23 +171,25 @@ classdef spineAnalysis < handle
 
             %generate masks for the ROIs
             tix = 0;
+            sData.names ={}; %INITIALIZE
             for rix = 1:length(obj.hROIs)
                 try
-                    poly = findobj(obj.hROIs(rix));
-                    Pos = poly.Position;
+                    roiObj = findobj(obj.hROIs(rix));
                 catch
                     continue
                 end
-                if isempty(Pos)
-                    continue;
-                else
-                    tix = tix+1; %tix will count the total # of valid ROIs
-                    sData.poly{tix} = Pos;
-                    sData.names{tix} = poly.Label;
-                end
-                sData.mask{tix} = poly.createMask;
-                sData.bbox{tix} = [floor(min(Pos,[],1)) ; ceil(max(Pos,[],1))];
-                Dmask{tix} = sData.mask{tix}(sData.bbox{tix}(1,2):sData.bbox{tix}(2,2), sData.bbox{tix}(1,1):sData.bbox{tix}(2,1));
+
+
+                tix = tix+1; %tix will count the total # of valid ROIs
+                name = roiObj.Label;
+                assert(~isempty(name), 'ROI names cannot be empty!');
+                assert(~any(strcmpi(sData.names, name)), 'A ROI name was duplicated!')
+                sData.names{tix} = name;
+
+                sData.mask{tix} = roiObj.createMask;
+                [rr,cc] = find(sData.mask{tix});
+                sData.bbox{tix} = [min(cc) min(rr) ; max(cc) max(rr)];
+                Dmask{tix} = sData.mask{tix}(sData.bbox{tix}(1,2):sData.bbox{tix}(2,2), sData.bbox{tix}(1,1):sData.bbox{tix}(2,1)); %#ok<AGROW> 
             end
             nROIs = tix;
 
@@ -211,7 +216,7 @@ classdef spineAnalysis < handle
                             t.nextDirectory;
                         end
                     end
-                catch ME
+                catch ME %#ok<NASGU> 
                     disp(['Read ' int2str(fix) ' frames'])
                 end
             end
@@ -222,20 +227,20 @@ classdef spineAnalysis < handle
             for rix = 1:nROIs
                 Dsz = size(D{rix});
                 for cix = 1:obj.numChannels
-                
-                DD = double(reshape(D{rix}(:,:,cix,:), [], Dsz(4)));
-                nans = isnan(DD);
-                numVal = sum(~nans, 2);
-                [~,p] = sort(numVal,'descend');
-                r = (1:length(p))'; r(p) = r;
 
-                %select pixels and frames to include
-                selpix = (numVal./max(numVal))>(r./max(r) + 0.05);
-                selframes = ~any(nans(selpix,:),1);
-                selpix = ~any(nans(:,selframes),2);
-                DD = DD(selpix,selframes); %discard nans
+                    DD = double(reshape(D{rix}(:,:,cix,:), [], Dsz(4)));
+                    nans = isnan(DD);
+                    numVal = sum(~nans, 2);
+                    [~,p] = sort(numVal,'descend');
+                    r = (1:length(p))'; r(p) = r;
 
-                    trace0= mean(DD(Dmask{rix}(selpix),:),1);
+                    %select pixels and frames to include
+                    selpix = (numVal./max(numVal))>(r./max(r) + 0.05);
+                    selframes = ~any(nans(selpix,:),1);
+                    selpix = ~any(nans(:,selframes),2);
+                    DD = DD(selpix,selframes); %discard nans
+
+                    trace0= sum(DD(Dmask{rix}(selpix),:),1);
 
                     %remove motion noise in the singular components of the movie
                     mDD = mean(DD,3);
@@ -261,8 +266,6 @@ classdef spineAnalysis < handle
                     trace2 = mean(W(:,sel)*H(sel,:),1);
 
                     %compile output
-
-
                     sData.trace0(selframes, rix,cix) = trace0; %raw ROI, without decorrelating motion variables
                     sData.n0(rix,cix) = estimatenoise(trace0); %noise for trace0
                     sData.trace1(selframes, rix,cix) = trace1; %raw ROI, with motion variables decorrelated
@@ -302,6 +305,43 @@ classdef spineAnalysis < handle
             end
             [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.mat']);
             save([obj.drsave filesep obj.fnsave], 'sData')
+
+            obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-4) '.h5'] , sData)
+        end
+
+        function saveAsH5(obj, fname, sData)
+            nROIs = length(sData.names);
+
+            szTrace = [size(sData.trace0,1) obj.numChannels]; %size of each trace
+
+            %saves spine analyses data in H5 format for easier python analysis
+            for roiIx = 1:nROIs
+                roiName = sData.names{roiIx};
+
+                %create data
+                h5create(fname,['/fluo/raw/' roiName], [szTrace(2) szTrace(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace(2) szTrace(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
+                
+                % write data
+                h5write(fname,['/fluo/raw/' roiName],permute(sData.trace0(:,roiIx,:), [3 1 2]));
+
+                %write attributes
+                h5writeatt(fname,['/fluo/raw/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
+                h5writeatt(fname,['/fluo/raw/' roiName],'noise', sData.n0(roiIx,:)); %estimated noise, per channel
+                h5writeatt(fname,['/fluo/raw/' roiName],'chans', ["iGluSnFR", "jRGECO"]); %channel names
+            end
+
+            %save global information
+            h5create(fname,"/motionC",size(obj.aData.motionC), 'Datatype', 'single','ChunkSize', size(obj.aData.motionC), 'Deflate', 5); % XY movement
+            h5write(fname,"/motionC",obj.aData.motionC);
+            h5create(fname,"/motionR",size(obj.aData.motionR), 'Datatype', 'single','ChunkSize', size(obj.aData.motionR), 'Deflate', 5); % XY movement
+            h5write(fname,"/motionC",obj.aData.motionR);
+            h5create(fname,"/alignmentError",size(obj.aData.aError), 'Datatype', 'single','ChunkSize', size(obj.aData.aError), 'Deflate', 5); % XY movement
+            h5write(fname,"/alignmentError",obj.aData.aError);
+
+            h5writeatt(fname,"/motionR",'fs', 1/obj.aData.frametime);
+            h5writeatt(fname,"/motionC",'fs', 1/obj.aData.frametime);
+            h5writeatt(fname,"/alignmentError",'fs', 1/obj.aData.frametime);
+            
         end
 
         function saveROIs (obj, arg1, arg2)
@@ -312,20 +352,17 @@ classdef spineAnalysis < handle
             if isempty(obj.fnsave)
                 return
             end
-            pos = {}; labels = {};
+            roiData = {};
             for rix = 1:length(obj.hROIs)
                 try
-                    posTmp = get(obj.hROIs(rix), 'position');
-                    if ~isempty(posTmp)
-                        %convert the ROI to saveable data
-                        pos = [pos {posTmp}];
-                        labels = [labels {get(obj.hROIs(rix), 'Label')}];
-                    end
+                    S = get(obj.hROIs(rix));
+                    roiData = [roiData {S}];
                 catch
                     %this object didn't exist
+                    keyboard
                 end
             end
-            save([obj.drsave filesep obj.fnsave], 'pos', 'labels');
+            save([obj.drsave filesep obj.fnsave], 'roiData');
         end
 
         function [corrected, traceMot] = decorrelateMotion(obj, trace, motPreds)
@@ -339,21 +376,45 @@ classdef spineAnalysis < handle
 
         function loadROIs (obj, arg1, arg2)
             [fn dr] = uigetfile([obj.drsave filesep '*_ROIS.mat']);
+            load([dr filesep fn], 'roiData');
 
-            load([dr filesep fn], 'pos', 'labels');
             delete(obj.hROIs);
             obj.hROIs = [];
-            for rix = 1:length(pos)
-                obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'position', pos{rix}, 'label', labels{rix});
+            for rix = 1:length(roiData)
+                switch roiData{rix}.type
+                    case 'images.roi.circle'
+                        obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
+                    case 'images.roi.polygon'
+                        obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Radius', roiData{rix}.Radius, 'Label', roiData{rix}.Label);
+                    otherwise
+                        error('bad ROI data type');
+                end
+
+                fnms = fieldnames(roiData{rix});
+                for ix =1:length(fnms)
+                    set(obj.hROIs(rix), fnms(ix), roiData{rix}.(fnms(ix)));
+                end
+
+
+                cm = get(obj.hROIs(rix), 'ContextMenu');
+                uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(rix)))); %add a 'Set Label' context menu
             end
         end
 
         function drawPolygon(obj, arg1, arg2)
             L = length(obj.hROIs)+1;
             obj.hROIs(L) = drawpolygon(obj.hAx);
-            set(obj.hROIs(L), 'Label', int2str(L));
-            cm = get(obj.hROIs(end), 'ContextMenu');
-            uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(end)))); %add a 'Set Label' context menu
+            set(obj.hROIs(L), 'Label', [int2str(L)], 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
+            cm = get(obj.hROIs(L), 'ContextMenu');
+            uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
+        end
+
+        function drawCircle(obj, arg1, arg2)
+            L = length(obj.hROIs)+1;
+            obj.hROIs(L) = drawellipse(obj.hAx);
+            set(obj.hROIs(L), 'Label', [int2str(L)], 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
+            cm = get(obj.hROIs(L), 'ContextMenu');
+            uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
         end
 
         function setLabel(obj, hROI)
@@ -364,6 +425,8 @@ classdef spineAnalysis < handle
             switch arg2.Key
                 case 'a'
                     @obj.drawPolygon;
+                case 'c'
+                    @obj.drawCircle;
                 case 'period'
                     obj.Clevel = obj.Clevel/1.5;
                     obj.updateDisplay
