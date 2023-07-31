@@ -51,7 +51,7 @@ for f_ix = 1:length(fns)
     initR = 0; initC = 0;
     nDSframes= floor(sz(4)./(dsFac)); %number of downsampled frames
     motionDSr = nan(1,nDSframes); motionDSc = nan(1,nDSframes); motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
-    aErrorDS = nan(1,nDSframes);
+    aErrorDS = nan(1,nDSframes); % aCorrDS = nan(1,nDSframes);
 %     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshift))-maxshift, (1:(sz(2)+2*maxshift))-maxshift); %view matrices for interpolation
 
 
@@ -87,12 +87,17 @@ for f_ix = 1:length(fns)
             T = T3d(:,:,z);
 
             if DSframe == 1
+%                 [output, Greg] = dftregistration(fft2(single(T)),fft2(M),4);
                 output = dftregistration(fft2(single(T)),fft2(M),4);
             else
+%                 [output, Greg] = dftregistration_clipped(fft2(single(T)),fft2(M),4, clipShift);
                 output = dftregistration_clipped(fft2(single(T)),fft2(M),4, clipShift);
             end
 
-            if isnan(aErrorDS(DSframe)) || aErrorDS(DSframe) > output(1) 
+%             corrMetric = corr2(real(ifft2(Greg)),T); % using correlation gives same result as using error
+
+            if isnan(aErrorDS(DSframe)) || aErrorDS(DSframe) > output(1) % aCorrDS(DSframe) < corrMetric
+%                 aCorrDS(DSframe) = corrMetric;
                 aErrorDS(DSframe) = output(1);
                 motionDSr(DSframe) = initR + output(3);
                 motionDSc(DSframe) = initC + output(4);
@@ -110,6 +115,7 @@ for f_ix = 1:length(fns)
     motionR = interp1(tDS, motionDSr, 1:((2^ds_time)*nDSframes), 'pchip', 'extrap'); %upsample the movement to the original timebase
     motionZ = interp1(tDS, motionDSz, 1:((2^ds_time)*nDSframes), 'pchip', 'extrap'); %upsample the movement to the original timebase
     aError = interp1(tDS, aErrorDS, 1:((2^ds_time)*nDSframes), 'nearest', 'extrap');
+%     aCorr = interp1(tDS, aCorrDS, 1:((2^ds_time)*nDSframes), 'nearest', 'extrap');
     maxshiftC = max(abs(motionC-motionC(1))); maxshiftR = max(abs(motionR-motionR(1)));
     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshiftR))-maxshiftR, (1:(sz(2)+2*maxshiftC))-maxshiftC); %view matrices for interpolation
     
@@ -152,6 +158,7 @@ for f_ix = 1:length(fns)
     aData.motionDSr = motionDSr;
     aData.motionDSz = motionDSz;
     aData.aError = aError;
+%     aData.aCorr = aCorr;
     save([dr filesep fn(1:end-4) '_3DALIGNMENTDATA.mat'], 'aData');
 end
 
