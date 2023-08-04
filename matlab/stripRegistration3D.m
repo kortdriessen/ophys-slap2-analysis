@@ -10,7 +10,7 @@ refStack = tiffreadVolume([stackdr stackfns]);
 
 refStackHP = refStack - imgaussfilt(refStack,4);
 
-[fns, dr] = uigetfile('*.tif', 'Select Lookup Table', 'multiselect', 'on');
+[fns, dr] = uigetfile('*.tif', 'Select Movie', 'multiselect', 'on');
 if ~iscell(fns)
     fns = {fns};
 end
