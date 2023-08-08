@@ -6,6 +6,12 @@ zClipShift = 2; %max allowable shift per frame in Z (either up or down)
 
 [stackfns, stackdr] = uigetfile('*.tif', 'Select Reference Volume', 'multiselect', 'off');
 
+if strcmpi(stackfns(end-6:end-5),'CH')
+    channel = str2num(stackfns(end-4));
+else
+    channel = 1;
+end
+
 refStack = tiffreadVolume([stackdr stackfns]);
 
 refStackHP = refStack - imgaussfilt(refStack,4);
@@ -62,7 +68,8 @@ for f_ix = 1:length(fns)
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time); 
-        M = squeeze(sum(M,3)); %merge colors
+%         M = squeeze(sum(M,3)); %merge colors
+        M = squeeze(M(:,:,channel,:));
         M = M-imgaussfilt(M, 4); %highpass
 
         if ~mod(DSframe, 100)
