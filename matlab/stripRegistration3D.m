@@ -2,7 +2,7 @@ function stripRegistration3D(ds_time) %% same as stripRegistration but aligning 
 tic;
 maxshift = 80;
 clipShift = 10;%the maximum allowable shift per frame
-zClipShift = 2; %max allowable shift per frame in Z (either up or down)
+zClipShift = 5; %max allowable shift per frame in Z (either up or down)
 
 [stackfns, stackdr] = uigetfile('*.tif', 'Select Reference Volume', 'multiselect', 'off');
 
