@@ -37,7 +37,7 @@ classdef spineAnalysis < handle
         fnsave;
         fnStem;
 
-        defaultChLabels = {'iGluSnFr', 'jRGECO'};
+        defaultChLabels = {'iGluSnFr'; 'jRGECO'};
         Clevel = 3; %adjustable threshold for display of correlation image, in standard deviations
     end
 
@@ -299,13 +299,15 @@ classdef spineAnalysis < handle
             xlabel('time (s)');
             linkaxes(hAx, 'x');
 
+            %save figure
+            disp('saving figure')
+            print(obj.hF, [obj.drsave filesep obj.fnStem '_FIGURE.eps'], '-depsc', '-vector')
+
             %save output
             if isempty(obj.drsave)
                 obj.drsave = obj.dr;
             end
-            [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.mat']);
-            save([obj.drsave filesep obj.fnsave], 'sData')
-
+            [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.h5']);
             obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-4) '.h5'] , sData)
         end
 
@@ -327,21 +329,26 @@ classdef spineAnalysis < handle
                 %write attributes
                 h5writeatt(fname,['/fluo/raw/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
                 h5writeatt(fname,['/fluo/raw/' roiName],'noise', sData.n0(roiIx,:)); %estimated noise, per channel
-                h5writeatt(fname,['/fluo/raw/' roiName],'chans', ["iGluSnFR", "jRGECO"]); %channel names
+                chans = {};
+                for chIx = 1:obj.numChannels
+                    chans = cat(1, chans, {get(obj.hEditCh(chIx), 'Value')});
+                end
+                h5writeatt(fname,['/fluo/raw/' roiName],'chans', chans); %channel names
             end
 
             %save global information
-            h5create(fname,"/motionC",size(obj.aData.motionC), 'Datatype', 'single','ChunkSize', size(obj.aData.motionC), 'Deflate', 5); % XY movement
-            h5write(fname,"/motionC",obj.aData.motionC);
-            h5create(fname,"/motionR",size(obj.aData.motionR), 'Datatype', 'single','ChunkSize', size(obj.aData.motionR), 'Deflate', 5); % XY movement
-            h5write(fname,"/motionC",obj.aData.motionR);
-            h5create(fname,"/alignmentError",size(obj.aData.aError), 'Datatype', 'single','ChunkSize', size(obj.aData.aError), 'Deflate', 5); % XY movement
-            h5write(fname,"/alignmentError",obj.aData.aError);
-
-            h5writeatt(fname,"/motionR",'fs', 1/obj.aData.frametime);
-            h5writeatt(fname,"/motionC",'fs', 1/obj.aData.frametime);
-            h5writeatt(fname,"/alignmentError",'fs', 1/obj.aData.frametime);
+            h5create(fname,"/fluo/motionC",size(obj.aData.motionC), 'Datatype', 'single','ChunkSize', size(obj.aData.motionC), 'Deflate', 5); % XY movement
+            h5write(fname,"/fluo/motionC",obj.aData.motionC);
+            h5create(fname,"/fluo/motionR",size(obj.aData.motionR), 'Datatype', 'single','ChunkSize', size(obj.aData.motionR), 'Deflate', 5); % XY movement
+            h5write(fname,"/fluo/motionC",obj.aData.motionR);
+            h5create(fname,"/fluo/alignmentError",size(obj.aData.aError), 'Datatype', 'single','ChunkSize', size(obj.aData.aError), 'Deflate', 5); % XY movement
+            h5write(fname,"/fluo/alignmentError",obj.aData.aError);
             
+            
+            h5writeatt(fname,"/fluo/motionR",'fs', 1/obj.aData.frametime);
+            h5writeatt(fname,"/fluo/motionC",'fs', 1/obj.aData.frametime);
+            h5writeatt(fname,"/fluo/alignmentError",'fs', 1/obj.aData.frametime);
+
         end
 
         function saveROIs (obj, arg1, arg2)
@@ -375,6 +382,9 @@ classdef spineAnalysis < handle
         end
 
         function loadROIs (obj, arg1, arg2)
+            if isempty(obj.drsave)
+                obj.drsave = obj.dr;
+            end
             [fn dr] = uigetfile([obj.drsave filesep '*_ROIS.mat']);
             load([dr filesep fn], 'roiData');
 
