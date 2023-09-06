@@ -134,11 +134,9 @@ classdef spineAnalysis < handle
 
             C = mean(cat(obj.timeDim, horzC, circshift(horzC,1,2), vertC, circshift(vertC, 1,1)),obj.timeDim, 'omitnan');
             obj.IMc = (C-median(C, [1 2], 'omitnan'))./std(C, 0,[1 2],'omitnan');
-            
-            HP = imgaussfilt(HP, [0.6 0.6]);
             sk = skewness(HP,0,obj.timeDim).*IMgamma;
             obj.IMsk = (sk-median(sk(:), 'omitnan'))./std(sk, 0,'all','omitnan');
-            obj.IMact = obj.IMc + obj.IMsk;
+            obj.IMact = sqrt(obj.IMc + obj.IMsk);
 
             %gui creation
             obj.hF = uifigure('name', ['Spine analysis - ' obj.fn], 'KeyPressFcn', @obj.kpf);
@@ -160,7 +158,7 @@ classdef spineAnalysis < handle
             end
 
             obj.hAx = uiaxes(obj.hGrid);
-            obj.hIm = imshow(cat(3, obj.IMact(:,:,obj.showChannel)./obj.Clevel, obj.IMavg(:,:,obj.showChannel), obj.IMavg(:,:,obj.showChannel)),'parent', obj.hAx);
+            obj.hIm = imshow(cat(3, obj.IMc(:,:,obj.showChannel)./obj.Clevel, obj.IMavg(:,:,obj.showChannel), obj.IMavg(:,:,obj.showChannel)),'parent', obj.hAx);
             set(obj.hIm, 'HitTest', 'off', 'pickableparts', 'none', 'clipping', 'on')
             set(obj.hAx, 'hittest', 'off', 'PickableParts', 'all')
         end
@@ -171,7 +169,7 @@ classdef spineAnalysis < handle
         end
 
         function updateDisplay(obj)
-            set(obj.hIm, 'CData',cat(3, obj.IMact(:,:,obj.showChannel)./obj.Clevel, obj.IMavg(:,:,obj.showChannel), obj.IMavg(:,:,obj.showChannel)))
+            set(obj.hIm, 'CData',cat(3, obj.IMc(:,:,obj.showChannel)./obj.Clevel, obj.IMavg(:,:,obj.showChannel), obj.IMavg(:,:,obj.showChannel)))
         end
 
         function sData = analyze(obj, arg1, arg2)
