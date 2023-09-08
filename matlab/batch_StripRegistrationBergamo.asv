@@ -1,0 +1,26 @@
+function batch_StripRegistrationBergamo
+rootdir = 'F:\measurements';
+
+%select a set of folders
+uigetdir2(rootdir, 'Select folders to batch analyze')
+
+%traverse entire file structure
+filelist = dir(fullfile(rootdir, '**\scan_0*.tif'));  %get list of files and folders in any subfolder
+filelist = filelist(~[filelist.isdir]);  %remove folders from list
+
+for fnum = 1:length(filelist)
+    num_underscores = length(strfind(filelist(fnum).name, '_'));
+    if num_underscores>1 || num_underscores<1 || isempty(num_underscores)
+        continue
+    end
+
+    fullname =  [filelist(fnum).folder filesep filelist(fnum).name];
+    %check if already registered
+    if exist([fullname(1:end-4) '_REGISTERED_RAW.tif'])
+        continue
+    end
+try
+    stripRegistrationBergamo([],fullname);
+catch
+    di
+end
