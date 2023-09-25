@@ -89,15 +89,18 @@ classdef spineAnalysis < handle
             %initialize butterworth filter
             [obj.b2,obj.a2] = butter(4, 0.05, 'high'); %highpass filter for generating correlation image
 
+            %compute the bleaching curve
+            selValid = ~any(isnan(obj.IM(:,:,1,:)),obj.timeDim);
+            tmp = reshape(obj.IM, [], obj.numChannels, size(obj.IM,obj.timeDim));
+            offset = prctile(mean(tmp,3), 1, 1);
+            obj.IM = obj.IM-reshape(offset, [1 1 numel(offset) 1]);
+            tmp = tmp - offset;
+            obj.bleach = mean(tmp(selValid,:,:,:), 1, 'omitnan');
+
             %compute average image
             IMavg = mean(obj.IM,obj.timeDim, 'omitnan');
             IMgamma = sqrt(max(0, IMavg./prctile(IMavg(:), 99.99)));
             obj.IMavg = IMgamma;
-
-            %compute the bleaching curve
-            selValid = ~any(isnan(obj.IM(:,:,1,:)),obj.timeDim);
-            tmp = reshape(obj.IM, [], obj.numChannels, size(obj.IM,obj.timeDim));
-            obj.bleach = mean(tmp(selValid,:,:,:), 1, 'omitnan');
 
             %compute correlation image
             disp('computing correlation image');
@@ -297,7 +300,7 @@ classdef spineAnalysis < handle
             for pix = 1:nROIs
                 for cix = 1:obj.numChannels
                     hAx(pix,cix) = subplot(nROIs*obj.numChannels, 1, (pix-1)*obj.numChannels+cix);
-                    tNorm = sData.trace1(:,pix,cix)./sData.n1(rix,cix); %normalized trace
+                    tNorm = sData.trace1(:,pix,cix)./sqrt(sData.n1(rix,cix)); %normalized trace
                     plot(T, tNorm, 'color', sqrt(colors(cix,:))); hold on;
                     plot(T, nanfastsmooth(tNorm, 7, 3, 0.5), 'color', colors(cix,:), 'linewidth', 2);
                     ylabel([sData.names{pix} ' - Ch' int2str(cix)]);
@@ -317,11 +320,11 @@ classdef spineAnalysis < handle
             
             if obj.fnsave %if user didn't cancel
                 obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-4) '.h5'] , sData);
-
-                %save figure
-                disp('saving figure')
-                exportgraphics(obj.hF, [obj.drsave filesep obj.fnStem '_FIGURE.eps'], 'ContentType', 'vector')
             end
+
+            %save figure
+            disp('saving figure')
+            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
 
         end
 
@@ -379,7 +382,7 @@ classdef spineAnalysis < handle
                 obj.drsave = obj.dr;
             end
             [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_ROIs.mat']);
-            if isempty(obj.fnsave)
+            if isempty(obj.fnsave) || ~any(obj.fnsave)
                 return
             end
             roiData = {};
@@ -404,16 +407,21 @@ classdef spineAnalysis < handle
         end
 
         function loadROIs (obj, arg1, arg2)
-            if ~(obj.drsave) || isempty(obj.drsave)
+            if ~(any(obj.drsave)) || isempty(obj.drsave)
                 obj.drsave = obj.dr;
             end
             [fn dr] = uigetfile([obj.drsave filesep '*_ROIS.mat']);
             load([dr filesep fn], 'roiData');
 
-            delete(obj.hROIs);
+            try
+                delete(obj.hROIs);
+            catch
+            end
             obj.hROIs = [];
             for rix = 1:length(roiData)
-                switch roiData{rix}.type
+                switch roiData{rix}.Type
+                    case 'images.roi.ellipse'
+                        obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', roiData{rix}.AspectRatio, 'FixedAspectRatio', roiData{rix}.FixedAspectRatio, 'Center', roiData{rix}.Center, 'SemiAxes', roiData{rix}.SemiAxes, 'RotationAngle', roiData{rix}.RotationAngle, 'Label', roiData{rix}.Label);
                     case 'images.roi.circle'
                         obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
                     case 'images.roi.polygon'
@@ -424,7 +432,10 @@ classdef spineAnalysis < handle
 
                 fnms = fieldnames(roiData{rix});
                 for ix =1:length(fnms)
-                    set(obj.hROIs(rix), fnms(ix), roiData{rix}.(fnms(ix)));
+                    try
+                        set(obj.hROIs(rix), fnms{ix}, roiData{rix}.(fnms{ix}));
+                    catch
+                    end
                 end
 
 
@@ -436,17 +447,19 @@ classdef spineAnalysis < handle
         function drawPolygon(obj, arg1, arg2)
             L = length(obj.hROIs)+1;
             obj.hROIs(L) = drawpolygon(obj.hAx);
-            set(obj.hROIs(L), 'Label', [int2str(L)], 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
+            set(obj.hROIs(L), 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
             cm = get(obj.hROIs(L), 'ContextMenu');
             uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
+            obj.setLabel(obj.hROIs(L));
         end
 
         function drawCircle(obj, arg1, arg2)
             L = length(obj.hROIs)+1;
             obj.hROIs(L) = drawellipse(obj.hAx);
-            set(obj.hROIs(L), 'Label', [int2str(L)], 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
+            set(obj.hROIs(L), 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
             cm = get(obj.hROIs(L), 'ContextMenu');
             uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
+            obj.setLabel(obj.hROIs(L));
         end
 
         function setLabel(obj, hROI)
