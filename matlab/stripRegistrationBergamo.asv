@@ -8,7 +8,7 @@ if nargin<2 || isempty(fn)
     [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
 else
     [dr,fns, ext] = fileparts(fn);
-    
+    fns = strcat(fns,ext);
 end
 if ~iscell(fns)
     fns = {fns};
@@ -17,23 +17,21 @@ end
 for f_ix = 1:length(fns)
     fn = fns{f_ix};
     disp(['Aligning: ' [dr filesep fn]])
-    %tiff object to read metadata
-%     w = warning;
-%     warning('off', 'all')
-%     tiffObj = Tiff([dr filesep fn], 'r');
-%     tiffObj.setDirectory(1);
-%     for frame = 1:10 %compute the framerate from the metadata by reading a few frames
-%         meta = jsondecode(getTag(tiffObj,'ImageDescription'));
-%         timeStamp(frame) = meta.timestamp;
-%         tiffObj.nextDirectory;
-%     end
-%     numChannels = meta.numChannels;
-%     frametime = median(diff(timeStamp(1:numChannels:end)));
-%     clear tiffObj;
-%     warning(w);
 
     A = ScanImageTiffReader([dr filesep fn]);
     desc=A.descriptions();
+
+
+    eval(desc{1})
+    datestr(epoch)
+    %YYYYMMDDHHMMSS
+    dateAcqAsString = ['_' num2str(epoch(1), '%04i') num2str(epoch(2), '%02i') num2str(epoch(3), '%02i') '_' num2str(epoch(4), '%02i') num2str(epoch(5), '%02i') num2str(round(epoch(6)), '%02i')];
+    if ~exist([dr filesep fn(1:end-4) dateAcqAsString], 'dir')
+        mkdir([dr filesep fn(1:end-4) dateAcqAsString]);
+    end
+    fnstem = [dr filesep fn(1:end-4) dateAcqAsString filesep fn(1:end-4) dateAcqAsString];
+    copyfile([dr filesep fn], [fnstem '.tif']);
+
     try
     meta = A.metadata;
     eval(meta);
@@ -44,7 +42,7 @@ for f_ix = 1:length(fns)
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
     for frame = 1:10 %compute the framerate from the metadata by reading a few frames
         E = extract(desc{frame}, pat);
-        timestamp(frame) = str2double(E{1}(23:end));
+        timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW> 
     end
     frametime = median(diff(timestamp));
 
@@ -130,7 +128,7 @@ for f_ix = 1:length(fns)
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
 
     %save a downsampled aligned recording
-    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
+    fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
@@ -143,7 +141,7 @@ for f_ix = 1:length(fns)
     fTIF.close;
     
     %save an original-time-resolution recording
-    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_RAW.tif'];
+    fnwrite = [fnstem '_REGISTERED_RAW.tif'];
     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
     for frame = 1:length(motionC)
         for ch = 1:numChannels
@@ -161,7 +159,7 @@ for f_ix = 1:length(fns)
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.aError = aError;
-    save([dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'], 'aData');
+    save([fnstem '_ALIGNMENTDATA.mat'], 'aData');
 end
 
 end
@@ -182,7 +180,7 @@ try
         tiffObj.nextDirectory;
         Y(:,:,r) = tiffObj.read;
     end
-catch ME
+catch ME %#ok<NASGU> 
     readsuccess = false;
     return
 end
