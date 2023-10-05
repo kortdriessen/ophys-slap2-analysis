@@ -256,7 +256,7 @@ classdef spineAnalysis < handle
                     trace0= sum(DD(Dmask{rix}(selpix),:),1); %trace0 is the SUM over all selected pixels
 
                     %remove motion noise in the singular components of the movie
-                    mDD = mean(DD,3);
+                    mDD = mean(DD,2);
                     [U,S,V] = svds(DD-mDD, floor(sum(selpix)/10));
                     Vcorr = V;
                     for vix = 1:size(V,2)
@@ -340,27 +340,35 @@ classdef spineAnalysis < handle
             end
             nROIs = length(sData.names);
 
-            szTrace = [size(sData.trace0,1) obj.numChannels]; %size of each trace
+            szTrace0 = [size(sData.trace0,1) obj.numChannels]; %size of each trace
+            szTrace1 = [size(sData.trace1,1) obj.numChannels];
+
 
             %saves spine analyses data in H5 format for easier python analysis
             for roiIx = 1:nROIs
                 roiName = sData.names{roiIx};
 
                 %create data
-                h5create(fname,['/fluo/raw/' roiName], [szTrace(2) szTrace(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace(2) szTrace(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
-                
+                h5create(fname,['/fluo/raw/' roiName], [szTrace0(2) szTrace0(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace0(2) szTrace0(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
+                h5create(fname,['/fluo/mcorr/' roiName], [szTrace1(2) szTrace1(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace1(2) szTrace1(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
+
                 % write data
                 h5write(fname,['/fluo/raw/' roiName],permute(sData.trace0(:,roiIx,:), [3 1 2]));
+                h5write(fname,['/fluo/mcorr/' roiName],permute(sData.trace1(:,roiIx,:), [3 1 2]));
 
                 %write attributes
                 h5writeatt(fname,['/fluo/raw/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
                 h5writeatt(fname,['/fluo/raw/' roiName],'noise', sData.n0(roiIx,:)); %estimated noise, per channel
+                h5writeatt(fname,['/fluo/mcorr/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
+                h5writeatt(fname,['/fluo/mcorr/' roiName],'noise', sData.n1(roiIx,:)); %estimated noise, per channel
                 chans = {};
                 for chIx = 1:obj.numChannels
                     chans = cat(1, chans, {get(obj.hEditCh(chIx), 'Value')});
                 end
                 h5writeatt(fname,['/fluo/raw/' roiName],'chans', chans); %channel names
                 h5writeatt(fname,['/fluo/raw/' roiName],'nPix', sum(sData.mask{roiIx}(:))); %channel names
+                h5writeatt(fname,['/fluo/mcorr/' roiName],'chans', chans); %channel names
+                h5writeatt(fname,['/fluo/mcorr/' roiName],'nPix', sum(sData.mask{roiIx}(:))); %channel names
             end
 
             %save global information
