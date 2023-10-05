@@ -221,7 +221,7 @@ classdef spineAnalysisDat < handle
                     disp(['Frame ' int2str(fix) ' of ' int2str(numFrames) '...'])
                 end
                 for cix = 1:obj.numChannels
-                    fdata = S2data.getImage(cix, ceil(fix*dt), dt, 1); %Channel, Frame, Timewindow, Zindex
+                    fdata = S2data.getImage(cix, ceil(fix*dt), 2*dt, 1); %Channel, Frame, Timewindow, Zindex
                     for rix = 1:nROIs
                         Rq = obj.aData.cropRow+motionR(fix)-1+(sData.bbox{rix}(1,2):sData.bbox{rix}(2,2));
                         Cq = obj.aData.cropCol+motionC(fix)-1+(sData.bbox{rix}(1,1):sData.bbox{rix}(2,1));
@@ -249,11 +249,14 @@ classdef spineAnalysisDat < handle
                     selframes = ~any(nans(selpix,:),1);
                     selpix = ~any(nans(:,selframes),2);
                     DD = DD(selpix,selframes); %discard nans
+                    if isempty(DD)
+                        continue
+                    end
 
                     trace0= sum(DD(Dmask{rix}(selpix),:),1); %trace0 is the SUM over all selected pixels
 
                     %remove motion noise in the singular components of the movie
-                    mDD = mean(DD,3);
+                    mDD = mean(DD,2);
                     [U,S,V] = svds(DD-mDD, floor(sum(selpix)/10));
                     Vcorr = V;
                     for vix = 1:size(V,2)
@@ -286,20 +289,19 @@ classdef spineAnalysisDat < handle
                 end
             end
 
-            sData.frametime = obj.aData.frametime;
-            sData.dsFac = obj.dsFac;
+            sData.frametime = 1/analyzeHz;
             sData.bleach = obj.bleach; %bleaching curve for this field of view, in downsampled time
 
             %plot the data
-            colors = [0.8 0.3 0.3; 0.25 0.5 0.25; 0.25 0.25 0.5];
-            T = obj.aData.frametime * (1:size(sData.trace0,1)); %time vector
+            colors = [0.3 0.8 0.1; 0.8 0 0.3; 0.25 0.25 0.5]; %ch1 yellow
+            T = (1:size(sData.trace0,1))/analyzeHz; %time vector
             figure,
             for pix = 1:nROIs
                 for cix = 1:obj.numChannels
                     hAx(pix,cix) = subplot(nROIs*obj.numChannels, 1, (pix-1)*obj.numChannels+cix);
-                    tNorm = sData.trace1(:,pix,cix)./sqrt(sData.n1(rix,cix)); %normalized trace
+                    tNorm = sData.trace1(:,pix,cix)./sqrt(sData.n1(pix,cix)); %normalized trace
                     plot(T, tNorm, 'color', sqrt(colors(cix,:))); hold on;
-                    plot(T, nanfastsmooth(tNorm, 7, 3, 0.5), 'color', colors(cix,:), 'linewidth', 2);
+                    %plot(T, nanfastsmooth(tNorm, 7, 3, 0.5), 'color', colors(cix,:), 'linewidth', 2);
                     ylabel([sData.names{pix} ' - Ch' int2str(cix)]);
                     if pix<nROIs
                         set(hAx(pix,cix), 'xticklabel', [], 'tickdir', 'out');
@@ -308,6 +310,10 @@ classdef spineAnalysisDat < handle
             end
             xlabel('time (s)');
             linkaxes(hAx, 'x');
+
+            %save figure
+            disp('saving figure')
+            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
 
             %save output
             if isempty(obj.drsave) || ~any(obj.drsave)
@@ -319,9 +325,6 @@ classdef spineAnalysisDat < handle
                 obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-4) '.h5'] , sData);
             end
 
-            %save figure
-            disp('saving figure')
-            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
 
         end
 
@@ -361,16 +364,16 @@ classdef spineAnalysisDat < handle
             end
 
             %save global information
-            h5create(fname,"/fluo/motionC",size(obj.aData.motionC), 'Datatype', 'single','ChunkSize', size(obj.aData.motionC), 'Deflate', 5); % XY movement
-            h5write(fname,"/fluo/motionC",obj.aData.motionC);
-            h5create(fname,"/fluo/motionR",size(obj.aData.motionR), 'Datatype', 'single','ChunkSize', size(obj.aData.motionR), 'Deflate', 5); % XY movement
-            h5write(fname,"/fluo/motionC",obj.aData.motionR);
+            h5create(fname,"/fluo/motionC",size(motionC), 'Datatype', 'single','ChunkSize', size(motionC), 'Deflate', 5); % XY movement
+            h5write(fname,"/fluo/motionC",motionC);
+            h5create(fname,"/fluo/motionR",size(motionR), 'Datatype', 'single','ChunkSize', size(motionR), 'Deflate', 5); % XY movement
+            h5write(fname,"/fluo/motionC",motionR);
             h5create(fname,"/fluo/alignmentError",size(obj.aData.aError), 'Datatype', 'single','ChunkSize', size(obj.aData.aError), 'Deflate', 5); % XY movement
             h5write(fname,"/fluo/alignmentError",obj.aData.aError);
             
-            h5writeatt(fname,"/fluo/motionR",'fs', 1/obj.aData.frametime);
-            h5writeatt(fname,"/fluo/motionC",'fs', 1/obj.aData.frametime);
-            h5writeatt(fname,"/fluo/alignmentError",'fs', 1/obj.aData.frametime);
+            h5writeatt(fname,"/fluo/motionR",'fs', analyzeHz);
+            h5writeatt(fname,"/fluo/motionC",'fs', analyzeHz);
+            h5writeatt(fname,"/fluo/alignmentError",'fs', analyzeHz);
 
         end
 
