@@ -31,7 +31,7 @@ classdef spineAnalysisDat < handle
         IMavg; %average image, normalized to [0 1]
         bleach;
         aData; %alignment data
-        dsFac; %downsampling factor of the image file, used to properly set the framerate;
+        dsFac; %downsampling factor of the image file, not used for Dat files
         numChannels;
         fn;
         dr = [];
@@ -77,12 +77,7 @@ classdef spineAnalysisDat < handle
             clear IM;
 
             %infer downsampling from filename
-            str = extractBetween(obj.fn, '_DOWNSAMPLED-', 'x.tif');
-            if ~isempty(str)
-                obj.dsFac = str2double(str{1});
-            else
-                obj.dsFac = 1;
-            end
+            obj.dsFac = nan;
 
             %initialize butterworth filter
             [obj.b2,obj.a2] = butter(4, 0.05, 'high'); %highpass filter for generating correlation image
@@ -105,7 +100,7 @@ classdef spineAnalysisDat < handle
 
             %select valid frames for cross-correlation analysis
             if ~isempty(obj.aData)
-                err = aData.aError(1:obj.dsFac:end);
+                err = aData.aError;
                 errStd = sqrt(estimatenoise(err));
                 valid = err < (ordfilt2(err, 40, ones(1,200), 'symmetric')+5*errStd);
             else

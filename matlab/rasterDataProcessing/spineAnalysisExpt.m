@@ -1,4 +1,4 @@
-classdef spineAnalysisDat < handle
+classdef spineAnalysisExpt < handle
     %like spineanalysis, but reads data directly from .dat files
     properties
         hFigPanel; %image panel
@@ -31,7 +31,7 @@ classdef spineAnalysisDat < handle
         IMavg; %average image, normalized to [0 1]
         bleach;
         aData; %alignment data
-        dsFac; %downsampling factor of the image file, used to properly set the framerate;
+        dsFac; %downsampling factor of the image file, not used for Dat files
         numChannels;
         fn;
         dr = [];
@@ -39,101 +39,28 @@ classdef spineAnalysisDat < handle
         fnsave;
         fnStem;
 
+        exptData;
+
         defaultChLabels = {'iGluSnFr'; 'jRGECO'};
         Clevel = 3; %adjustable threshold for display of correlation image, in standard deviations
     end
 
     methods
-        function obj = spineAnalysisDat(arg1)
+        function obj = spineAnalysisExpt(arg1)
             if ~nargin || isempty(arg1)
-                [obj.fn, obj.dr] = uigetfile('*DOWNSAMPLED*.tif');
-            elseif isstring(arg1) || ischar(arg1)
-                [obj.dr, fn] = fileparts(arg1);
-                obj.fn = [fn '.tif'];
+                [obj.fn, obj.dr] = uigetfile('*.mat');
             else
                 error('incorrect input!')
             end
 
             %load motion correction data
-            fnStemEnd = strfind(obj.fn, '_REGISTERED') -1;
-            obj.fnStem = obj.fn(1:fnStemEnd);
-            try
-                load([obj.dr filesep obj.fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'], 'aData');
-                obj.aData = aData;
-                if isfield(aData, 'numChannels')
-                    obj.numChannels = aData.numChannels;
-                else
-                    obj.numChannels = 1;
-                end
-            catch
-                msgbox('Could not load alignment data; traces will not be decorrelated to motion.')
-                obj.numChannels = 1;
-            end
-
-            %load image data
-            A = ScanImageTiffReader([obj.dr filesep obj.fn]);
-            IM = A.data;
-            obj.IM = reshape(IM, size(IM,1), size(IM,2), obj.numChannels, []); %deinterleave;
-            clear IM;
-
-            %infer downsampling from filename
-            str = extractBetween(obj.fn, '_DOWNSAMPLED-', 'x.tif');
-            if ~isempty(str)
-                obj.dsFac = str2double(str{1});
-            else
-                obj.dsFac = 1;
-            end
-
-            %initialize butterworth filter
-            [obj.b2,obj.a2] = butter(4, 0.05, 'high'); %highpass filter for generating correlation image
-
-            %compute the bleaching curve
-            selValid = ~any(isnan(obj.IM(:,:,1,:)),obj.timeDim);
-            tmp = reshape(obj.IM, [], obj.numChannels, size(obj.IM,obj.timeDim));
-            offset = prctile(mean(tmp,3), 1, 1);
-            obj.IM = obj.IM-reshape(offset, [1 1 numel(offset) 1]);
-            tmp = tmp - offset;
-            obj.bleach = mean(tmp(selValid,:,:,:), 1, 'omitnan');
-
-            %compute average image
-            IMavg = mean(obj.IM,obj.timeDim, 'omitnan');
-            IMgamma = sqrt(max(0, IMavg./prctile(IMavg(:), 99.99)));
+            obj.exptSummary = load([obj.dr filesep obj.fn], 'exptSummary');
+                
+            obj.numChannels = 1;
+            obj.dsFac = nan;
             obj.IMavg = IMgamma;
-
-            %compute correlation image
-            disp('computing correlation image');
-
-            %select valid frames for cross-correlation analysis
-            if ~isempty(obj.aData)
-                err = aData.aError(1:obj.dsFac:end);
-                errStd = sqrt(estimatenoise(err));
-                valid = err < (ordfilt2(err, 40, ones(1,200), 'symmetric')+5*errStd);
-            else
-                valid = true(1, size(obj.IM,3));
-            end
-
-            noNan = double(obj.IM(:,:,:,valid));
-            noNan = noNan - mean(noNan,obj.timeDim, 'omitnan');
-            nanInds = isnan(noNan);
-            noNan(nanInds)=0;
-            HP = permute(filtfilt(obj.b2,obj.a2,permute(noNan, [obj.timeDim 1 2 obj.chDim])), [2 3 4 1]); clear noNan;
-            HP(nanInds) = nan;
-
-            %discard pixels with few measurements
-            nanOut = sum(~isnan(HP(:,:,1,:)),4)<(size(HP,4)/3);
-            HP(repmat(nanOut, [1 1 size(HP,3) size(HP,4)])) = nan;
-
-            ss = sum(HP.^2,obj.timeDim, 'omitnan');
-            vertC = sum(HP .* circshift(HP, [1 0 0 0]),obj.timeDim, 'omitnan')./sqrt(ss.*circshift(ss, [1 0 0 0]));
-            horzC = sum(HP .* circshift(HP, [0 1 0 0]),obj.timeDim, 'omitnan')./sqrt(ss.*circshift(ss, [0 1 0 0]));
-
-            C = mean(cat(obj.timeDim, horzC, circshift(horzC,1,2), vertC, circshift(vertC, 1,1)),obj.timeDim, 'omitnan');
-            obj.IMc = (C-median(C, [1 2], 'omitnan'))./std(C, 0,[1 2],'omitnan');
-            
-            HP = imgaussfilt(HP, [0.6 0.6]);
-            sk = skewness(HP,0,obj.timeDim).*IMgamma;
-            obj.IMsk = (sk-median(sk(:), 'omitnan'))./std(sk, 0,'all','omitnan');
-            obj.IMact = obj.IMc + obj.IMsk;
+            obj.IMc = obj.exptSummary.
+            obj.IMact = 
 
             %gui creation
             obj.hF = uifigure('name', ['Spine analysis - ' obj.fn], 'KeyPressFcn', @obj.kpf);
