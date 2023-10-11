@@ -61,7 +61,7 @@ for DMDix = 1:nDMDs
         actIM{DMDix}(end:size(IMc,1),:,:,:) = nan;
         actIM{DMDix}(:,end:size(IMc,2),:,:) = nan;
         actIM{DMDix}(:,:,:,trialIx) = nan;
-        actIM{DMDix}(1:size(IMc,1),1:size(IMc,2),:,trialIx) = IMc+IMsk;
+        actIM{DMDix}(1:size(IMc,1),1:size(IMc,2),:,trialIx) = posNorm(IMc,IMsk);
     end
 
     %Make template
@@ -99,7 +99,7 @@ exptSummary.dr = dr;
 exptSummary.validTrials = validTrials;
 %global images
 exptSummary.meanIM = cellfun(@(x)(mean(x(:,:,:,validTrials),4)), meanAligned, 'UniformOutput', false);
-exptSummary.actIM = cellfun(@(x)(mean(x(:,:,:,validTrials),4)), actAligned, 'UniformOutput', false);
+exptSummary.actIM = cellfun(@(x)(sqrt(mean(x(:,:,:,validTrials).^2,4, 'omitnan'))), actAligned, 'UniformOutput', false);
 %per-trial images
 exptSummary.perTrialMeanIMs = meanIM;
 exptSummary.perTrialActIms = actIM;
@@ -166,4 +166,14 @@ function [IMc, IMsk]= activityImage(IM, aData)
             HP = imgaussfilt(HP, [0.6 0.6]);
             sk = skewness(HP,0,4).*IMgamma;
             IMsk = (sk-median(sk(:), 'omitnan'))./std(sk, 0,'all','omitnan');
+
+            keyboard
+            %check if the bias in IMact is due to skewness or correlation
+            %bias probably has to do with imaging rate at each pixel;
+            %normalize to rate?
+end
+
+function IMout = posNorm(IM1, IM2)
+    %computes the 2-norm of two images but only considers positive values
+    IMout = sqrt(max(IM1,0).^2 + max(IM2,0).^2);  
 end

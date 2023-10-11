@@ -212,22 +212,15 @@ classdef spineAnalysisExpt < handle
             %   ROIs x time, averaged by trials
             %   total input vs output
             %   cross-correlations
-            
-            obj.plotAllTrials(sData)
-            obj.plotTrialAverage(sData)
-
-            %save figure
-            disp('saving figure')
-            exportgraphics(hAx, [drsave filesep fnsave(1:end-4) '_RoisFigure.pdf'], 'ContentType', 'vector')
-        end
-
-        function plotAllTrials(obj, sData)
             colors = [0.3 0.8 0.1; 0.8 0 0.3]; %ch1 yellow ch2 red
             plotChannel = ones(1, maskData.nROIs);
             plotChannel(strcmpi(maskData.names, 'soma')) = 2; %plot soma in red
             T = (1:size(sData.traces,1))/obj.analyzeHz; %time vector
             
-            hF = figure('name', 'all trials')
+
+
+
+            hF_allTrials = figure('name', 'all trials')
             for ROIix = 1:maskData.nROIs
                  tmp = squeeze(sData.traces(:,ROIix, plotChannel(ROIix),2,:))./reshape(sqrt(sData.noise(ROIix,plotChannel(ROIix),2,:)), 1,[]); %normalized trace
                  
@@ -252,11 +245,18 @@ classdef spineAnalysisExpt < handle
                     xlabel('time (s)');
                     linkaxes(hAx, 'x');
             end
+
+            %save figure
+            disp('saving figure')
+            exportgraphics(hAx, [drsave filesep fnsave(1:end-4) '_RoisFigure.pdf'], 'ContentType', 'vector')
         end
 
-        function plotTrialAverage
+        function plotAllTrials
+
 
         end
+
+        function plotT
 
         function [traces, noise] = extractTraces(obj, D, maskData, motPreds)
             nROIs = maskData.nROIs;
