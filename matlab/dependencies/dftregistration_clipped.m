@@ -78,7 +78,7 @@ elseif usfac == 1,
 %     CC(:,1:fix((n-clip(1))/2)) = -inf;
 %     CC(:,fix((n+clip(1))/2):end) = -inf;
 
-    [max1,loc1] = max(CC);
+    [max1,loc1] = max(real(CC));
     [max2,loc2] = max(max1);
     rloc=loc1(loc2);
     cloc=loc2;
@@ -118,11 +118,11 @@ else
     CC = ifft2(ifftshift(CC)); % Calculate cross-correlation
     
     keep = true(size(CC));
-    keep(fix(2*clip(1)/2)+2:end-fix(2*clip(1)/2),:) = false;
-    keep(:,fix(2*clip(2)/2)+2:end-fix(2*clip(2)/2),:) = false;
+    keep(fix(2*clip(1))+2:end-fix(2*clip(1)),:) = false;
+    keep(:,fix(2*clip(2))+2:end-fix(2*clip(2)),:) = false;
     CC(~keep) = 0;
 
-    [max1,loc1] = max(CC);
+    [max1,loc1] = max(real(CC));
     [max2,loc2] = max(max1);
     rloc=loc1(loc2);cloc=loc2;
     CCmax=CC(rloc,cloc);
@@ -154,7 +154,7 @@ else
         CC = conj(dftups(buf2ft.*conj(buf1ft),ceil(usfac*1.5),ceil(usfac*1.5),usfac,...
             dftshift-row_shift*usfac,dftshift-col_shift*usfac))/(md2*nd2*usfac^2);
         % Locate maximum and map back to original pixel grid 
-        [max1,loc1] = max(CC);   
+        [max1,loc1] = max(real(CC));   
         [max2,loc2] = max(max1); 
         rloc = loc1(loc2); cloc = loc2;
         CCmax = CC(rloc,cloc);

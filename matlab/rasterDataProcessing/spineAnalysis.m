@@ -92,7 +92,7 @@ classdef spineAnalysis < handle
             %compute the bleaching curve
             selValid = ~any(isnan(obj.IM(:,:,1,:)),obj.timeDim);
             tmp = reshape(obj.IM, [], obj.numChannels, size(obj.IM,obj.timeDim));
-            offset = prctile(mean(tmp,3), 1, 1);
+            offset = prctile(mean(tmp,3, 'omitnan'), 1, 1);
             obj.IM = obj.IM-reshape(offset, [1 1 numel(offset) 1]);
             tmp = tmp - offset;
             obj.bleach = mean(tmp(selValid,:,:,:), 1, 'omitnan');
@@ -433,7 +433,7 @@ classdef spineAnalysis < handle
                     case 'images.roi.circle'
                         obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
                     case 'images.roi.polygon'
-                        obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Radius', roiData{rix}.Radius, 'Label', roiData{rix}.Label);
+                        obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Label', roiData{rix}.Label);
                     otherwise
                         error('bad ROI data type');
                 end

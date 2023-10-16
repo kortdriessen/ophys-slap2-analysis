@@ -68,11 +68,15 @@ elseif usfac == 1,
     md2 = fix(m/2); 
     nd2 = fix(n/2);
     CC = ifft2(buf1ft.*conj(buf2ft));
-    
-    CC(1:fix((m-clip(1))/2),:) = -inf;
-    CC(fix((m+clip(1))/2):end,:) = -inf;
-    CC(:,1:fix((n-clip(1))/2)) = -inf;
-    CC(:,fix((n+clip(1))/2):end) = -inf;
+
+    keep = true(size(CC));
+    keep(fix(clip(1)/2)+2:end-fix(clip(1)/2),:) = false;
+    keep(:,fix(clip(2)/2)+2:end-fix(clip(2)/2),:) = false;
+    CC(~keep) = 0;
+%     CC(1:fix((m-clip(1))/2),:) = -inf;
+%     CC(fix((m+clip(1))/2):end,:) = -inf;
+%     CC(:,1:fix((n-clip(1))/2)) = -inf;
+%     CC(:,fix((n+clip(1))/2):end) = -inf;
 
     [max1,loc1] = max(CC);
     [max2,loc2] = max(max1);
@@ -114,13 +118,9 @@ else
     CC = ifft2(ifftshift(CC)); % Calculate cross-correlation
     
     keep = true(size(CC));
-    keep(fix(2*clip(1)/2)+2:end-fix(2*clip(1)/2),:) = false;
-    keep(:,fix(2*clip(2)/2)+2:end-fix(2*clip(2)/2),:) = false;
-    
-    CC(1:fix((2*clip(1))/2),:) = -inf;
-    CC(fix((mlarge+2*clip(1))/2):end,:) = -inf;
-    CC(:,1:fix((nlarge-2*clip(1))/2)) = -inf;
-    CC(:,fix((nlarge+2*clip(1))/2):end) = -inf;
+    keep(fix(2*clip(1))+2:end-fix(2*clip(1)),:) = false;
+    keep(:,fix(2*clip(2))+2:end-fix(2*clip(2)),:) = false;
+    CC(~keep) = 0;
 
     [max1,loc1] = max(CC);
     [max2,loc2] = max(max1);

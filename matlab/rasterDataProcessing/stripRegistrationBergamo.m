@@ -1,6 +1,6 @@
 function stripRegistrationBergamo(ds_time, fn)
 maxshift = 80;
-clipShift = 10;%the maximum allowable shift per frame
+clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
 
@@ -66,7 +66,7 @@ for f_ix = 1:length(fns)
     Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
     sz = size(Ad);
     Yhp = squeeze(sum(Y,3));
-    Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
+    %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
     options_rigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'bin_width',initFrames,'max_shift',maxshift,'us_fac',4,'init_batch',initFrames, 'correct_bidir', false);
     F = normcorre(Yhp,options_rigid);
     F = mean(F,3); %fixed image
@@ -89,7 +89,7 @@ for f_ix = 1:length(fns)
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time); 
         M = squeeze(sum(M,3)); %merge colors
-        M = M-imgaussfilt(M, 4); %highpass
+        %M = M-imgaussfilt(M, 4); %highpass
 
         if ~mod(DSframe, 1000)
             disp([int2str(DSframe) ' of ' int2str(nDSframes)]);
@@ -107,14 +107,16 @@ for f_ix = 1:length(fns)
         motionDSc(DSframe) = initC+output(4);
         aErrorDS(DSframe) = output(1);
 
-        A = interp2(1:sz(2), 1:sz(1), M,viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan);
-        sel = ~isnan(A);
-        nantmp = sel & isnan(template);
-        template(nantmp) = A(nantmp);
-        template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
-        
-        initR = round(motionDSr(DSframe));
-        initC = round(motionDSc(DSframe));
+        if abs(motionDSr(DSframe))<maxshift && abs(motionDSc(DSframe))<maxshift
+            A = interp2(1:sz(2), 1:sz(1), M,viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan);
+            sel = ~isnan(A);
+            nantmp = sel & isnan(template);
+            template(nantmp) = A(nantmp);
+            template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
+
+            initR = round(motionDSr(DSframe));
+            initC = round(motionDSc(DSframe));
+        end
     end
 
     %upsample the shifts and compute a tighter field of view
