@@ -33,7 +33,7 @@ numChannels = aData.numChannels;
 
 %generate a concensus alignment across trials for further analysis
 meanIM = cell(1,2);
-for DMDix = 1:nDMDs
+for DMDix = nDMDs:-1:1
     meanIM{DMDix} = nan(1,1,2,1);
     actIM{DMDix} = nan(1,1,2,1);
     disp('Loading data and calculating correlation images...')
@@ -89,6 +89,9 @@ for DMDix = 1:nDMDs
     cc = corrCoeff(:, DMDix);
     corrThresh(DMDix) = min(min(0.99,median(cc)), mean(cc(cc>median(cc)) - 4*std(cc(cc>median(cc)))));
     selTrials(:, DMDix) = cc>corrThresh(DMDix);
+
+    keyboard %for the second DMD aligned, we should use a template corresponding to
+    %the selected trials from the first DMD!!
 end
 
 validTrials = all(selTrials,2);
@@ -98,7 +101,7 @@ exptSummary.fns = fns;
 exptSummary.dr = dr;
 exptSummary.validTrials = validTrials;
 %global images
-exptSummary.meanIM = cellfun(@(x)(mean(x(:,:,:,validTrials),4)), meanAligned, 'UniformOutput', false);
+exptSummary.meanIM = cellfun(@(x)(mean(x(:,:,:,validTrials),4, 'omitnan')), meanAligned, 'UniformOutput', false);
 exptSummary.actIM = cellfun(@(x)(sqrt(mean(x(:,:,:,validTrials).^2,4, 'omitnan'))), actAligned, 'UniformOutput', false);
 %per-trial images
 exptSummary.perTrialMeanIMs = meanIM;
@@ -131,6 +134,8 @@ subplot(4,1,3)
 imshow(cat(3, exptSummary.actIM{2}(:,:,1)./Clevel, sqrt(IMnorm(:,:,1)), sqrt(IMnorm(:,:,1))));
 subplot(4,1,4)
 imshow(cat(3, exptSummary.actIM{2}(:,:,2)./Clevel, sqrt(IMnorm(:,:,2)), sqrt(IMnorm(:,:,2))));
+
+disp('Done summarizeMultiRoi')
 end
 
 
@@ -165,9 +170,13 @@ function [IMc, IMsk]= activityImage(IM, aData)
             
             HP = imgaussfilt(HP, [0.6 0.6]);
             sk = skewness(HP,0,4).*IMgamma;
-            IMsk = (sk-median(sk(:), 'omitnan'))./std(sk, 0,'all','omitnan');
+            sknan = isnan(sk);
+            sk(sknan)=1;
+            sk = sk - imgaussfilt(sk, 10);
+            sk(sknan) = nan;
+            IMsk = sk./std(sk, 0,[1 2],'omitnan');
+            %IMsk = (sk-median(sk(:), 'omitnan'))./std(sk, 0,'all','omitnan');
 
-            keyboard
             %check if the bias in IMact is due to skewness or correlation
             %bias probably has to do with imaging rate at each pixel;
             %normalize to rate?
@@ -175,5 +184,6 @@ end
 
 function IMout = posNorm(IM1, IM2)
     %computes the 2-norm of two images but only considers positive values
-    IMout = sqrt(max(IM1,0).^2 + max(IM2,0).^2);  
+    IMout = sqrt(max(IM1,0).^2 + max(IM2,0).^2);
+    IMout(isnan(IM1) & isnan(IM2)) = nan;
 end
