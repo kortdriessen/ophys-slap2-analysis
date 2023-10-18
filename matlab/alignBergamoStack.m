@@ -5,7 +5,7 @@
 %!!! The stack should be split into 1 file per Z-position. This reduces memory load
 
 
-% [fn, dr] = uigetfile('*.tif*', 'Select ONE FILE PER PLANE', 'multiselect', 'on');
+[fn, dr] = uigetfile('*.tif*', 'Select ONE FILE PER PLANE', 'multiselect', 'on');
 % if isnumeric(fn)
 %     return % user abort
 % end
@@ -103,7 +103,7 @@ bfsave(squeeze(IMc(:,:,2,:)), outputPathCh2corr, 'BigTiff', true);
 bfsave(squeeze(IMsk(:,:,1,:)), outputPathCh1sk, 'BigTiff', true);
 bfsave(squeeze(IMsk(:,:,2,:)), outputPathCh2sk, 'BigTiff', true);
 
-function [refPlane, corrPlane, skewPlane, gammaPlane] = alignMultiChannel(IMs, b,a)
+function [refPlane, corrPlane, skewPlane] = alignMultiChannel(IMs, b,a)
 Y = squeeze(makeHighPass(sum(IMs,3))); % data order is XYCTZV
 options_rigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'bin_width',200,'max_shift',20,'us_fac',4,'init_batch',40, 'correct_bidir', true);
 refPlane = [];
