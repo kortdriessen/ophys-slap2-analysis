@@ -254,7 +254,7 @@ saveas(gcf,[filepath '\inferredMotion.fig']);
 
 %% Save out data
 
-inferMotionOut.motion = motion - [xPre+1 yPre+1 0];
+inferMotionOut.motion = motion - [yPre+1 xPre+1 0];
 inferMotionOut.brightness = brightness';
 inferMotionOut.dataMatrix = dataMatrix;
 inferMotionOut.expectedMatrix = expectedMatrix;
