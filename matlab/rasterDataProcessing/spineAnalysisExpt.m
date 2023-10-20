@@ -130,7 +130,6 @@ classdef spineAnalysisExpt < handle
         end
 
         function sData = analyze(obj, ~, ~)
-
             [fnsave, drsave] = uiputfile([obj.dr filesep obj.fn(1:end-4) '_DMD' int2str(obj.selDMD) 'analyzed.mat']);
 
             maskData = obj.roiMasks;
@@ -171,6 +170,7 @@ classdef spineAnalysisExpt < handle
                 aData = loadAlignmentData([obj.exptSummary.dr datFn]);
                 motionC = interp1(aData.DSframes,aData.motionDSc, frameIxs, 'linear', 'extrap');
                 motionR = interp1(aData.DSframes,aData.motionDSr, frameIxs, 'linear', 'extrap');
+                aError =  interp1(aData.DSframes,aData.aError, frameIxs, 'linear', 'extrap');
                 motPreds = [motionC ; motionR ; motionC.^2 ; motionR.^2 ; motionC.^3 ; motionR.^3 ; motionC.*motionR ; ones(size(motionC))];
 
                 %load the high time resolution data
@@ -199,71 +199,35 @@ classdef spineAnalysisExpt < handle
                 end
 
                 [traces, noise] = obj.extractTraces(D, maskData, motPreds); %
+                
                 %traces dimensions: [time, roi, channel, traceType]
                 sData.trialLength(trialIx) = size(traces,1);
-                if size(traces,1)>size(sData.traces,2)
-                    sData.traces(end:size(sData.traces,2),:,:,:,:) = nan;
+                if size(traces,1)>size(sData.traces,1) %The first dimension needs to be extended with nans
+                    sData.traces(end+1:size(traces,1),:,:,:,:) = nan;
+                    sData.motionC(end+1:size(traces,1),:) = nan;
+                    sData.motionR(end+1:size(traces,1),:) = nan;
+                    sData.alignError(end+1:size(traces,1),:) = nan;
                 end
-                sData.traces(:,:,:,:,trialIx) = nan;
+                sData.traces(:,:,:,:,trialIx) = nan; %prefill with nans
+                sData.motionC(:,trialIx) = nan;
+                sData.motionR(:,trialIx) = nan;
+                sData.alignError(:,trialIx) = nan;
+
+                %accumulate per-trace data
                 sData.traces(1:size(traces,1),1:length(D),1:obj.numChannels, 1:size(traces,4), trialIx) = traces; %time, roi, channel, traceType, trial
                 sData.noise(1:length(D), 1:obj.numChannels, 1:size(traces,4), trialIx) = noise; %roi, channel, traceType, trial
+                sData.motionC(:,trialIx) =  motionC;
+                sData.motionR(:,trialIx) =  motionR;
+                sData.alignError(:,trialIx) = aError;
+
             end
             sData.maskData = maskData;
-            
             sData.frametime = 1/obj.analyzeHz;
-
             save([drsave filesep fnsave], 'sData')
-
-            %plots:
-            %   ROIs x time, for duration of experiment
-            %   ROIs x time, averaged by trials
-            %   total input vs output
-            %   cross-correlations
-            
-            %obj.plotAllTrials(sData)
-            %obj.plotTrialAverage(sData)
-
+    
             %save figure
             disp('saving figure')
             exportgraphics(obj.hAx, [drsave filesep fnsave(1:end-4) '_RoisFigure.pdf'], 'ContentType', 'vector');
-        end
-
-        function hF = plotAllTrials(obj, sData)
-            colors = [0.3 0.8 0.1; 0.8 0 0.3]; %ch1 yellow ch2 red
-            nROIs = size(sData.traces,2);
-            plotChannel = ones(1, nROIs);
-            plotChannel(strcmpi(sData.maskData.names, 'soma')) = 2; %plot soma in red
-            T = (1:size(sData.traces,1))/obj.analyzeHz; %time vector
-
-            hF = figure('name', 'all trials');
-            for ROIix = nROIs:-1:1
-                 tmp = squeeze(sData.traces(:,ROIix, plotChannel(ROIix),2,:));
-                 tmp = (tmp-median(tmp,1, 'omitnan'))./reshape(sqrt(sData.noise(ROIix,plotChannel(ROIix),2,:)), 1,[]); %normalized trace
-
-                 numTrials = size(tmp,2);
-                 tAll(:, ROIix) = tmp(:);
-                 %tMean(:,ROIix) = mean(tmp,2, 'omitnan');
-
-                 %concatenate normalized trials
-                 hAx(ROIix) = subplot(nROIs, 1, ROIix);
-                 trialbounds = size(sData.traces,1)*(1:numTrials);
-                 plot(tAll(:, ROIix), 'color', colors(plotChannel(ROIix),:)); hold on;
-                 ylim = [min(tAll(:, ROIix), [],'all','omitnan') max(tAll(:, ROIix), [], 'all','omitnan')];
-                 %plot trial boundaries
-                 plot(reshape([trialbounds ; trialbounds ; trialbounds], 1, []), repmat([ylim nan], [1 numTrials]), 'k')
-                 %plot(T, nanfastsmooth(tNorm, 7, 3, 0.5), 'color', colors(cix,:), 'linewidth', 2);
-                 ylabel([sData.maskData.names{ROIix}]);
-
-                    %label plots
-                    if ROIix<nROIs
-                        set(hAx(ROIix), 'xticklabel', [], 'tickdir', 'out');
-                    else
-                        xlabel('time (s)');
-                    end 
-                    set(hAx(ROIix), 'ylim', ylim);
-            end
-            set(hAx, 'box', 'off')
-            linkaxes(hAx, 'x');
         end
 
         function [traces, noise] = extractTraces(obj, D, maskData, motPreds)
@@ -300,13 +264,13 @@ classdef spineAnalysisExpt < handle
                         [~, Vcorr(:, vix)] = obj.decorrelateMotion(V(:,vix), motPreds(:,selframes));
                     end
                     DDcorr = DD-(U*S*Vcorr'); %motion-corrected data: the original data minus the reconstructed motion artefact
-                    trace1= mean(DDcorr(maskData.mask{rix}(selpix), :),1); % the decorrelated trace computed from the mask alone
+                    trace1= sum(DDcorr(maskData.mask{rix}(selpix), :),1); % the decorrelated trace computed from the mask alone
 
                     %compile output
                     traces(selframes, rix,cix,1) = trace0; %raw ROI, without decorrelating motion variables
-                    noise(rix,cix,1) = estimatenoise(trace0(1:4:end)); %noise for trace0
+                    noise(rix,cix,1) = estimatenoise(trace0(1:4:end)); %noise for trace0; computed from every 4th sample because of smoothing in .dat signal extraction
                     traces(selframes, rix,cix,2) = trace1; %raw ROI, with motion variables decorrelated
-                    noise(rix,cix,2) = estimatenoise(trace1(1:4:end)); %noise for trace1
+                    noise(rix,cix,2) = estimatenoise(trace1(1:4:end)); %noise for trace1; computed from every 4th sample because of smoothing in .dat signal extraction
                 end
             end
         end
@@ -381,7 +345,6 @@ classdef spineAnalysisExpt < handle
         end
 
         function [corrected, traceMot] = decorrelateMotion(obj, trace, motPreds)
-
             %highpass filter trace
             trace = trace(:) - smooth(trace, ceil(3*obj.analyzeHz), 'lowess');
             beta = mvregress(motPreds',trace);
