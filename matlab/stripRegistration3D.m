@@ -1,9 +1,8 @@
 function stripRegistration3D(ds_time) %% same as stripRegistration but aligning to a reference volume to allow for Z registration
-tic;
 maxshift = 80;
 maxInitOffset = 80; %
-clipShift = 20;%the maximum allowable shift per frame
-zClipShift = 5; %max allowable shift per frame in Z (either up or down)
+clipShift = 15;%the maximum allowable shift per frame
+zClipShift = 2; %max allowable shift per frame in Z (either up or down)
 
 [stackfns, stackdr] = uigetfile('*.tif', 'Select Reference Volume', 'multiselect', 'off');
 
@@ -81,7 +80,7 @@ for f_ix = 1:length(fns)
         if DSframe == 1
             padsz = size(refStack, 1:2) - sz(1:2);
 
-            zRange = 1:size(refStackHP,3);
+            zRange = 3:size(refStackHP,3)-2;
 
             T3d = refStackHP;
             keep = false(2*size(T3d,1)-1, 2*size(T3d,2)-1);
@@ -110,7 +109,7 @@ for f_ix = 1:length(fns)
                 T = fullField((1:sz(1))+maxshift+floor(padsz(1)/2)+mod(padsz(1),2)+initR, (1:sz(2))+maxshift+floor(padsz(2)/2)+mod(padsz(2),2)+initC,z);
             end
 
-            [output, Greg] = dftregistration_clipped(fft2(single(T)),fft2(M),4, clipShift);
+            [output, ~] = dftregistration_clipped(fft2(single(T)),fft2(M),4, clipShift);
             %shiftedFrame = real(ifft2(Greg));
 
             corrMetric(z) = 1-output(1);
@@ -148,7 +147,6 @@ for f_ix = 1:length(fns)
 
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
 
-    toc;
     disp('Saving results');
 
     %save a downsampled aligned recording
