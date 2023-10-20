@@ -5,7 +5,7 @@
 %!!! The stack should be split into 1 file per Z-position. This reduces memory load
 
 
-% [fn, dr] = uigetfile('*.tif*', 'Select ONE FILE PER PLANE', 'multiselect', 'on');
+[fn, dr] = uigetfile('*.tif*', 'Select ONE FILE PER PLANE', 'multiselect', 'on');
 % if isnumeric(fn)
 %     return % user abort
 % end
@@ -45,37 +45,29 @@ end
 %straighten out the reference stack
 [IM, IMc, IMsk] = straightenStack(IM, IMc, IMsk);
 
-%compute IMgamma
-nDS = 1;
-tmp = IM;
-for DSiter = 1:nDS
-    tmp = tmp(1:2:2*floor(end/2), 1:2:2*floor(end/2),:,:) + tmp(2:2:2*floor(end/2), 1:2:2*floor(end/2),:,:) + tmp(1:2:2*floor(end/2), 2:2:2*floor(end/2),:,:) + tmp(2:2:2*floor(end/2), 2:2:2*floor(end/2),:,:);
-end
-tmp = tmp- prctile(tmp(:),1, 'all');
-IMgamma = sqrt(max(0,tmp));
-
-
 %convolve correlation image in 3D and background subtract
-IMc2 = IMc.*IMgamma; 
-IMc2 = squeeze(max(IMc2,[],4));
+IMc2 = squeeze(IMc(:,:,2,:)); %we use channel 2
+IMc2 = IMc2 - imgaussfilt(IMc2, 29, 'padding', 'symmetric'); 
+IMc2 = imgaussfilt3(IMc2, [4 4 1]);
+IMc2 = max(IMc2,[],3);
 
-% IMsk2 = IMsk.*IMgamma; 
-% %IMsk2 = IMsk2 - imgaussfilt(IMsk2, 29, 'padding', 'symmetric'); 
-% IMsk2 = imgaussfilt3(IMsk2, [4 4 0.5]);
-% IMsk2 = max(IMsk2,[],3);
+IMsk2 = squeeze(IMsk(:,:,2,:)); %we use channel 2
+IMsk2 = IMsk2 - imgaussfilt(IMsk2, 29, 'padding', 'symmetric'); 
+IMsk2 = imgaussfilt3(IMsk2, [4 4 0.5]);
+IMsk2 = max(IMsk2,[],3);
 
 %convert to 16 bit
 IM = max(0, IM- prctile(IM(:), 1));
 
 %convert correlation image 
-IMc2 = max(0, IMc2- prctile(IMc2(:), 1, [1 2]));
+IMc2 = max(0, IMc2- prctile(IMc2(:), 1));
 IMc2 = IMc2./max(IMc2, [], 'all');
 IMc2(~isfinite(IMc2)) = 0;
 IMc2 = uint16(IMc2.*65000);
-% IMsk2 = max(0, IMsk2- prctile(IMsk2(:), 1));
-% IMsk2 = IMsk2./max(IMsk2, [], 'all');
-% IMsk2(~isfinite(IMsk2)) = 0;
-% IMsk2 = uint16(IMsk2.*65000);
+IMsk2 = max(0, IMsk2- prctile(IMsk2(:), 1));
+IMsk2 = IMsk2./max(IMsk2, [], 'all');
+IMsk2(~isfinite(IMsk2)) = 0;
+IMsk2 = uint16(IMsk2.*65000);
 
 %remap refIM to full dynamic range; off by default
 normalizeIntensity = false;
@@ -91,8 +83,10 @@ disp('Saving...')
 
 outputPathCh1 = [tiffFn{1}(1:end-4) '-REF_Ch1.ome.tif'];
 outputPathCh2 = [tiffFn{1}(1:end-4) '-REF_Ch2.ome.tif'];
-outputPathcorr = [tiffFn{1}(1:end-4) '-CORR.ome.tif'];
-%outputPathCh2corr = [tiffFn{1}(1:end-4) '-CORR_Ch2.ome.tif'];
+outputPathCh1corr = [tiffFn{1}(1:end-4) '-CORR_Ch1.ome.tif'];
+outputPathCh2corr = [tiffFn{1}(1:end-4) '-CORR_Ch2.ome.tif'];
+outputPathCh1sk = [tiffFn{1}(1:end-4) '-SK_Ch1.ome.tif'];
+outputPathCh2sk = [tiffFn{1}(1:end-4) '-SK_Ch2.ome.tif'];
 
 bfCheckJavaPath;
 metadata1 = createMinimalOMEXMLMetadata(squeeze(IM(:,:,1,:)));
@@ -104,8 +98,10 @@ pixelSizeZObj = ome.units.quantity.Length(java.lang.Double(abs(zStep)), ome.unit
 metadata1.setPixelsPhysicalSizeZ(pixelSizeZObj, 0); metadata2.setPixelsPhysicalSizeZ(pixelSizeZObj, 0);
 bfsave(squeeze(IM(:,:,1,:)), outputPathCh1, 'BigTiff', true, 'metadata', metadata1);
 bfsave(squeeze(IM(:,:,2,:)), outputPathCh2, 'BigTiff', true, 'metadata', metadata2);
-bfsave(squeeze(IMc2), outputPathcorr, 'BigTiff', true);
-%bfsave(squeeze(IMc2(:,:,2)), outputPathCh2corr, 'BigTiff', true);
+bfsave(squeeze(IMc(:,:,1,:)), outputPathCh1corr, 'BigTiff', true);
+bfsave(squeeze(IMc(:,:,2,:)), outputPathCh2corr, 'BigTiff', true);
+bfsave(squeeze(IMsk(:,:,1,:)), outputPathCh1sk, 'BigTiff', true);
+bfsave(squeeze(IMsk(:,:,2,:)), outputPathCh2sk, 'BigTiff', true);
 
 function [refPlane, corrPlane, skewPlane] = alignMultiChannel(IMs, b,a)
 Y = squeeze(makeHighPass(sum(IMs,3))); % data order is XYCTZV

@@ -84,17 +84,15 @@ for f_ix = 1:length(fns)
             zRange = 1:size(refStackHP,3);
 
             T3d = refStackHP;
-            keep = false(2*size(T3d,1)-1, 2*size(T3d,2)-1);
-            keep(ceil(end/2)+ [-maxInitOffset:maxInitOffset], ceil(end/2)+ [-maxInitOffset:maxInitOffset]) = true;
         else
             zRange = max(1,round(motionDSz(DSframe-1))-zClipShift):min(size(refStack,3),round(motionDSz(DSframe-1))+zClipShift);
-            initR = max(-maxshift, min(maxshift, round(motionDSr(DSframe-1)))); 
-            initC = max(-maxshift, min(maxshift, round(motionDSc(DSframe-1))));
+            initR = motionDSr(DSframe-1); initC = motionDSc(DSframe-1);
             T3d = fullField((1:sz(1))+maxshift+floor(padsz(1)/2)+mod(padsz(1),2)+initR, (1:sz(2))+maxshift+floor(padsz(2)/2)+mod(padsz(2),2)+initC, :);
         end
-
+        keep = false(2*size(T3d,1)-1, 2*size(T3d,2)-1);
+        keep(ceil(end/2)+ [-maxInitOffset:maxInitOffset], ceil(end/2)+ [-maxInitOffset:maxInitOffset]) = true;
         
-        corrMetric = nan(1,max(zRange));
+        %corrMetric = nan(1,max(zRange));
         for z = zRange
             T = T3d(:,:,z);
 
@@ -113,14 +111,14 @@ for f_ix = 1:length(fns)
             [output, Greg] = dftregistration_clipped(fft2(single(T)),fft2(M),4, clipShift);
             %shiftedFrame = real(ifft2(Greg));
 
-            corrMetric(z) = 1-output(1);
+            corrMetric = 1-output(1);
             % subShiftedFrame = shiftedFrame(abs(shiftedFrame) > 1e-3);
             % subT = T(abs(shiftedFrame) > 1e-3);
             % 
             % corrMetric = corr2(subShiftedFrame,subT);
 
-            if isnan(aCorrDS(DSframe)) || aCorrDS(DSframe) < corrMetric(z)
-                aCorrDS(DSframe) = corrMetric(z);
+            if isnan(aCorrDS(DSframe)) || aCorrDS(DSframe) < corrMetric
+                aCorrDS(DSframe) = corrMetric;
                 motionDSr(DSframe) = initR + output(3);
                 motionDSc(DSframe) = initC + output(4);
                 motionDSz(DSframe) = z;
@@ -128,12 +126,12 @@ for f_ix = 1:length(fns)
         end
 
         %superres Z estimation
-        zz = motionDSz(DSframe);
-        if zz>zRange(1) && zz<zRange(end)
-            ratio = min(1e6,(corrMetric(zz) - corrMetric(zz-1))/(corrMetric(zz) - corrMetric(zz+1)));
-            dZ = (1-ratio)/(1+ratio)/2;
-            motionDSz(DSframe) = zz-dZ;
-        end
+        % zz = motionDSz(DSframe);
+        % if zz>zRange(1) && zz<zRange(end)
+        %     ratio = min(1e6,(corrMetric(zz) - corrMetric(zz-1))/(corrMetric(zz) - corrMetric(zz+1)));
+        %     dZ = (1-ratio)/(1+ratio)/2;
+        %     motionDSz(DSframe) = zz-dZ;
+        % end
     end
 
     %upsample the shifts and compute a tighter field of view

@@ -249,7 +249,7 @@ classdef spineAnalysis < handle
                     r = (1:length(p))'; r(p) = r;
 
                     %compute average time trace within the ROI, ignoring nans
-                    traceAvg = mean(DD,1, 'omitmissing');
+                    traceAvg = mean(DD,1, 'omitnan');
 
                     %select pixels and frames to include
                     selpix = (numVal./max(numVal))>(r./max(r) + 0.05);
@@ -356,19 +356,19 @@ classdef spineAnalysis < handle
                 %create data
                 h5create(fname,['/fluo/raw/' roiName], [szTrace0(2) szTrace0(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace0(2) szTrace0(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
                 h5create(fname,['/fluo/mcorr/' roiName], [szTrace1(2) szTrace1(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace1(2) szTrace1(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
-                h5create(fname,['/fluo/ignoringNan/' roiName], [szTrace1(2) szTrace1(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace1(2) szTrace1(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
+                h5create(fname,['/fluo/avgwNaN/' roiName], [szTrace1(2) szTrace1(1)], 'Datatype', 'single', 'ChunkSize', min([szTrace1(2) szTrace1(1)], [1 2000]), 'Deflate', 5); % fluorescence from this ROI
 
                 % write data
                 h5write(fname,['/fluo/raw/' roiName],permute(sData.trace0(:,roiIx,:), [3 1 2]));
                 h5write(fname,['/fluo/mcorr/' roiName],permute(sData.trace1(:,roiIx,:), [3 1 2]));
-                h5write(fname,['/fluo/ignoringNan/' roiName],permute(sData.traceAvg(:,roiIx,:), [3 1 2]));
+                h5write(fname,['/fluo/avgwNaN/' roiName],permute(sData.traceAvg(:,roiIx,:), [3 1 2]));
 
                 %write attributes
                 h5writeatt(fname,['/fluo/raw/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
                 h5writeatt(fname,['/fluo/raw/' roiName],'noise', sData.n0(roiIx,:)); %estimated noise, per channel
                 h5writeatt(fname,['/fluo/mcorr/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
                 h5writeatt(fname,['/fluo/mcorr/' roiName],'noise', sData.n1(roiIx,:)); %estimated noise, per channel
-                h5writeatt(fname,['/fluo/ignoringNan/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
+                h5writeatt(fname,['/fluo/avgwNaN/' roiName],'fs', 1/obj.aData.frametime); %sampling frequency
 
                 chans = {};
                 for chIx = 1:obj.numChannels
@@ -378,7 +378,7 @@ classdef spineAnalysis < handle
                 h5writeatt(fname,['/fluo/raw/' roiName],'nPix', sum(sData.mask{roiIx}(:))); %channel names
                 h5writeatt(fname,['/fluo/mcorr/' roiName],'chans', chans); %channel names
                 h5writeatt(fname,['/fluo/mcorr/' roiName],'nPix', sum(sData.mask{roiIx}(:))); %channel names
-                h5writeatt(fname,['/fluo/ignoringNan/' roiName],'chans', chans); %channel names
+                h5writeatt(fname,['/fluo/avgwNaN/' roiName],'chans', chans); %channel names
             end
 
             %save global information
