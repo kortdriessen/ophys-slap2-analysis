@@ -1,4 +1,4 @@
-function summarizeMultiRoi(nDMDs)
+function summarizeMultiRoi(nDMDs, forceCorrThresh)
 if ~nargin
     nDMDs = 2;
 end
@@ -46,6 +46,9 @@ for DMDix = nDMDs:-1:1
         %load the tiff
         A = ScanImageTiffReader([dr filesep fn]);
         IM = double(A.data);
+        if size(IM,3)<100
+            error(['The file:' fn 'is very short. You should probably not include it?']);
+        end
         IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
         meanIM{DMDix}(end:size(IM,1),:,:,:) = nan;
         meanIM{DMDix}(:, end:size(IM,2),:,:) = nan;
@@ -87,10 +90,14 @@ for DMDix = nDMDs:-1:1
 
     %identify outliers in alignment quality
     cc = corrCoeff(:, DMDix);
-    corrThresh(DMDix) = min(min(0.99,median(cc)), mean(cc(cc>median(cc)) - 4*std(cc(cc>median(cc)))));
+    
+    if nargin<1 && forceCorrThresh>0
+        corrThresh(DMDix) = forceCorrThresh;
+    else
+        corrThresh(DMDix) = min(min(0.99,median(cc)), mean(cc(cc>median(cc)) - 4*std(cc(cc>median(cc)))));       
+    end
     selTrials(:, DMDix) = cc>corrThresh(DMDix);
-
-    keyboard %for the second DMD aligned, we should use a template corresponding to
+    %keyboard %for the second DMD aligned, we should use a template corresponding to
     %the selected trials from the first DMD!!
 end
 
@@ -115,7 +122,9 @@ save([drsave filesep fnsave], 'exptSummary');
 %plot the peak correlation
 figure('name', fnsave)
 plot(corrCoeff(:, 1), 'r'); hold on, plot([1, length(fns)], corrThresh(1)*[1 1], ':r')
-plot(corrCoeff(:, 2), 'b'); hold on, plot([1, length(fns)], corrThresh(2)*[1 1], ':b')
+if nDMDs>1
+    plot(corrCoeff(:, 2), 'b'); hold on, plot([1, length(fns)], corrThresh(2)*[1 1], ':b')
+end
 xlabel('Trials');
 ylabel('alignment quality')
 
@@ -154,8 +163,12 @@ function [IMc, IMsk]= activityImage(IM, aData)
             noNan = noNan - mean(noNan,4, 'omitnan');
             nanInds = isnan(noNan);
             noNan(nanInds)=0;
+            try
             HP = permute(filtfilt(bb,aa,permute(noNan, [4 1 2 3])), [2 3 4 1]); clear noNan;
             HP(nanInds) = nan;
+            catch
+                error(['A file is likely too short!']);
+            end
 
             %discard pixels with few measurements
             nanOut = sum(~isnan(HP(:,:,1,:)),4)<(size(HP,4)/3);

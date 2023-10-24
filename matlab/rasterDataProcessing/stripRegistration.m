@@ -32,7 +32,6 @@ for f_ix = 1:length(fns)
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
 
     %get acquisition time from metadata
-    keyboard
 
     %downsample to align
     if nargin<1
@@ -46,7 +45,7 @@ for f_ix = 1:length(fns)
     Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
     sz = size(Ad);
     Yhp = squeeze(sum(Y,3));
-    Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
+    %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
     options_rigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'bin_width',initFrames,'max_shift',maxshift,'us_fac',4,'init_batch',initFrames, 'correct_bidir', false);
     F = normcorre(Yhp,options_rigid);
     F = mean(F,3); %fixed image for registration
@@ -68,7 +67,7 @@ for f_ix = 1:length(fns)
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time);
         M = squeeze(sum(M,3)); %merge colors
-        M = M-imgaussfilt(M, 4); %highpass
+        %M = M-imgaussfilt(M, 4); %highpass
 
         if ~mod(DSframe, 1000)
             disp([int2str(DSframe) ' of ' int2str(nDSframes)]);

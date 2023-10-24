@@ -138,7 +138,10 @@ classdef spineAnalysisExpt < handle
             validTrials = find(obj.exptSummary.validTrials);
             sData.traces = nan(1,1,1,1,1); %time, roi, channel, traceType, trial
             sData.noise = nan(1,1,1,1); %roi, trial, channel, traceType
-
+            sData.motionC = nan(1,1); %time, roi, channel, traceType, trial
+            sData.motionR = nan(1,1); %time, roi, channel, traceType, trial
+            sData.alignError = nan(1,1); %time, roi, channel, traceType, trial
+            
             for trialIx = 1:length(validTrials) %TMP
                 fnTrial = obj.exptSummary.fns{validTrials(trialIx)};
                 dmdNumStringIndex = strfind(fnTrial, 'DMD1')+3;
@@ -216,9 +219,9 @@ classdef spineAnalysisExpt < handle
                 %accumulate per-trace data
                 sData.traces(1:size(traces,1),1:length(D),1:obj.numChannels, 1:size(traces,4), trialIx) = traces; %time, roi, channel, traceType, trial
                 sData.noise(1:length(D), 1:obj.numChannels, 1:size(traces,4), trialIx) = noise; %roi, channel, traceType, trial
-                sData.motionC(:,trialIx) =  motionC;
-                sData.motionR(:,trialIx) =  motionR;
-                sData.alignError(:,trialIx) = aError;
+                sData.motionC(1:length(motionC),trialIx) =  motionC;
+                sData.motionR(1:length(motionC),trialIx) =  motionR;
+                sData.alignError(1:length(motionC),trialIx) = aError;
 
             end
             sData.maskData = maskData;

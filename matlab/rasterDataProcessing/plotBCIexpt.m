@@ -140,7 +140,7 @@ for epoch = 1:length(pData)
     isSoma = strcmpi(pData(epoch).names, 'soma');
     outputCh = 2;
     D = pData(epoch).(toPlot); %data to plot
-    D = D(:,:,:,traceType,1:min(end,40)); %use default trace type
+    D = D(:,:,:,traceType,1:min(end,80)); %use default trace type
     tt = (1:size(D,1)) * pData(epoch).frametime; %time vector
     output = D(:,isSoma,outputCh,1,:);
 
@@ -157,13 +157,45 @@ for epoch = 1:length(pData)
     xlabel('time (s)');
     ylabel('dFF');
 
-    selTime = tt>2 & tt<10; %time window for averaging dFF within trial
+    selTime = tt>2 & tt<20; %time window for averaging dFF within trial
     normTime = tt<2;
     trialMeans{epoch} = squeeze(mean(output(selTime,1,1,1,:),1,'omitmissing'));
     controlMeans{epoch} = squeeze(mean(output(normTime,1,1,1,:),1,'omitmissing'));
 end
 linkaxes(hAxAvgOut);
 set(hAxAvgOut, 'xlim', [0 20])
+
+
+%did the somatic activity increase over epochs?
+if length(pData)>1 %if multi-epoch
+    alltrials = cell2mat(trialMeans');
+    edges = cumsum(cellfun(@length, trialMeans));
+    figure, plot(alltrials, 'o-');
+    hold on,
+    for E = 1:length(edges)
+        plot(edges(E)*[1 1], ylim, 'color', [0.5 0.5 0.5], 'linewidth', 2)
+    end
+    xlabel('trial number');
+    ylabel('mean activity');
+
+    figure, 
+    for epoch = 1:length(pData)
+        scatter(epoch*ones(1,length(trialMeans{epoch})), trialMeans{epoch},'MarkerEdgeColor',[0.5 0.5 0.5]);
+        hold on, plot(epoch+[-0.2 0.2], mean(trialMeans{epoch}, 'omitmissing')*[1 1], 'k', 'linewidth', 2);
+
+        if epoch<length(pData)
+        %t-test
+        [p,h] = ranksum(trialMeans{epoch}, trialMeans{epoch+1});
+        disp(['Wilcoxon epoch' int2str(epoch+1) ':']);
+        p
+        end
+    end
+    set(gca, 'xlim', [0 length(pData)+1], 'xtick', 1:length(pData));
+    xlabel('Epoch');
+    ylabel('mean activity')
+
+
+end
 % figure,
 % shadedErrorPlot(tt,mO,eO,pData.colors(outputCh,:))
 

@@ -1,9 +1,11 @@
-function multiRoiRegistration
+function multiRoiRegistration(alignHz)
 maxshift = 80;
 clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.005; %exponential time constant for template
-alignHz = 33; %we will align data at this timescale, Hz
-
+if ~nargin || isempty(alignHz)
+    alignHz = 33; %we will align data at this timescale, Hz
+end
+    
 [fns, dr] = uigetfile('*.dat', 'multiselect', 'on');
 if ~iscell(fns)
     fns = {fns};
