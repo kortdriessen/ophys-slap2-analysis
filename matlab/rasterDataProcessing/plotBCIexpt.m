@@ -9,7 +9,7 @@ function [pData, hF] = plotBCIexpt(sData, pData)
 %figures are the figure handles
 %pData is the data used in the plots
 
-traceType = 2; ;%which trace version to use; 1=raw ROIs, 2=motion subtracted ROIs,...
+traceType = 2;%which trace version to use; 1=raw ROIs, 2=motion subtracted ROIs,...
 
 %sanity check that all sData have same frametime
 assert(all([sData.frametime]==sData(1).frametime));
@@ -28,7 +28,7 @@ if nargin<2 %generate pData
     save([dr filesep fn], 'pData');
 end
 
-%make plots specific for this epoch
+%make plots 
 hF3 = plotTrialAverages(sData, pData);
 hF1 = plotTotalInput(sData,pData);
 hF2 = plotAllTraces(sData, pData);
@@ -45,46 +45,82 @@ for dmdNum = 1:length(sData)
     Tt = sData(dmdNum).traces;
     Nn = sData(dmdNum).noise;
     if dmdNum==1 %first DMD
-        F = Tt;
-        noise = Nn;
-        dmdIxs = ones(1,size(Tt,2));
-        names = sData(dmdNum).maskData.names;
+        pData.F = Tt;
+        pData.noise = Nn;
+        pData.dmdIxs = ones(1,size(Tt,2));
+        pData.names = sData(dmdNum).maskData.names;
     else
-        if size(Tt,1)>size(F,1)
-            F((size(F,1)+1):size(Tt,1),:,:,:,:) = nan;
+        if size(Tt,1)>size(pData.F,1)
+            pData.F((size(pData.F,1)+1):size(Tt,1),:,:,:,:) = nan;
         else
-            Tt((size(Tt,1)+1):size(F,1),:,:,:,:) = nan;
+            Tt((size(Tt,1)+1):size(pData.F,1),:,:,:,:) = nan;
         end
-        F= cat(2,F,Tt);
-        noise = cat(1, noise, Nn);
-        dmdIxs = cat(2, dmdIxs, dmdNum*ones(1,size(Tt,2)));
-        names = cat(2, names,  sData(dmdNum).maskData.names);
+        pData.F= cat(2,pData.F,Tt);
+        pData.noise = cat(1, pData.noise, Nn);
+        pData.dmdIxs = cat(2, pData.dmdIxs, dmdNum*ones(1,size(Tt,2)));
+        pData.names = cat(2, pData.names,  sData(dmdNum).maskData.names);
     end
 end
 
-pData.tau(1) = 0.02/sData(1).frametime;%Glutamate time constant in samples
-pData.tau(2) = 0.05/sData(1).frametime; %Calcium time constant in samples
+fields2D = {'alignError', 'motionC', 'motionR'};
+for fIx = 1:length(fields2D)
+    pData.(fields2D{fIx}) = accumulate2Dfield(sData, fields2D{fIx});
+end
+
+%select frames to censor due to poor alignment
+pData.motionCensor = censorMotion(pData);
+pData.F(pData.motionCensor) = nan;
+
 pData.denoiseWindow = [0.5/sData(1).frametime 0.5/sData(1).frametime];
 pData.hullWindow = [0.8/sData(1).frametime 0.8/sData(1).frametime];
 
 disp('Computing F0...')
-F0 = nan(size(F));
+pData.F0 = nan(size(pData.F));
 for Ch = 1:2
-    F0(:,:,Ch,:,:) = computeF0(F(:,:,Ch,:,:), pData.denoiseWindow(Ch), pData.hullWindow(Ch)); %allow F0 fitting to differ for different channels
+    pData.F0(:,:,Ch,:,:) = computeF0(pData.F(:,:,Ch,:,:), pData.denoiseWindow(Ch), pData.hullWindow(Ch)); %allow F0 fitting to differ for different channels
 end
-dF = F-F0;
-dFF = (F-F0)./max(0,F0);
+pData.dF = pData.F-pData.F0;
+pData.dFF = (pData.F-pData.F0)./max(0,pData.F0);
 
-pData.F=F;
-pData.dF=dF;
-pData.dFF = dFF;
-pData.F0 = F0;
-pData.noise=noise;
-pData.dmdIxs= dmdIxs;
-pData.names = names;
+pData.tau(1) = 0.02/sData(1).frametime;%Glutamate time constant in samples
+pData.tau(2) = 0.05/sData(1).frametime; %Calcium time constant in samples
 end
 
+function A = accumulate2Dfield(sData, fieldname)
+for dmdNum = 1:length(sData)
+    Tt = sData(dmdNum).(fieldname);
+    if dmdNum==1 %first DMD
+        A = Tt;
+    else
+        if size(Tt,1)>size(A,1)
+            A((size(A,1)+1):size(Tt,1),:,:,:,:) = nan;
+        else
+            Tt((size(Tt,1)+1):size(A,1),:,:,:,:) = nan;
+        end
+        A= cat(3,A,Tt);
+    end
+end
+end
 
+function censoredFrames = censorMotion(pData)
+    %frames with sharp motion derivatives
+    dM= sqrt(mean(cat(4, abs(pData.motionC([2:end end],:,:) -  pData.motionC), abs(pData.motionC([1 1:end-1],:,:) - pData.motionC), ...
+        abs(pData.motionR([2:end end],:,:) -  pData.motionR), abs(pData.motionR([1 1:end-1],:,:) - pData.motionR)).^2,4, 'omitnan'));
+    thresh = 0.05; %in pixels RMS
+
+    %frames with bad alignment errors
+    m = median(pData.alignError,1, 'omitmissing');
+    e = max(0.02, 2*std(pData.alignError,0,1, 'omitmissing')); % error threshold, in normalized error of dftRegistration
+    
+    censoredFrames = dM>thresh & pData.alignError>(m+e);
+    
+    %always censor frames in the wrong Z-plane
+    if isfield(pData, 'motionZ')
+        censoredFrames = censoredFrames | pData.motionZ>1; %in microns
+    end
+
+    censoredFrames = cat(2, repmat(permute(censoredFrames(:,:,1), [1 3 4 5 2]), [1 sum(pData.dmdIxs==1)]), repmat(permute(censoredFrames(:,:,2), [1 3 4 5 2]), [1 sum(pData.dmdIxs==2)]));
+end
 
 function hF = plotAllTraces(sData, pData)
 
@@ -116,7 +152,7 @@ if any(isSoma)
     set(hAxSoma, 'xtick', [])
     ylabel('Z-score')
 end
-hAxSpines = subplot(10,1,2:10);
+hAxSpines = subplot(10,1,2:9);
 if any(~isSoma)
     tmp = Dnorm(:,~isSoma, spineCh,1,:);
     tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
@@ -127,8 +163,31 @@ if any(~isSoma)
     set(hAxSpines, 'ytick', [])
     xlabel('time (s)'); ylabel('Z-score')
 end
-set([hAxSoma hAxSpines], 'box', 'off')
-linkaxes([hAxSoma hAxSpines], 'x');
+
+%Plot motion
+tmp = cat(3, pData.motionC, pData.motionR);
+tmp = reshape(tmp, [],size(tmp,3));
+tmp(~keepFrames,:) = [];
+tmp = tmp-mean(tmp,1, 'omitnan');
+nans = any(isnan(tmp),2);
+tmp(nans,:) = 0;
+[UU,SS,~] = svds(tmp, 2); %PCA motion down to top 2 dimensions
+motPCs = (UU.*diag(SS)')/sqrt(2);
+motPCs(nans,:) = nan;
+
+hAxMotion = subplot(10,1,10);
+plot(T, motPCs(:,1), 'color', 'b');
+hold on,
+plot(T, motPCs(:,2), 'color', 'r');
+xlabel('time (s)'); ylabel('Brain Movement')
+
+set([hAxSoma hAxSpines hAxMotion], 'box', 'off')
+linkaxes([hAxSoma hAxSpines hAxMotion], 'x');
+end
+
+function hF = plotCrossCorrelations(sData,pData)
+
+
 end
 
 function hF = plotTrialAverages(sData, pData)
@@ -143,7 +202,6 @@ for epoch = 1:length(pData)
     D = D(:,:,:,traceType,1:min(end,80)); %use default trace type
     tt = (1:size(D,1)) * pData(epoch).frametime; %time vector
     output = D(:,isSoma,outputCh,1,:);
-
 
     %mean and standard error of output signal over trials
     mO = mean(output,5, 'omitnan');
@@ -185,7 +243,7 @@ if length(pData)>1 %if multi-epoch
 
         if epoch<length(pData)
         %t-test
-        [p,h] = ranksum(trialMeans{epoch}, trialMeans{epoch+1});
+        [p,h] = ranksum(trialMeans{epoch}, trialMeans{epoch+1},'tail','right');
         disp(['Wilcoxon epoch' int2str(epoch+1) ':']);
         p
         end
@@ -193,8 +251,6 @@ if length(pData)>1 %if multi-epoch
     set(gca, 'xlim', [0 length(pData)+1], 'xtick', 1:length(pData));
     xlabel('Epoch');
     ylabel('mean activity')
-
-
 end
 % figure,
 % shadedErrorPlot(tt,mO,eO,pData.colors(outputCh,:))
@@ -224,6 +280,9 @@ T = sData(1).frametime*(1:size(tmp,2));
 plot(T, tmp, 'color', pData.colors(somaCh,:));
 set(hAxSoma, 'xtick', [])
 ylabel('Z-score')
+
+
+hF = figure;
 
 end
 
@@ -260,14 +319,16 @@ output = sum(tmpOut, 2, 'omitnan');%in case there are multiple soma ROIs, sum th
 % end
 
 tmpIn= D(:,~isSoma,inputCh,:,:);
-tmpIn = tmpIn - mean(tmpIn, [1], 'omitnan');
+tmpIn = tmpIn - mean(tmpIn, 1, 'omitnan');
 input = sum(tmpIn, 2, 'omitnan'); % omitting nans assumed mean dF=0 where not measured
 
 figure,
-hAx(1) = subplot(2,1,1)
+hAx(1) = subplot(2,1,1);
 plot(output(:), 'color', pData.colors(outputCh,:));
-hAx(2)= subplot(2,1,2)
+xlabel('Output; trials concatenated');
+hAx(2)= subplot(2,1,2);
 plot(input(:), 'color', pData.colors(inputCh,:));
+xlabel('Sum Input; trials concatenated');
 linkaxes(hAx, 'x')
 
 %%%
@@ -302,6 +363,7 @@ end
 
 function [r, rshuff, lags] = xcorr_vs_shuffle(d1,d2, window)
 %computes cross-correlation of d1 and d2 across trials and compares to a
+%null of shuffling with all non-synchronous trials
 rii = nan(2*window+1,size(d1,2));
 rij = nan(2*window+1,size(d1,2), size(d2,2));
 for ix1  = 1:size(d1,2)
