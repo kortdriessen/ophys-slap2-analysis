@@ -91,7 +91,7 @@ for DMDix = nDMDs:-1:1
     %identify outliers in alignment quality
     cc = corrCoeff(:, DMDix);
     
-    if nargin<1 && forceCorrThresh>0
+    if nargin>1 && forceCorrThresh>0
         corrThresh(DMDix) = forceCorrThresh;
     else
         corrThresh(DMDix) = min(min(0.99,median(cc)), mean(cc(cc>median(cc)) - 4*std(cc(cc>median(cc)))));       

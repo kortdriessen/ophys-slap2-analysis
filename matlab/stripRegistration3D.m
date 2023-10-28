@@ -83,7 +83,7 @@ for f_ix = 1:length(fns)
             zRange = 3:size(refStackHP,3)-2;
 
             T3d = refStackHP;
-            keep = false(2*size(T3d,1)-1, 2*size(T3d,2)-1);
+            keep = false(size(M) + size(T3d, [1 2]) -1);%false(2*size(T3d,1)-1, 2*size(T3d,2)-1);
             keep(ceil(end/2)+ [-maxInitOffset:maxInitOffset], ceil(end/2)+ [-maxInitOffset:maxInitOffset]) = true;
         else
             zRange = max(1,round(motionDSz(DSframe-1))-zClipShift):min(size(refStack,3),round(motionDSz(DSframe-1))+zClipShift);
