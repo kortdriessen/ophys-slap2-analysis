@@ -1,10 +1,11 @@
-function [motion, R] = xcorr2_nans(moving, fixed, shiftsCenter, dShift)
+function [motion, R] = xcorr2_nans(frame, template, shiftsCenter, dShift)
 %Kaspar Podgorski 2023
 %perform a somewhat-efficient local normalized crosscorrelation for images with
 %nans
 
-%moving: moving image
-%fixed: fixed image
+%template: the template
+%frame: the frame to be aligned; this has more NaNs
+
 %shiftsCenter: the center offset around which to perform a local search
 %dShift: the maximum shift (scalar, in pixels) to consider on each axis around shiftsCenter
 
@@ -12,12 +13,17 @@ dShift = round(dShift(1)); %sanity check
 
 SE = strel(ones(2*dShift+1)); %we will erode with this structuring element to select the set of pixels that are always non-nan within the search space
 
-fValid = imerode(~isnan(fixed) & circshift(~isnan(moving), -shiftsCenter), SE); %valid pixels of the fixed image
+fValid = ~isnan(frame) & circshift(~imdilate(isnan(template),SE), shiftsCenter); %valid pixels of the new frame
 fValid(1:dShift,:) = false; fValid(end-dShift+1:end,:) = false; %remove edges
 fValid(:,1:dShift) = false; fValid(:,end-dShift+1:end) = false; %remove edges
-mValid = circshift(fValid, shiftsCenter); %valid pixels of the moving image
 
-F = fixed(fValid); %fixed data;
+tValid = circshift(fValid, -shiftsCenter);
+
+%fValid = imerode(~isnan(template) & circshift(~isnan(frame), -shiftsCenter), SE); %valid pixels of the fixed image
+
+%mValid = circshift(fValid, shiftsCenter); %valid pixels of the moving image
+
+F = frame(fValid); %fixed data;
 ssF = sqrt(sum(F.^2));
 
 %correlation is sum(A.*B)./(sqrt(ssA)*sqrt(ssB)); ssB is constant though
@@ -25,9 +31,9 @@ shifts =  -dShift:dShift;
 C = nan(length(shifts), length(shifts));
 for drix = 1:length(shifts)
     for dcix = 1:length(shifts)
-        M = moving(circshift(mValid, [shifts(drix) shifts(dcix)]));
-        ssM = sum(M.^2);
-        C(drix,dcix) = sum(F .* M)./sqrt(ssM);
+        T = template(circshift(tValid, -[shifts(drix) shifts(dcix)]));
+        ssT = sum(T.^2);
+        C(drix,dcix) = sum(F .* T)./sqrt(ssT);
     end
 end
 
