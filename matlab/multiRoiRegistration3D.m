@@ -3,7 +3,7 @@ maxShift = 50;
 zClipShift = 3;
 
 if ~nargin || isempty(alignHz)
-    alignHz = 33; %we will align data at this timescale, Hz
+    alignHz = 50; %we will align data at this timescale, Hz
 end
 
 [refFn, refDr] = uigetfile('*REFERENCE*.tif', 'Select a Reference Image');
@@ -15,10 +15,17 @@ elseif contains(refFn, '_CH2')
 else
     error('Nonstandard reference image name!')
 end
+if contains(refFn, '_DMD1')
+    dmdString = '_DMD1';
+elseif contains(refFn, '_DMD2')
+    dmdString = '_DMD2';
+else
+    error('Nonstandard reference image name!')
+end
 
 ref= permute(A.data, [2 1 3]);
 
-[fns, dr] = uigetfile('*.dat', 'multiselect', 'on');
+[fns, dr] = uigetfile([refDr filesep '*' dmdString '*.dat'], 'multiselect', 'on');
 if ~iscell(fns)
     fns = {fns};
 end
@@ -61,11 +68,14 @@ for f_ix = 1:length(fns)
 
     disp('Registering:');
     for DSframe = 1:nDSframes
+        if ~mod(DSframe, 100)
+            disp([int2str(DSframe) ' of ' int2str(nDSframes)]);
+        end
         if DSframe == 1
             zRange = max(1, ceil(size(ref,3)/2)-4):(min(size(ref,3), ceil(size(ref,3)/2)+4));
             initR = 0; initC = 0; clipShift = 30;
         else
-            clipShift = max(5, 30-5*Dsframe);
+            clipShift = max(5, 30-5*DSframe);
             zRange = max(1,round(motionDSz(DSframe-1))-zClipShift):min(size(ref,3),round(motionDSz(DSframe-1))+zClipShift);
             initR = max(-maxShift, min(maxShift, round(motionDSr(DSframe-1))));
             initC = max(-maxShift, min(maxShift, round(motionDSc(DSframe-1))));
@@ -81,10 +91,6 @@ for f_ix = 1:length(fns)
         
         bestC = -1; corrCoeff = nan(1,max(zRange)); 
         for z = zRange
-            if ~mod(DSframe, 1000)
-                disp([int2str(DSframe) ' of ' int2str(nDSframes)]);
-            end
-
             T = ref(trimRows-initR,trimCols-initC,z);
 
             [motOutput, corrCoeff(z)] = xcorr2_nans(M, T, [0 ; 0], clipShift);
@@ -113,6 +119,9 @@ for f_ix = 1:length(fns)
         end
     end
     fTIF.close;
+    
+    disp('Getting online motion correction offsets')
+    [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, (1:nDSframes)*dt);
 
     %save alignment metadata
     aData.numChannels = numChannels;
