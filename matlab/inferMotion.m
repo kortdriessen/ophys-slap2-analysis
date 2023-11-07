@@ -11,8 +11,13 @@ end
 % load reference stack
 if numel(varargin) < 2 || isempty(varargin{2})
     [fns, dr] = uigetfile('*.tif', 'Select Reference Stack', 'multiselect', 'on');
-    refStack = tiffreadVolume([dr fns]);
-    
+    try
+        ReferenceStack_ = slap2.util.ReferenceStack.loadTif([dr fns]);
+        refStack = permute(ReferenceStack_.data,[2 1 3]);
+    catch
+        refStack = tiffreadVolume([dr fns]);
+    end
+
     if strcmpi(fns(end-6:end-5),'CH')
         channel = str2num(fns(end-4));
     else
@@ -31,7 +36,8 @@ end
 
 % read in downsampling factor (default to 7x temporal ds)
 if numel(varargin) < 3
-    ds = 7;
+    % ds = 7;
+    ds = 3;
 else
     ds = varargin{3};
 end
@@ -63,6 +69,12 @@ numFastZs = length(hLowLevelDataFile.fastZs);
 %% get list of superpixels and extract data
 
 allSuperPixelIDs = [];
+
+fastZ2RefZ = zeros(numFastZs,1);
+for z = 1:numFastZs
+    [~, ind] = min(abs(ReferenceStack_.zs - hLowLevelDataFile.fastZs(z)));
+    fastZ2RefZ(z) = ind;
+end
 
 for lineSweepIdx = 1:numLinesPerCycle
     superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineSweepIdx};
@@ -132,13 +144,12 @@ end
 xPre = 25; xPost = 25;
 yPre = 25; yPost = 25;
 
-zPre = 0;
-zPost = 0;
-blCropZ = bl(:,:,1+zPre:end-zPost);
+zPre = 10;
+zPost = 10;
 
 xMotRange = xPre + xPost + 1;
 yMotRange = yPre + yPost + 1;
-zMotRange = size(blCropZ,3) - numFastZs + 1;
+zMotRange = zPre + zPost + 1;
 
 % query user to select a existing lookup table
 [lookupFile, lookupDir] = uigetfile('*.mat', 'Select Lookup Table');
@@ -146,7 +157,7 @@ zMotRange = size(blCropZ,3) - numFastZs + 1;
 % make lookup table if it doesn't exist
 if sum(lookupFile == 0)
 
-    likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs,-yPre:yPost,-xPre:xPost,1:zMotRange);
+    likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
     
     if exist('fname')
         save([fname(1:end-5) '_LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
@@ -160,7 +171,7 @@ else % load user selected lookup table
 end
 
 %%  Calculate log likelihoods and infer motion from MAP
-log_means = log(likelihood_means);
+log_means = log(likelihood_means + 1e-8);
 
 % how much change is allowed in each dimension at each step
 searchRadius = 4;
@@ -223,6 +234,7 @@ frames = 1:totalCycles;
 dsFrames = frames(1:2^ds:(2^ds*numCycles));
 
 motion = interp1(dsFrames,dsMotion,frames);
+motion = motion - [yPre+1 xPre+1 zPre+1];
 
 brightness = interp1(dsFrames,dsBrightness,frames,'linear','extrap');
 
@@ -254,7 +266,7 @@ saveas(gcf,[filepath '\inferredMotion.fig']);
 
 %% Save out data
 
-inferMotionOut.motion = motion - [yPre+1 xPre+1 0];
+inferMotionOut.motion = motion;
 inferMotionOut.brightness = brightness';
 inferMotionOut.dataMatrix = dataMatrix;
 inferMotionOut.expectedMatrix = expectedMatrix;
