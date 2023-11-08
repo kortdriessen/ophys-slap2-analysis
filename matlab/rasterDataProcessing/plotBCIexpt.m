@@ -15,7 +15,7 @@ traceType = 2;%which trace version to use; 1=raw ROIs, 2=motion subtracted ROIs,
 assert(all([sData.frametime]==sData(1).frametime));
 
 if nargin<2 %generate pData
-    [fn, dr] = uiputfile('plottingData.mat');
+    % [fn, dr] = uiputfile('plottingData.mat');
     %merge data from the two DMDs and compute F0
     for epoch = 1:size(sData, 1)
         pData(epoch) = mergeDMDs(sData(epoch,:));
@@ -25,10 +25,10 @@ if nargin<2 %generate pData
         pData(epoch).frametime = sData(epoch,1).frametime; %
         pData(epoch).traceType(:) = traceType;  %default trace Type for plotting
     end
-    save([dr filesep fn], 'pData');
+    % save([dr filesep fn], 'pData');
 end
 
-%make plots 
+%make plots
 hF3 = plotTrialAverages(sData, pData);
 hF1 = plotTotalInput(sData,pData);
 hF2 = plotAllTraces(sData, pData);
@@ -103,91 +103,91 @@ end
 end
 
 function censoredFrames = censorMotion(pData)
-    %frames with sharp motion derivatives
-    dM= sqrt(mean(cat(4, abs(pData.motionC([2:end end],:,:) -  pData.motionC), abs(pData.motionC([1 1:end-1],:,:) - pData.motionC), ...
-        abs(pData.motionR([2:end end],:,:) -  pData.motionR), abs(pData.motionR([1 1:end-1],:,:) - pData.motionR)).^2,4, 'omitnan'));
-    thresh = 0.05; %in pixels RMS
+%frames with sharp motion derivatives
+dM= sqrt(mean(cat(4, abs(pData.motionC([2:end end],:,:) -  pData.motionC), abs(pData.motionC([1 1:end-1],:,:) - pData.motionC), ...
+    abs(pData.motionR([2:end end],:,:) -  pData.motionR), abs(pData.motionR([1 1:end-1],:,:) - pData.motionR)).^2,4, 'omitnan'));
+thresh = 0.05; %in pixels RMS
 
-    %frames with bad alignment errors
-    m = median(pData.alignError,1, 'omitmissing');
-    e = max(0.02, 2*std(pData.alignError,0,1, 'omitmissing')); % error threshold, in normalized error of dftRegistration
-    
-    censoredFrames = dM>thresh & pData.alignError>(m+e);
-    
-    %always censor frames in the wrong Z-plane
-    if isfield(pData, 'motionZ')
-        censoredFrames = censoredFrames | pData.motionZ>1; %in microns
-    end
+%frames with bad alignment errors
+m = median(pData.alignError,1, 'omitmissing');
+e = max(0.02, 2*std(pData.alignError,0,1, 'omitmissing')); % error threshold, in normalized error of dftRegistration
 
+censoredFrames = dM>thresh & pData.alignError>(m+e);
+
+%always censor frames in the wrong Z-plane
+if isfield(pData, 'motionZ')
+    censoredFrames = censoredFrames | pData.motionZ>1; %in microns
+end
+if size(censoredFrames,3)>1
     censoredFrames = cat(2, repmat(permute(censoredFrames(:,:,1), [1 3 4 5 2]), [1 sum(pData.dmdIxs==1)]), repmat(permute(censoredFrames(:,:,2), [1 3 4 5 2]), [1 sum(pData.dmdIxs==2)]));
+else
+    censoredFrames = repmat(permute(censoredFrames(:,:,1), [1 3 4 5 2]), [1 size(pData.F,2)]);
+end
 end
 
 function hF = plotAllTraces(sData, pData)
 
 %Figure with 2 subplots: 1 for soma, 1 for all synapses
 toPlot = 'dF';
-D = pData.(toPlot); %data to plot
-D = D(:,:,:,pData.traceType,:);
-Dnorm = D./shiftdim(sqrt(pData.noise(:,:,pData.traceType,:)), -1); %normalized to noise estimate
+for epoch = 1:length(pData)
+    D = pData(epoch).(toPlot); %data to plot
+    D = D(:,:,:,pData(epoch).traceType,:);
+    Dnorm = D./shiftdim(sqrt(pData(epoch).noise(:,:,pData(epoch).traceType,:)), -1); %normalized to noise estimate
 
-%get trial lengths
-keepFrames = true(1, size(D,1)*size(D,5));
-for trialIx = size(D,5):-1:1
-    trialLength(trialIx) = find(~all(isnan(Dnorm(:,:,1,1,trialIx)),2), 1, 'last');
-    keepFrames(((trialIx-1)*size(D,1)+trialLength(trialIx)+1):(trialIx*size(D,1))) = false;
+    %get trial lengths
+    keepFrames = true(1, size(D,1)*size(D,5));
+    for trialIx = size(D,5):-1:1
+        trialLength(trialIx) = find(~all(isnan(Dnorm(:,:,1,1,trialIx)),2), 1, 'last');
+        keepFrames(((trialIx-1)*size(D,1)+trialLength(trialIx)+1):(trialIx*size(D,1))) = false;
+    end
+
+    hF = figure('name', 'all trials');
+    isSoma = strcmpi(pData(epoch).names, 'soma');
+    somaCh = 2; spineCh = 1;
+    hAxSoma = [];
+    if any(isSoma)
+        hAxSoma = subplot(10,1,1);
+        tmp = Dnorm(:,isSoma, somaCh,1,:);
+        tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
+        tmp = tmp + 10*(0:(size(tmp,1)-1)); %offset for plotting
+        tmp(:, ~keepFrames) = []; %remove ends of trials
+        T = sData(1).frametime*(1:size(tmp,2));
+        plot(T, tmp, 'color', pData(epoch).colors(somaCh,:));
+        set(hAxSoma, 'xtick', [])
+        ylabel('Z-score')
+    end
+    hAxSpines = subplot(10,1,2:9);
+    if any(~isSoma)
+        tmp = Dnorm(:,~isSoma, spineCh,1,:);
+        tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
+        tmp = tmp + 10*(0:(size(tmp,1)-1))'; %offset for plotting
+        tmp(:, ~keepFrames) = []; %remove ends of trials
+        T = sData(1).frametime*(1:size(tmp,2));
+        plot(T, tmp, 'color', pData(epoch).colors(spineCh,:));
+        set(hAxSpines, 'ytick', [])
+        xlabel('time (s)'); ylabel('Z-score')
+    end
+
+    %Plot motion
+    tmp = cat(3, pData(epoch).motionC, pData(epoch).motionR);
+    tmp = reshape(tmp, [],size(tmp,3));
+    tmp(~keepFrames,:) = [];
+    tmp = tmp-mean(tmp,1, 'omitnan');
+    nans = any(isnan(tmp),2);
+    tmp(nans,:) = 0;
+    [UU,SS,~] = svds(tmp, 2); %PCA motion down to top 2 dimensions
+    motPCs = (UU.*diag(SS)')/sqrt(2);
+    motPCs(nans,:) = nan;
+
+    hAxMotion = subplot(10,1,10);
+    plot(T, motPCs(:,1), 'color', 'b');
+    hold on,
+    plot(T, motPCs(:,2), 'color', 'r');
+    xlabel('time (s)'); ylabel('Brain Movement')
+
+    set([hAxSoma hAxSpines hAxMotion], 'box', 'off')
+    linkaxes([hAxSoma hAxSpines hAxMotion], 'x');
 end
-
-hF = figure('name', 'all trials');
-isSoma = strcmpi(pData.names, 'soma');
-somaCh = 2; spineCh = 1;
-hAxSoma = [];
-if any(isSoma)
-    hAxSoma = subplot(10,1,1);
-    tmp = Dnorm(:,isSoma, somaCh,1,:);
-    tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
-    tmp = tmp + 10*(0:(size(tmp,1)-1)); %offset for plotting
-    tmp(:, ~keepFrames) = []; %remove ends of trials
-    T = sData(1).frametime*(1:size(tmp,2));
-    plot(T, tmp, 'color', pData.colors(somaCh,:));
-    set(hAxSoma, 'xtick', [])
-    ylabel('Z-score')
-end
-hAxSpines = subplot(10,1,2:9);
-if any(~isSoma)
-    tmp = Dnorm(:,~isSoma, spineCh,1,:);
-    tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
-    tmp = tmp + 10*(0:(size(tmp,1)-1))'; %offset for plotting
-    tmp(:, ~keepFrames) = []; %remove ends of trials
-    T = sData(1).frametime*(1:size(tmp,2));
-    plot(T, tmp, 'color', pData.colors(spineCh,:));
-    set(hAxSpines, 'ytick', [])
-    xlabel('time (s)'); ylabel('Z-score')
-end
-
-%Plot motion
-tmp = cat(3, pData.motionC, pData.motionR);
-tmp = reshape(tmp, [],size(tmp,3));
-tmp(~keepFrames,:) = [];
-tmp = tmp-mean(tmp,1, 'omitnan');
-nans = any(isnan(tmp),2);
-tmp(nans,:) = 0;
-[UU,SS,~] = svds(tmp, 2); %PCA motion down to top 2 dimensions
-motPCs = (UU.*diag(SS)')/sqrt(2);
-motPCs(nans,:) = nan;
-
-hAxMotion = subplot(10,1,10);
-plot(T, motPCs(:,1), 'color', 'b');
-hold on,
-plot(T, motPCs(:,2), 'color', 'r');
-xlabel('time (s)'); ylabel('Brain Movement')
-
-set([hAxSoma hAxSpines hAxMotion], 'box', 'off')
-linkaxes([hAxSoma hAxSpines hAxMotion], 'x');
-end
-
-function hF = plotCrossCorrelations(sData,pData)
-
-
 end
 
 function hF = plotTrialAverages(sData, pData)
@@ -236,16 +236,16 @@ if length(pData)>1 %if multi-epoch
     xlabel('trial number');
     ylabel('mean activity');
 
-    figure, 
+    figure,
     for epoch = 1:length(pData)
         scatter(epoch*ones(1,length(trialMeans{epoch})), trialMeans{epoch},'MarkerEdgeColor',[0.5 0.5 0.5]);
         hold on, plot(epoch+[-0.2 0.2], mean(trialMeans{epoch}, 'omitmissing')*[1 1], 'k', 'linewidth', 2);
 
         if epoch<length(pData)
-        %t-test
-        [p,h] = ranksum(trialMeans{epoch}, trialMeans{epoch+1},'tail','right');
-        disp(['Wilcoxon epoch' int2str(epoch+1) ':']);
-        p
+            %t-test
+            [p,h] = ranksum(trialMeans{epoch}, trialMeans{epoch+1},'tail','left');
+            disp(['Wilcoxon epoch' int2str(epoch+1) ':']);
+            p
         end
     end
     set(gca, 'xlim', [0 length(pData)+1], 'xtick', 1:length(pData));
@@ -290,75 +290,76 @@ function hF = plotTotalInput(sData, pData)
 %make a plot with the soma activity and the sum glutamate signal (in
 %photons). Compute crosscorrelations between input and output
 toPlot = 'dF';
-D = pData.(toPlot); %data to plot
-D = D(:,:,:,pData.traceType,:); %use default trace type
+for epoch = 1:length(pData)
+    D = pData(epoch).(toPlot); %data to plot
+    D = D(:,:,:,pData(epoch).traceType,:); %use default trace type
 
-%get trial lengths
-keepFrames = true(1, size(D,1)*size(D,5));
-for trialIx = size(D,5):-1:1
-    trialLength(trialIx) = find(~all(isnan(D(:,:,1,1,trialIx)),2), 1, 'last');
-    keepFrames(((trialIx-1)*size(D,1)+trialLength(trialIx)+1):(trialIx*size(D,1))) = false;
+    %get trial lengths
+    keepFrames = true(1, size(D,1)*size(D,5));
+    for trialIx = size(D,5):-1:1
+        trialLength(trialIx) = find(~all(isnan(D(:,:,1,1,trialIx)),2), 1, 'last');
+        keepFrames(((trialIx-1)*size(D,1)+trialLength(trialIx)+1):(trialIx*size(D,1))) = false;
+    end
+
+    %sum the fluorescence signal
+    isSoma = strcmpi(pData(epoch).names, 'soma');
+
+    outputCh = 2;
+    inputCh = 1;
+
+    tmpOut = D(:,isSoma,outputCh,:,:);
+    %tmpOut = tmpOut - mean(tmpOut, [1 5], 'omitnan');
+    output = sum(tmpOut, 2, 'omitnan');%in case there are multiple soma ROIs, sum them
+
+    % %deconvolve output using OASIS
+    % for trialIx = 1:size(output,5)
+    %     df= output(:,:,:,:,trialIx);
+    %     [c, s, options] = deconvolveCa(df, 'foopsi','type', 'ar1','pars', exp(-1/20), 'optimize_pars', false, 'optimize_b', false);
+    %     %figure, plot(df); hold on, plot(c); hold on, plot(s)
+    %     out_deconv(:,1,1,1,trialIx) = s;
+    % end
+
+    tmpIn= D(:,~isSoma,inputCh,:,:);
+    tmpIn = tmpIn - mean(tmpIn, 1, 'omitnan');
+    input = sum(tmpIn, 2, 'omitnan'); % omitting nans assumed mean dF=0 where not measured
+
+    figure,
+    hAx(1) = subplot(2,1,1);
+    plot(output(:), 'color', pData(epoch).colors(outputCh,:));
+    xlabel('Output; trials concatenated');
+    hAx(2)= subplot(2,1,2);
+    plot(input(:), 'color', pData(epoch).colors(inputCh,:));
+    xlabel('Sum Input; trials concatenated');
+    linkaxes(hAx, 'x')
+
+    %%%
+    [r_io, r_io_shuff, lags] = xcorr_vs_shuffle(squeeze(input), squeeze(output), 5/sData(1).frametime);
+    hF(1) = figure;
+    plot(lags*pData(epoch).frametime, r_io, 'color', 'b', 'linewidth', 2);
+    hold on, plot(lags*pData(epoch).frametime,  r_io_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
+    hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
+    xlabel('lag (s)');
+    ylabel('Xcorrelation input vs output')
+    legend({'', 'trial shuffle'})
+
+    [r_ii, r_ii_shuff, lags] = xcorr_vs_shuffle(squeeze(input), squeeze(input), 5/sData(1).frametime);
+    hF(2) = figure;
+    plot(lags*pData(epoch).frametime, r_ii, 'color', pData(epoch).colors(inputCh,:),'linewidth', 2);
+    hold on, plot(lags*pData(epoch).frametime,  r_ii_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
+    hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
+    xlabel('lag (s)');
+    ylabel('Input Autocorrelation')
+    legend({'', 'trial shuffle'})
+
+    [r_oo, r_oo_shuff, lags] = xcorr_vs_shuffle(squeeze(output), squeeze(output), 5/sData(1).frametime);
+    hF(3) = figure;
+    plot(lags*pData(epoch).frametime, r_oo, 'color',  pData(epoch).colors(outputCh,:), 'linewidth', 2);
+    hold on, plot(lags*pData(epoch).frametime,  r_oo_shuff,'color', [0.5 0.5 0.5], 'linewidth', 2);
+    hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
+    xlabel('lag (s)');
+    ylabel('Output Autocorrelation')
+    legend({'', 'trial shuffle'})
 end
-
-%sum the fluorescence signal
-isSoma = strcmpi(pData.names, 'soma');
-
-outputCh = 2;
-inputCh = 1;
-
-tmpOut = D(:,isSoma,outputCh,:,:);
-%tmpOut = tmpOut - mean(tmpOut, [1 5], 'omitnan');
-output = sum(tmpOut, 2, 'omitnan');%in case there are multiple soma ROIs, sum them
-
-% %deconvolve output using OASIS
-% for trialIx = 1:size(output,5)
-%     df= output(:,:,:,:,trialIx);
-%     [c, s, options] = deconvolveCa(df, 'foopsi','type', 'ar1','pars', exp(-1/20), 'optimize_pars', false, 'optimize_b', false);
-%     %figure, plot(df); hold on, plot(c); hold on, plot(s)
-%     out_deconv(:,1,1,1,trialIx) = s;
-% end
-
-tmpIn= D(:,~isSoma,inputCh,:,:);
-tmpIn = tmpIn - mean(tmpIn, 1, 'omitnan');
-input = sum(tmpIn, 2, 'omitnan'); % omitting nans assumed mean dF=0 where not measured
-
-figure,
-hAx(1) = subplot(2,1,1);
-plot(output(:), 'color', pData.colors(outputCh,:));
-xlabel('Output; trials concatenated');
-hAx(2)= subplot(2,1,2);
-plot(input(:), 'color', pData.colors(inputCh,:));
-xlabel('Sum Input; trials concatenated');
-linkaxes(hAx, 'x')
-
-%%%
-[r_io, r_io_shuff, lags] = xcorr_vs_shuffle(squeeze(input), squeeze(output), 5/sData(1).frametime);
-hF(1) = figure;
-plot(lags*pData.frametime, r_io, 'color', 'b', 'linewidth', 2);
-hold on, plot(lags*pData.frametime,  r_io_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
-hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
-xlabel('lag (s)');
-ylabel('Xcorrelation input vs output')
-legend({'', 'trial shuffle'})
-
-[r_ii, r_ii_shuff, lags] = xcorr_vs_shuffle(squeeze(input), squeeze(input), 5/sData(1).frametime);
-hF(2) = figure;
-plot(lags*pData.frametime, r_ii, 'color', pData.colors(inputCh,:),'linewidth', 2);
-hold on, plot(lags*pData.frametime,  r_ii_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
-hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
-xlabel('lag (s)');
-ylabel('Input Autocorrelation')
-legend({'', 'trial shuffle'})
-
-[r_oo, r_oo_shuff, lags] = xcorr_vs_shuffle(squeeze(output), squeeze(output), 5/sData(1).frametime);
-hF(3) = figure;
-plot(lags*pData.frametime, r_oo, 'color',  pData.colors(outputCh,:), 'linewidth', 2);
-hold on, plot(lags*pData.frametime,  r_oo_shuff,'color', [0.5 0.5 0.5], 'linewidth', 2);
-hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
-xlabel('lag (s)');
-ylabel('Output Autocorrelation')
-legend({'', 'trial shuffle'})
-
 end
 
 function [r, rshuff, lags] = xcorr_vs_shuffle(d1,d2, window)

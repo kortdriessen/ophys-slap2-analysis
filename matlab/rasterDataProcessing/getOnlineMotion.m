@@ -8,9 +8,9 @@ if nargin<2
     lineIds = 1:linesPerCycle:totalNumLines;
 end
 
-xOffset_pix = nan(totalNumLines,1);
-yOffset_pix = nan(totalNumLines,1);
-zOffset_um = nan(totalNumLines,1);
+xOffset_pix = nan(length(lineIds),1);
+yOffset_pix = nan(length(lineIds),1);
+zOffset_um = nan(length(lineIds),1);
 
 
 cycleIdxs = ceil(lineIds/linesPerCycle);

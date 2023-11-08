@@ -44,8 +44,17 @@ for f_ix = 1:length(fns)
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
     sz = size(Ad);
 
-    %tiffStack object to read data from disk memory mapped
+    %read off online motion correction data, if any
 
+    desc = A.descriptions;
+    for frame = floor(length(desc)/numChannels):-1:1
+        S = jsondecode(desc{frame*numChannels});
+        onlineXshift(frame) =S.motionCorrectionX_pix;
+        onlineYshift(frame) =S.motionCorrectionY_pix;
+        onlineZshift(frame) = S.motionCorrectionZ_um;
+    end
+    %tiffStack object to read data from disk memory mapped
+    
     %disp('Reading TIFF headers...')
     %TIFFStack([dr filesep fn], [], [numChannels]);
     %downsample to align
@@ -182,6 +191,9 @@ for f_ix = 1:length(fns)
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.motionDSz = motionDSz;
+    aData.onlineXshift = onlineXshift;
+    aData.onlineYshift = onlineYshift;
+    aData.onlineZshift = onlineZshift;
     %     aData.aError = aError;
     aData.aCorr = aCorr;
     save([dr filesep fn(1:end-4) '_3DALIGNMENTDATA.mat'], 'aData');
