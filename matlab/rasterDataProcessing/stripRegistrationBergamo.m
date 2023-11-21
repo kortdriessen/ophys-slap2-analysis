@@ -1,5 +1,5 @@
 function stripRegistrationBergamo(ds_time, fn)
-maxshift = 80;
+maxshift = 30;
 clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
@@ -40,7 +40,7 @@ for f_ix = 1:length(fns)
     numChannels = length(SI.hChannels.channelSave);
 
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
-    for frame = 1:10 %compute the framerate from the metadata by reading a few frames
+    for frame = 1:numChannels:(10*numChannels) %compute the framerate from the metadata by reading a few frames
         E = extract(desc{frame}, pat);
         timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW> 
     end

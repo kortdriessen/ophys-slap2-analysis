@@ -211,7 +211,7 @@ classdef spineAnalysis < handle
             if ~isempty(ind)
                 disp('Reading High-res data')
                 fnRaw = [obj.fn(1:ind) 'RAW.tif'];
-                nframes = obj.dsFac * size(obj.IM,obj.timeDim) / obj.numChannels;
+                nframes = 50; %obj.dsFac * size(obj.IM,obj.timeDim) / obj.numChannels;
                 t = Tiff([obj.dr filesep fnRaw], 'r');
                 t.setDirectory(1);
 
