@@ -124,7 +124,9 @@ end
 
 %%
 disp('Growing snakes...')
+tic;
 allSnakes = growAStarSnake(round(keypoints),[],1,[],refStack);
+toc;
 
 %%
 disp('Saving JSON...')
