@@ -106,7 +106,7 @@ for f_ix = 1:length(fns)
         
         %upsample z motion
         if any(bestZ==zRange([1 end]))
-            motionDSz = bestZ;
+            motionDSz(DSframe) = bestZ;
         else %superresolution
              ratio = min(1e6,(corrCoeff(bestZ) - corrCoeff(bestZ-1))/(corrCoeff(bestZ) - corrCoeff(bestZ+1)));
              dZ = (1-ratio)/(1+ratio)/2;
