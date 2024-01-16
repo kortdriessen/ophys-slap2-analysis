@@ -8,7 +8,7 @@ if nargin<4
     algoNum = 1;
 end
 
-algos = {@algo1, @algo2};
+algos = {@algo1, @algo2, @algo3};
 algo = algos{algoNum};
 warning('off');
 F0 = algo(Fin, denoiseWindow, cutWindow);
@@ -60,13 +60,41 @@ end
 
 
 
-function F0 = algo2(Fin, tau, window)
-%fits DFF quickly; assumes first dimension is time
-    Ffit = Fin;
-    for iter = 1:2
-        F0 = smoothdata(Ffit, 1,'movmean',window);
-        Ffit = min(Ffit, F0);%-thresh);
-    end
-    F0 = smoothdata(Ffit, 1,'movmean',window);
+function F0 = algo2(Fin, denoiseWindow, hullWindow)
+%algorithm 2:
+%very fast
+%mean filter to denoise, then windowed minimum
+%assumes first dimension is time
+
+origsz = size(Fin);    
+F0 = reshape(Fin, size(Fin,1), []);
+F0 = smoothdata(F0, 1,'movmedian',denoiseWindow, 'omitmissing');
+F0 = smoothdata(-imdilate(-F0, ones(hullWindow,1)), 1, 'movmean', hullWindow);
+F0 = reshape(F0, origsz);
 end
 
+
+function F0 = algo3(Fin, denoiseWindow, hullWindow)
+%algorithm 3
+% no median; iteratively reweighted mean
+%should be less biased
+origsz = size(Fin);    
+cutoff = 1.5;
+Fin = reshape(Fin, size(Fin,1), []);
+Fin = smoothdata(Fin, 1,'movmedian',10*denoiseWindow, 'omitmissing');
+
+F0 = smoothdata(Fin, 1,'movmedian',10*hullWindow, 'omitmissing');
+tmp = Fin-F0;
+noise = std(tmp,0,1, 'omitmissing');
+
+for iter = 1:5
+    setZero = abs(tmp./noise)>cutoff;
+    tmp(setZero) = nan;
+    noise = std(tmp, 0,1,"omitmissing");
+    F0 = F0 + smoothdata(tmp, 1,'movmean',hullWindow, 'omitmissing');
+    if iter<5
+        tmp = Fin-F0;
+    end
+end
+F0 = reshape(F0, origsz);
+end
