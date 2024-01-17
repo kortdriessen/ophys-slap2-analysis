@@ -1,5 +1,5 @@
 function template = makeTemplateMultiRoi(Y, maxshift)
-sz = size(Y);
+sz = size(Y, [1 2 3]);
 R = ones(sz(3));
 motion = zeros(2,sz(3),sz(3));
 for f1 = 1:sz(3)

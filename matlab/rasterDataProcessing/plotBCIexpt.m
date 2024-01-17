@@ -127,9 +127,12 @@ end
 
 function hF = plotAllTraces(sData, pData)
 
+
+
 %Figure with 2 subplots: 1 for soma, 1 for all synapses
 toPlot = 'dF';
 for epoch = 1:length(pData)
+    jsonS  = struct;
     D = pData(epoch).(toPlot); %data to plot
     D = D(:,:,:,pData(epoch).traceType,:);
     Dnorm = D./shiftdim(sqrt(pData(epoch).noise(:,:,pData(epoch).traceType,:)), -1); %normalized to noise estimate
@@ -140,10 +143,15 @@ for epoch = 1:length(pData)
         trialLength(trialIx) = find(~all(isnan(Dnorm(:,:,1,1,trialIx)),2), 1, 'last');
         keepFrames(((trialIx-1)*size(D,1)+trialLength(trialIx)+1):(trialIx*size(D,1))) = false;
     end
+    trialbounds = cumsum(trialLength);
 
-    hF = figure('name', 'all trials');
+
+
+
     isSoma = strcmpi(pData(epoch).names, 'soma');
-    somaCh = 2; spineCh = 1;
+    somaCh = 2; 
+    for spineCh = [1,2]
+    hF(spineCh) = figure('name', ['All trials, epoch ' int2str(epoch)]);
     hAxSoma = [];
     if any(isSoma)
         hAxSoma = subplot(10,1,1);
@@ -152,7 +160,10 @@ for epoch = 1:length(pData)
         tmp = tmp + 10*(0:(size(tmp,1)-1)); %offset for plotting
         tmp(:, ~keepFrames) = []; %remove ends of trials
         T = sData(1).frametime*(1:size(tmp,2));
-        plot(T, tmp, 'color', pData(epoch).colors(somaCh,:));
+        plot(T, tmp, 'color', pData(epoch).colors(somaCh,:)); hold on;
+        for tb = 1:length(trialbounds)
+            plot(sData(1).frametime*trialbounds(tb)*[1 1], ylim, 'k-');
+        end
         set(hAxSoma, 'xtick', [])
         ylabel('Z-score')
     end
@@ -160,12 +171,27 @@ for epoch = 1:length(pData)
     if any(~isSoma)
         tmp = Dnorm(:,~isSoma, spineCh,1,:);
         tmp = reshape(permute(tmp, [2 1 5 4 3]), size(tmp,2), []); %tmp is now 2D [ROIs allTime]
-        tmp = tmp + 10*(0:(size(tmp,1)-1))'; %offset for plotting
+        %tmp = tmp + 6*(0:(size(tmp,1)-1))'; %offset for plotting
         tmp(:, ~keepFrames) = []; %remove ends of trials
         T = sData(1).frametime*(1:size(tmp,2));
-        plot(T, tmp, 'color', pData(epoch).colors(spineCh,:));
-        set(hAxSpines, 'ytick', [])
-        xlabel('time (s)'); ylabel('Z-score')
+        for traceIx = 1:size(tmp,1)
+            offset = 10*traceIx;
+            plot(T, tmp(traceIx,:)+offset, 'color', [0.8 0.8 0.8] ); hold on; %pData(epoch).colors(spineCh,:)
+        end
+        for traceIx = 1:size(tmp,1)
+            offset = 10*traceIx;
+            tmp2 = tmp(traceIx,:);
+            tmp3 = tmp(traceIx,:);
+            tmp2(tmp2<3) = nan;
+            %tmp3(tmp3>-3) = nan;
+            plot(T, tmp2+offset, 'color', pData(epoch).colors(spineCh,:), 'linewidth', 2);
+            %plot(T, tmp3+offset, 'color', 'r', 'linewidth', 2);
+        end
+        for tb = 1:length(trialbounds)
+            plot(sData(1).frametime*trialbounds(tb)*[1 1], ylim, 'k-');
+        end
+        set(hAxSpines, 'ytick', [], 'xticklabel', [], 'tickdir', 'out', 'box', 'on', 'xgrid', 'on');
+        ylabel('Z-score')
     end
 
     %Plot motion
@@ -183,10 +209,27 @@ for epoch = 1:length(pData)
     plot(T, motPCs(:,1), 'color', 'b');
     hold on,
     plot(T, motPCs(:,2), 'color', 'r');
+    for tb = 1:length(trialbounds)
+        plot(sData(1).frametime*trialbounds(tb)*[1 1], ylim, 'k-');
+    end
     xlabel('time (s)'); ylabel('Brain Movement')
 
     set([hAxSoma hAxSpines hAxMotion], 'box', 'off')
     linkaxes([hAxSoma hAxSpines hAxMotion], 'x');
+    end
+
+    %export to json for collaborators
+    jsonS.epoch = epoch;
+    jsonS.channelNames = {'Glutamate', 'Calcium'};
+    jsonS.dataDescription = 'delta Photons';
+    jsonS.data = permute(D, [1 2 3 5 4]);
+    jsonS.dataDimensions = {'time (frames at 100Hz)', 'ROI#', 'Channel', 'Trial'};
+    jsonS.isSoma = isSoma;
+    jsonS.motion = single(cat(3, pData(epoch).motionC, pData(epoch).motionR));
+    jString = jsonencode(jsonS);
+    fileID = fopen(['epoch' int2str(epoch) '.json'], 'w');
+    fwrite(fileID, jString);
+    fclose(fileID);
 end
 end
 

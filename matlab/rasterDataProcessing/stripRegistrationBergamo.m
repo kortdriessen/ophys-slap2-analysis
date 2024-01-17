@@ -32,10 +32,13 @@ for f_ix = 1:length(fns)
     fnstem = [dr filesep fn(1:end-4) dateAcqAsString filesep fn(1:end-4) dateAcqAsString];
     copyfile([dr filesep fn], [fnstem '.tif']);
 
-    try
     meta = A.metadata;
-    eval(meta);
-    catch
+    metaLines = strsplit(meta, '\n');
+    for lineIx = 1:length(metaLines)
+        try
+        eval([metaLines{lineIx} ';']);
+            catch
+        end
     end
     numChannels = length(SI.hChannels.channelSave);
 
@@ -133,13 +136,31 @@ for f_ix = 1:length(fns)
     %save a downsampled aligned recording
     fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    Bsum = zeros([size(viewR') numChannels]);
+    Bcount = zeros([size(viewR') numChannels]);
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
         YY = downsampleTime(Ad(:,:,:, readFrames), ds_time); 
         for ch = 1:numChannels
             B =  interp2(1:sz(2), 1:sz(1), YY(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan)';
             fTIF.WriteIMG(single(B));
+            
+            Bcount(:,:,ch) = Bcount(:,:,ch) + ~isnan(B);
+            B(isnan(B)) = 0;
+            Bsum(:,:,ch) = Bsum(:,:,ch)+double(B);
         end
+    end
+    fTIF.close;
+
+    %save an average image
+    Bmean = Bsum(:,:,1)./Bcount(:,:,1);
+    minV = prctile(Bmean(~isnan(Bmean(:))), 10);
+    maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
+    Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
+    fnwrite = [fnstem '_REGISTERED_AVG_CH1_8bit.tif'];
+    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    for ch = 1
+        fTIF.WriteIMG(single(Bmean(:,:,ch)));
     end
     fTIF.close;
     
