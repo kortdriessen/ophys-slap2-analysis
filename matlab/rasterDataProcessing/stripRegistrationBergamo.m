@@ -40,11 +40,12 @@ for f_ix = 1:length(fns)
     numChannels = length(SI.hChannels.channelSave);
 
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
-    for frame = 1:numChannels:(10*numChannels) %compute the framerate from the metadata by reading a few frames
+    for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
         E = extract(desc{frame}, pat);
         timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW> 
     end
-    frametime = median(diff(timestamp));
+
+    frametime = median(diff(timestamp(1:numChannels:end)));
 
     Ad = single(A.data);
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
