@@ -152,17 +152,17 @@ for f_ix = 1:length(fns)
     end
     fTIF.close;
 
-    %save an average image
-    Bmean = Bsum(:,:,1)./Bcount(:,:,1);
-    minV = prctile(Bmean(~isnan(Bmean(:))), 10);
-    maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
-    Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
-    fnwrite = [fnstem '_REGISTERED_AVG_CH1_8bit.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-    for ch = 1
-        fTIF.WriteIMG(single(Bmean(:,:,ch)));
+    %save an average image for each channel
+    for ch = 1:numChannels
+        Bmean = Bsum(:,:,ch)./Bcount(:,:,ch);
+        minV = prctile(Bmean(~isnan(Bmean(:))), 10);
+        maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
+        Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
+        fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
+        fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+        fTIF.WriteIMG(single(Bmean));
+        fTIF.close;
     end
-    fTIF.close;
     
     %save an original-time-resolution recording
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
