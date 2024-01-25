@@ -444,6 +444,66 @@ classdef spineAnalysis < handle
             corrected = trace' - traceMot';
         end
 
+        function loadROIsDirect (obj, arg1)
+            if ~(any(obj.drsave)) || isempty(obj.drsave)
+                obj.drsave = obj.dr;
+            end
+%             [fn dr] = uigetfile([obj.drsave filesep '*_ROIS.mat']);
+            load(arg1, 'roiData');
+
+            try
+                delete(obj.hROIs);
+            catch
+            end
+            obj.hROIs = [];
+            disp(length(roiData))
+            for rix = 1:length(roiData)
+                %Lucas added this
+                switch roiData{rix}.Type
+                    case 'images.roi.ellipse'
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('ellipse was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', roiData{rix}.AspectRatio, 'FixedAspectRatio', roiData{rix}.FixedAspectRatio, 'Center', roiData{rix}.Center, 'SemiAxes', roiData{rix}.SemiAxes, 'RotationAngle', roiData{rix}.RotationAngle, 'Label', roiData{rix}.Label);
+                        end
+                    case 'images.roi.circle'
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('circle was incomplete, creating a dud circle to delete later')
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', [5, 5], 'Label', 'dud');
+                        else
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
+                        end
+                    
+                    case 'images.roi.polygon'
+                        if isempty(roiData{rix}.Position)
+                            disp(rix)
+                            disp('Polygon was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Label', roiData{rix}.Label);
+                        end
+
+                    otherwise
+                        error('bad ROI data type');
+                end
+
+                fnms = fieldnames(roiData{rix});
+                for ix =1:length(fnms)
+                    try
+                        set(obj.hROIs(rix), fnms{ix}, roiData{rix}.(fnms{ix}));
+                    catch
+                    end
+                end
+
+
+%                 cm = get(obj.hROIs(rix), 'ContextMenu');
+%                 uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(rix)))); %add a 'Set Label' context menu
+            end
+        end
+
         function loadROIs (obj, arg1, arg2)
             if ~(any(obj.drsave)) || isempty(obj.drsave)
                 obj.drsave = obj.dr;
