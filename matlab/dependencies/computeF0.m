@@ -23,7 +23,7 @@ function [F0] = algo1(Fin, denoiseWindow, hullWindow)
 %   extrapolated smooth F0
 T = size(Fin,1);
 hullWindow = min(hullWindow, floor(T/4));
-deltaDes = (denoiseWindow/4); % a safe spacing for computing F0, to save compute time
+deltaDes = max(4, (denoiseWindow/4)); % a safe spacing for computing F0, to save compute time
 sampleTimes = round(linspace(1, T, ceil(T/deltaDes)+1));
 nSampsInHull = ceil(hullWindow/deltaDes);
 
@@ -55,7 +55,7 @@ for cix = 1:size(F0,2)
         F0(:,cix) = interp1(sampleTimes,F2,1:T,"pchip");
 end
 F0 = reshape(F0, origsz);
-F0(isnan(Fin)) = nan;
+%F0(isnan(Fin)) = nan;
 end
 
 
@@ -63,13 +63,15 @@ end
 function F0 = algo2(Fin, denoiseWindow, hullWindow)
 %algorithm 2:
 %very fast
-%mean filter to denoise, then windowed minimum
+%median filter to denoise, then windowed minimum
 %assumes first dimension is time
 
 origsz = size(Fin);    
 F0 = reshape(Fin, size(Fin,1), []);
+nans = isnan(F0);
 F0 = smoothdata(F0, 1,'movmedian',denoiseWindow, 'omitmissing');
-F0 = smoothdata(-imdilate(-F0, ones(hullWindow,1)), 1, 'movmean', hullWindow);
+F0 = smoothdata(-imdilate(-F0, ones(hullWindow,1)), 1, 'movmean', hullWindow, 'omitmissing');
+F0(nans) = nan;
 F0 = reshape(F0, origsz);
 end
 
