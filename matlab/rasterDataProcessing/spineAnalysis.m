@@ -434,6 +434,10 @@ classdef spineAnalysis < handle
                 end
             end
             save([obj.drsave filesep obj.fnsave], 'roiData');
+
+            %save figure
+            disp('saving figure')
+            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
         end
 
         function [corrected, traceMot] = decorrelateMotion(obj, trace, motPreds)
