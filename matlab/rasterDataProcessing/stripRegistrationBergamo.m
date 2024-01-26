@@ -3,7 +3,10 @@ maxshift = 30;
 clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
-
+if nargin<1 || isempty(ds_time)
+    ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
+end
+dsFac = 2^ds_time;
 if nargin<2 || isempty(fn)
     [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
 else
@@ -36,8 +39,8 @@ for f_ix = 1:length(fns)
     metaLines = strsplit(meta, '\n');
     for lineIx = 1:length(metaLines)
         try
-        eval([metaLines{lineIx} ';']);
-            catch
+            eval([metaLines{lineIx} ';']);
+        catch
         end
     end
     numChannels = length(SI.hChannels.channelSave);
@@ -45,7 +48,7 @@ for f_ix = 1:length(fns)
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
     for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
         E = extract(desc{frame}, pat);
-        timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW> 
+        timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW>
     end
 
     frametime = median(diff(timestamp(1:numChannels:end)));
@@ -55,14 +58,10 @@ for f_ix = 1:length(fns)
     Ad = Ad(removeLines+1:end,:,:,:);
 
     %tiffStack object to read data from disk memory mapped
-    
+
     %disp('Reading TIFF headers...')
-    %TIFFStack([dr filesep fn], [], [numChannels]); 
+    %TIFFStack([dr filesep fn], [], [numChannels]);
     %downsample to align
-    if nargin<1 || isempty(ds_time)
-        ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
-    end
-    dsFac = 2^ds_time;
 
     %make an initial template with normcorr
     initFrames = 400;
@@ -78,7 +77,7 @@ for f_ix = 1:length(fns)
     template(maxshift+(1:sz(1)), maxshift+(1:sz(2)))=F;
     T0 = template; T00 = zeros(size(template));
     clear Y Yhp;
-    
+
     %aligned = nan(2*maxshift+szY(1), 2*maxshift+szY(2), nDSframes);
     %alignedY = nan(2*maxshift+szY(1), 2*maxshift+szY(2), nDSframes);
     initR = 0; initC = 0;
@@ -87,12 +86,12 @@ for f_ix = 1:length(fns)
     aErrorDS = nan(1,nDSframes);
     aRankCorr = nan(1,nDSframes);
     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshift))-maxshift, (1:(sz(2)+2*maxshift))-maxshift); %view matrices for interpolation
-   
+
     disp('Registering:');
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
 
-        M = downsampleTime(Ad(:,:,:, readFrames), ds_time); 
+        M = downsampleTime(Ad(:,:,:, readFrames), ds_time);
         M = squeeze(sum(M,3)); %merge colors
         %M = M-imgaussfilt(M, 4); %highpass
 
@@ -102,12 +101,12 @@ for f_ix = 1:length(fns)
 
         Ttmp = mean(cat(3, T0, T00,template),3, 'omitnan');
         T = Ttmp(maxshift-initR + (1:sz(1)), maxshift-initC+(1:sz(2)));
-        
+
         %output = dftregistration(fft2(M),fft2(single(T)),4);
         output = dftregistration_clipped(fft2(M),fft2(single(T)),4, clipShift);
-%         if abs(output(3))>10 || abs(output(4))>10
-%             %the shift was very large- what's up?
-%         end
+        %         if abs(output(3))>10 || abs(output(4))>10
+        %             %the shift was very large- what's up?
+        %         end
         motionDSr(DSframe) = initR+output(3);
         motionDSc(DSframe) = initC+output(4);
         aErrorDS(DSframe) = output(1);
@@ -118,7 +117,7 @@ for f_ix = 1:length(fns)
 
             selCorr = ~(isnan(A) | isnan(template));
             aRankCorr(DSframe) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
-            
+
             nantmp = sel & isnan(template);
             template(nantmp) = A(nantmp);
             template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
@@ -129,13 +128,13 @@ for f_ix = 1:length(fns)
     end
 
     %upsample the shifts and compute a tighter field of view
-    tDS = (1:nDSframes).*(dsFac) - (2^(ds_time-1)) + 0.5; 
+    tDS = (1:nDSframes).*(dsFac) - (2^(ds_time-1)) + 0.5;
     motionC = interp1(tDS, motionDSc, 1:((2^ds_time)*nDSframes), 'pchip','extrap'); %upsample the movement to the original timebase
     motionR = interp1(tDS, motionDSr, 1:((2^ds_time)*nDSframes), 'pchip', 'extrap'); %upsample the movement to the original timebase
     aError = interp1(tDS, aErrorDS, 1:((2^ds_time)*nDSframes), 'nearest', 'extrap');
     maxshiftC = max(abs(motionC)); maxshiftR = max(abs(motionR));
     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshiftR))-maxshiftR, (1:(sz(2)+2*maxshiftC))-maxshiftC); %view matrices for interpolation
-    
+
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
 
     %save a downsampled aligned recording
@@ -145,11 +144,11 @@ for f_ix = 1:length(fns)
     Bcount = zeros([size(viewR') numChannels]);
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
-        YY = downsampleTime(Ad(:,:,:, readFrames), ds_time); 
+        YY = downsampleTime(Ad(:,:,:, readFrames), ds_time);
         for ch = 1:numChannels
             B =  interp2(1:sz(2), 1:sz(1), YY(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan)';
             fTIF.WriteIMG(single(B));
-            
+
             Bcount(:,:,ch) = Bcount(:,:,ch) + ~isnan(B);
             B(isnan(B)) = 0;
             Bsum(:,:,ch) = Bsum(:,:,ch)+double(B);
@@ -168,7 +167,7 @@ for f_ix = 1:length(fns)
         fTIF.WriteIMG(single(Bmean));
         fTIF.close;
     end
-    
+
     %save an original-time-resolution recording
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
@@ -210,7 +209,7 @@ try
         tiffObj.nextDirectory;
         Y(:,:,r) = tiffObj.read;
     end
-catch ME %#ok<NASGU> 
+catch ME %#ok<NASGU>
     readsuccess = false;
     return
 end

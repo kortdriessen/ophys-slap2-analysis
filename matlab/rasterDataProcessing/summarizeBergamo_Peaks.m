@@ -8,8 +8,8 @@ function summarizeBergamo_Peaks
 %cd('\\allen\aind\scratch\ophys\Adrian\iGluSnFR testing\datasets\699943\10-11-23\scans\scan_00002_20231011_115018')
 %cd('C:\temp\SYNAPSES\Test');
 
-cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
-params.tau_s = 0.026; % time constant in seconds for glutamate channel
+%cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
+params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
 params.sigma_px = 1.33;   % space constant in pixels
 params.eventRateThresh_hz = 1/10; % minimum event rate in Hz
 params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
@@ -72,7 +72,7 @@ for trialIx = length(fns):-1:1
 
     %discard motion frames
     tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorr,2, 'movmedian', ceil(2/aData.frametime));
-    discardFrames{trialIx} = imdilate(tmp<-(5*std(tmp)), ones(1,3));
+    discardFrames{trialIx} = imdilate(tmp<-(4*std(tmp)), ones(1,5));
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
 
