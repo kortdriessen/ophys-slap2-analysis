@@ -341,8 +341,9 @@ classdef spineAnalysis < handle
             if isempty(obj.drsave) || ~any(obj.drsave)
                 obj.drsave = obj.dr;
             end
-            [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.h5']);
-            
+            % [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.h5']);
+            obj.fnsave = [obj.fnStem '_TRACES.h5'];
+
             if obj.fnsave %if user didn't cancel
                 obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-3) '.h5'] , sData);
             end
