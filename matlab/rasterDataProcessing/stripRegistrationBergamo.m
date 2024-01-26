@@ -43,11 +43,12 @@ for f_ix = 1:length(fns)
     numChannels = length(SI.hChannels.channelSave);
 
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
-    for frame = 1:numChannels:(10*numChannels) %compute the framerate from the metadata by reading a few frames
+    for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
         E = extract(desc{frame}, pat);
         timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW> 
     end
-    frametime = median(diff(timestamp));
+
+    frametime = median(diff(timestamp(1:numChannels:end)));
 
     Ad = single(A.data);
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
@@ -151,17 +152,17 @@ for f_ix = 1:length(fns)
     end
     fTIF.close;
 
-    %save an average image
-    Bmean = Bsum(:,:,1)./Bcount(:,:,1);
-    minV = prctile(Bmean(~isnan(Bmean(:))), 10);
-    maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
-    Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
-    fnwrite = [fnstem '_REGISTERED_AVG_CH1_8bit.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-    for ch = 1
-        fTIF.WriteIMG(single(Bmean(:,:,ch)));
+    %save an average image for each channel
+    for ch = 1:numChannels
+        Bmean = Bsum(:,:,ch)./Bcount(:,:,ch);
+        minV = prctile(Bmean(~isnan(Bmean(:))), 10);
+        maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
+        Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
+        fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
+        fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+        fTIF.WriteIMG(single(Bmean));
+        fTIF.close;
     end
-    fTIF.close;
     
     %save an original-time-resolution recording
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];

@@ -72,7 +72,6 @@ classdef spineAnalysis < handle
             %load image data
             A = ScanImageTiffReader([obj.dr filesep obj.fn]);
             IM = A.data;
-            %obj.IM = permute(IM, [2 1 3]); %assume 1 Channel
             IM = reshape(IM, size(IM,1), size(IM,2), obj.numChannels, []); %deinterleave;
             obj.IM = permute(IM, [2 1 3 4]); % X Y C T order
 
@@ -192,7 +191,6 @@ classdef spineAnalysis < handle
                     continue
                 end
 
-
                 tix = tix+1; %tix will count the total # of valid ROIs
                 name = roiObj.Label;
                 assert(~isempty(name), 'ROI names cannot be empty!');
@@ -211,26 +209,44 @@ classdef spineAnalysis < handle
             if ~isempty(ind)
                 disp('Reading High-res data')
                 fnRaw = [obj.fn(1:ind) 'RAW.tif'];
-                nframes = 50; %obj.dsFac * size(obj.IM,obj.timeDim) / obj.numChannels;
-                t = Tiff([obj.dr filesep fnRaw], 'r');
-                t.setDirectory(1);
+                nframes = obj.dsFac * size(obj.IM,obj.timeDim); %/ obj.numChannels;
 
                 %initialize data series
                 for rix =nROIs:-1:1
                     D{rix} = nan([sData.bbox{rix}(2,2)-sData.bbox{rix}(1,2)+1, sData.bbox{rix}(2,1)-sData.bbox{rix}(1,1)+1, obj.numChannels, nframes]);
                 end
-                try
-                    for fix = 1:nframes
-                        for cix = 1:obj.numChannels
-                            fdata = t.read;
-                            for rix = 1:nROIs
-                                D{rix}(:,:,cix,fix) = fdata(sData.bbox{rix}(1,2):sData.bbox{rix}(2,2), sData.bbox{rix}(1,1):sData.bbox{rix}(2,1));
-                            end
-                            t.nextDirectory;
-                        end
+
+                finfo = dir([obj.dr filesep fnRaw]);
+                if finfo(1).bytes<1e10
+                    %file is small enough to fit into memory
+                    A = ScanImageTiffReader([obj.dr filesep fnRaw]);
+                    fdata = permute(A.data(), [2 1 3]);
+                    fdata = reshape(fdata, size(fdata,1),size(fdata,2), obj.numChannels, nframes);
+                    for rix = 1:nROIs
+                        D{rix} = fdata(sData.bbox{rix}(1,2):sData.bbox{rix}(2,2), sData.bbox{rix}(1,1):sData.bbox{rix}(2,1),:,:);
                     end
-                catch ME %#ok<NASGU> 
-                    disp(['Read ' int2str(fix) ' frames'])
+                elseif nframes<2^16
+                    t = Tiff([obj.dr filesep fnRaw], 'r');
+                    t.setDirectory(1);
+                    try
+                        for fix = 1:nframes
+                            for cix = 1:obj.numChannels
+                                %pageInd = (fix-1)*obj.numChannels + cix
+                                %fdata = imread([obj.dr filesep fnRaw], pageInd);
+                                fdata = t.read;
+                                for rix = 1:nROIs
+                                    D{rix}(:,:,cix,fix) = fdata(sData.bbox{rix}(1,2):sData.bbox{rix}(2,2), sData.bbox{rix}(1,1):sData.bbox{rix}(2,1));
+                                end
+                                t.nextDirectory;
+                            end
+                        end
+                    catch ME %#ok<NASGU>
+                        disp(['Read ' int2str(fix) ' frames'])
+                    end
+                else
+                    %file is too big to fit into memory and has too many
+                    %pages for Tiff library
+                    error('file is too big to fit into memory, and too many pages for Tiff library... will solve this later...')
                 end
             end
 
@@ -271,16 +287,20 @@ classdef spineAnalysis < handle
 
                     %perform NMF
                     nfacs = max(2, floor(sum(selpix)/12));
-                    [W,H] = nnmf(double(DDcorr),nfacs);
+                    try
+                        [W,H] = nnmf(double(DDcorr),nfacs);
 
-                    %find NMF components spatially correlated to trace0, temporally correlated, and with positive skewness
-                    HP = filtfilt(obj.b2,obj.a2,H')';
-                    t0HP = filtfilt(obj.b2,obj.a2,trace0);
-                    Cspace = corr(W, Dmask{rix}(selpix));
-                    Ctime = corr(HP', t0HP'); %high frequency correlation
-                    SK = skewness(HP, 0, 2);
-                    sel = Cspace>0.1 & Ctime>0.1 & SK>0.2;
-                    trace2 = mean(W(:,sel)*H(sel,:),1);
+                        %find NMF components spatially correlated to trace0, temporally correlated, and with positive skewness
+                        HP = filtfilt(obj.b2,obj.a2,H')';
+                        t0HP = filtfilt(obj.b2,obj.a2,trace0);
+                        Cspace = corr(W, Dmask{rix}(selpix));
+                        Ctime = corr(HP', t0HP'); %high frequency correlation
+                        SK = skewness(HP, 0, 2);
+                        sel = Cspace>0.1 & Ctime>0.1 & SK>0.2;
+                        trace2 = mean(W(:,sel)*H(sel,:),1);
+                    catch
+                        trace2 = NaN(size(trace1));
+                    end
 
                     %compile output
                     sData.traceAvg(:,rix,cix) = traceAvg; %average value within ROI
@@ -321,16 +341,13 @@ classdef spineAnalysis < handle
             if isempty(obj.drsave) || ~any(obj.drsave)
                 obj.drsave = obj.dr;
             end
-            [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.h5']);
-            
+            % [obj.fnsave, obj.drsave] = uiputfile([obj.drsave filesep obj.fnStem '_TRACES.h5']);
+            obj.fnsave = [obj.fnStem '_TRACES.h5'];
+
             if obj.fnsave %if user didn't cancel
                 obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-3) '.h5'] , sData);
             end
-
-            %save figure
-            disp('saving figure')
-            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
-
+            
         end
 
         function saveAsH5(obj, fname, sData)
@@ -413,15 +430,79 @@ classdef spineAnalysis < handle
                 end
             end
             save([obj.drsave filesep obj.fnsave], 'roiData');
+
+            %save figure
+            disp('saving figure')
+            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
         end
 
         function [corrected, traceMot] = decorrelateMotion(obj, trace, motPreds)
 
             %highpass filter trace
-            trace = trace(:) - smooth(trace, ceil(8/obj.aData.frametime), 'lowess');
+            trace = trace(:) - nanfastsmooth(trace(:), min(length(trace)/2, ceil(2/obj.aData.frametime)), 3, 0.5);
             beta = mvregress(motPreds',trace);
             traceMot = motPreds'*beta;
             corrected = trace' - traceMot';
+        end
+
+        function loadROIsDirect (obj, arg1)
+            if ~(any(obj.drsave)) || isempty(obj.drsave)
+                obj.drsave = obj.dr;
+            end
+%             [fn dr] = uigetfile([obj.drsave filesep '*_ROIS.mat']);
+            load(arg1, 'roiData');
+
+            try
+                delete(obj.hROIs);
+            catch
+            end
+            obj.hROIs = [];
+            disp(length(roiData))
+            for rix = 1:length(roiData)
+                %Lucas added this
+                switch roiData{rix}.Type
+                    case 'images.roi.ellipse'
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('ellipse was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', roiData{rix}.AspectRatio, 'FixedAspectRatio', roiData{rix}.FixedAspectRatio, 'Center', roiData{rix}.Center, 'SemiAxes', roiData{rix}.SemiAxes, 'RotationAngle', roiData{rix}.RotationAngle, 'Label', roiData{rix}.Label);
+                        end
+                    case 'images.roi.circle'
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('circle was incomplete, creating a dud circle to delete later')
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', [5, 5], 'Label', 'dud');
+                        else
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
+                        end
+                    
+                    case 'images.roi.polygon'
+                        if isempty(roiData{rix}.Position)
+                            disp(rix)
+                            disp('Polygon was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Label', roiData{rix}.Label);
+                        end
+
+                    otherwise
+                        error('bad ROI data type');
+                end
+
+                fnms = fieldnames(roiData{rix});
+                for ix =1:length(fnms)
+                    try
+                        set(obj.hROIs(rix), fnms{ix}, roiData{rix}.(fnms{ix}));
+                    catch
+                    end
+                end
+
+
+%                 cm = get(obj.hROIs(rix), 'ContextMenu');
+%                 uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(rix)))); %add a 'Set Label' context menu
+            end
         end
 
         function loadROIs (obj, arg1, arg2)
@@ -436,14 +517,36 @@ classdef spineAnalysis < handle
             catch
             end
             obj.hROIs = [];
+            disp(length(roiData))
             for rix = 1:length(roiData)
+                %Lucas added this
                 switch roiData{rix}.Type
                     case 'images.roi.ellipse'
-                        obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', roiData{rix}.AspectRatio, 'FixedAspectRatio', roiData{rix}.FixedAspectRatio, 'Center', roiData{rix}.Center, 'SemiAxes', roiData{rix}.SemiAxes, 'RotationAngle', roiData{rix}.RotationAngle, 'Label', roiData{rix}.Label);
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('ellipse was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', roiData{rix}.AspectRatio, 'FixedAspectRatio', roiData{rix}.FixedAspectRatio, 'Center', roiData{rix}.Center, 'SemiAxes', roiData{rix}.SemiAxes, 'RotationAngle', roiData{rix}.RotationAngle, 'Label', roiData{rix}.Label);
+                        end
                     case 'images.roi.circle'
-                        obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
+                        if isempty(roiData{rix}.Center)
+                            disp(rix)
+                            disp('circle was incomplete, creating a dud circle to delete later')
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', [5, 5], 'Label', 'dud');
+                        else
+                            obj.hROIs(rix) = images.roi.Circle(obj.hAx,'Center', roiData{rix}.Center, 'Label', roiData{rix}.Label);
+                        end
+                    
                     case 'images.roi.polygon'
-                        obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Label', roiData{rix}.Label);
+                        if isempty(roiData{rix}.Position)
+                            disp(rix)
+                            disp('Polygon was incomplete, creating a dud ellipse to delete later')
+                            obj.hROIs(rix) = images.roi.Ellipse(obj.hAx, 'AspectRatio', 0.9, 'FixedAspectRatio', 0, 'Center', [5, 5], 'SemiAxes', [3, 3], 'RotationAngle', 215, 'Label', 'dud');                        
+                        else
+                            obj.hROIs(rix) = images.roi.Polygon(obj.hAx,'Position', roiData{rix}.Position, 'Label', roiData{rix}.Label);
+                        end
+
                     otherwise
                         error('bad ROI data type');
                 end
