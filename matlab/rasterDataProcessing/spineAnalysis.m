@@ -347,11 +347,7 @@ classdef spineAnalysis < handle
             if obj.fnsave %if user didn't cancel
                 obj.saveAsH5([obj.drsave filesep obj.fnsave(1:end-3) '.h5'] , sData);
             end
-
-            %save figure
-            disp('saving figure')
-            exportgraphics(obj.hAx, [obj.drsave filesep obj.fnStem '_FIGURE.pdf'], 'ContentType', 'vector');
-
+            
         end
 
         function saveAsH5(obj, fname, sData)
