@@ -85,6 +85,7 @@ for f_ix = 1:length(fns)
     nDSframes= floor(sz(4)./(dsFac)); %number of downsampled frames
     motionDSr = nan(1,nDSframes); motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
     aErrorDS = nan(1,nDSframes);
+    aRankCorr = nan(1,nDSframes);
     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshift))-maxshift, (1:(sz(2)+2*maxshift))-maxshift); %view matrices for interpolation
    
     disp('Registering:');
@@ -114,6 +115,10 @@ for f_ix = 1:length(fns)
         if abs(motionDSr(DSframe))<maxshift && abs(motionDSc(DSframe))<maxshift
             A = interp2(1:sz(2), 1:sz(1), M,viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan);
             sel = ~isnan(A);
+
+            selCorr = ~(isnan(A) | isnan(template));
+            aRankCorr(DSframe) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
+            
             nantmp = sel & isnan(template);
             template(nantmp) = A(nantmp);
             template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
@@ -183,6 +188,7 @@ for f_ix = 1:length(fns)
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.aError = aError;
+    aData.aRankCorr = aRankCorr;
     save([fnstem '_ALIGNMENTDATA.mat'], 'aData');
 end
 
