@@ -2,7 +2,8 @@ dr = uigetdir();
 
 dataDrs = dir(fullfile(dr,'scan_*'));
 
-for idx = 1:length(dataDrs)
+parfor idx = 1:length(dataDrs)
+    disp(dataDrs(idx).name)
     disp(['Running directory ' dataDrs(idx).name])
     tmp = dir(fullfile(dataDrs(idx).folder,dataDrs(idx).name,'*_DOWNSAMPLED*'));
     downsampledFile = tmp.name;
@@ -10,11 +11,12 @@ for idx = 1:length(dataDrs)
 
     tmp = dir(fullfile(dataDrs(idx).folder,dataDrs(idx).name,'*ROIs.mat'));
     roisFile = tmp(1).name;
-    spAnalysis.loadROIsDirect(fullfile(dataDrs(idx).folder,dataDrs(idx).name,downsampledFile,roisFile));
+    spAnalysis.loadROIsDirect(fullfile(dataDrs(idx).folder,dataDrs(idx).name,roisFile));
 
     try
         spAnalysis.analyze;
     catch
+        disp(['Error analyzing: ' dataDrs(idx).name]);
         msgbox(['Error analyzing: ' dataDrs(idx).name]);
     end
 end
