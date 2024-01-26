@@ -91,7 +91,8 @@ for f_ix = 1:length(fns)
 
     motionDSr = nan(1,nDSframes); 
     motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
-    aErrorDS = nan(1,nDSframes);
+    aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
+    aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
 
     %output TIF
     fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(alignHz) 'Hz.tif'];
@@ -110,7 +111,6 @@ for f_ix = 1:length(fns)
             M = M1;
         end
           
-
         if ~mod(DSframe, 1000)
             disp([int2str(DSframe) ' of ' int2str(nDSframes)]);
         end
@@ -134,6 +134,9 @@ for f_ix = 1:length(fns)
         end
 
         sel = ~isnan(A);
+        selCorr = sel & ~isnan(template);
+        aRankCorrDS(DSframe) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
+
         nantmp = sel & isnan(template);
         template(nantmp) = A(nantmp);
         template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
@@ -150,6 +153,7 @@ for f_ix = 1:length(fns)
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.aError = aErrorDS;
+    aData.aRankCorrDS = aRankCorrDS;
     aData.cropRow = trimRows(1)-maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-maxshift; %offset to add to ROIs to index into original recording
     save([dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'], 'aData');

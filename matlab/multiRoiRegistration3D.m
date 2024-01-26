@@ -50,7 +50,8 @@ for f_ix = 1:length(fns)
     motionDSr = nan(1,nDSframes);
     motionDSc = nan(1,nDSframes); 
     motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
-    aErrorDS = nan(1,nDSframes);
+    aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
+    aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
 
     %compute things that only need to be computed once 
     Y =  S2data.getImage(alignChan, 1, dt, 1);
@@ -116,7 +117,14 @@ for f_ix = 1:length(fns)
         for ch = 1:2
             A = interp2(1:sz(2), 1:sz(1), MM(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan);
             fTIF.WriteIMG(single(A));
+            
+            if ch==alignChan
+                AA = A;
+            end
         end
+        T = ref(trimRows,trimCols,bestZ);
+        sel = ~isnan(T) & ~isnan(AA);
+        aRankCorrDS(DSframe) = corr(A(sel), T(sel), 'Spearman');
     end
     fTIF.close;
     
@@ -131,6 +139,7 @@ for f_ix = 1:length(fns)
     aData.motionDSr = motionDSr;
     aData.motionDSz = motionDSz;
     aData.aError = aErrorDS;
+    aData.aRankCorr = aRankCorrDS;
     aData.cropRow = trimRows(1); %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1); %offset to add to ROIs to index into original recording
     save([dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'], 'aData');
