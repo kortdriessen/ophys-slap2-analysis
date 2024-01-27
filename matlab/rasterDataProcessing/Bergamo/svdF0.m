@@ -1,4 +1,4 @@
-function F0 = svdF0(IM, nPCs, denoiseWindow, baselineWindow)
+function F0 = svdF0(IM, nPCs, baselineWindow)
 %compute F0 for all pixels in IM, ignoring nans, using an SVD-based
 %approach. This is good if individual pixels are noisy
 %time is the first dimension
@@ -6,9 +6,6 @@ if nargin<2
     nPCs = 4;
 end
 if nargin<3
-    denoiseWindow = 33;
-end
-if nargin<4
     baselineWindow = 101;
 end
 origsz = size(IM);
@@ -39,6 +36,7 @@ for px = 1:size(IM,2)
         Y(selT, px) = [ones(sum(selT),1) VV2(selT,selU)  ]*b;
     end
 end
+F0 = nan(size(IM));
 F0(~nanframes,:) = Y;
 %F0 = computeF0(F0, denoiseWindow,baselineWindow,2);
 F0 = reshape(F0, origsz);
