@@ -194,7 +194,7 @@ classdef spineAnalysis < handle
                 tix = tix+1; %tix will count the total # of valid ROIs
                 name = roiObj.Label;
                 assert(~isempty(name), 'ROI names cannot be empty!');
-                assert(~any(strcmpi(sData.names, name)), 'A ROI name was duplicated!')
+                assert(~any(strcmpi(sData.names, name)), ['A ROI name was duplicated! ROI: ' name])
                 sData.names{tix} = name;
 
                 sData.mask{tix} = roiObj.createMask;
