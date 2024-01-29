@@ -2,17 +2,8 @@ function summarizeBergamo_Peaks
     %TO DO:
     %SIMULATE DATA AND TEST
 
-    %to explore:
-    %upsample F0 from earlier calculation, rather than recalc??
-
-    %dilate W0 a little before solving?
-        %does this produce better-looking filters?
-        %it's possible the ideal sources change/move around a little across trials
-
     %add some global NMF components?
         %initialize with random values and existing problem
-
-    %are the smallest sources real, or should we prune them?
 
 %cd('\\allen\aind\scratch\ophys\Adrian\iGluSnFR testing\datasets\699943\10-11-23\scans\scan_00002_20231011_115018')
 %cd('C:\temp\SYNAPSES\Test');
@@ -26,7 +17,7 @@ params.nmfIter = 5; %number of iterations of NMF refinement
 params.dXY = 3; %how large sources can be (radius), pixels
 params.upsample = 3; %how many times to upsample the imaging resolution for finding local maxima to identify sources; affects maximum source density
 params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
-params.denoiseWindow_samps = 31; %number of samples to average together for denoising
+params.denoiseWindow_samps = 35; %number of samples to average together for denoising
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
 
@@ -58,7 +49,7 @@ for trialIx = length(fns):-1:1
     %ensure the high res file exists
     ind =strfind(fn, '_DOWNSAMPLED');
     fnRaw{trialIx} = [fn(1:ind) 'RAW.tif'];
-    assert(exist(fnRaw{trialIx}, 'file'), ['No corresponding RAW tiff recording found for file:' fn])
+    assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding RAW tiff recording found for file:' fn])
 
     %load the tiff
     A = ScanImageTiffReader([dr filesep fn]);
@@ -76,11 +67,12 @@ for trialIx = length(fns):-1:1
     fnStemEnd = strfind(fn, '_REGISTERED') -1;
     load([dr filesep fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'], 'aData');
     aData.dsFac = round(length(aData.motionC)./length(aData.motionDSc));
+    params.dsFac = aData.dsFac;
+    params.frametime = aData.frametime;
 
     %discard motion frames
-    tmp = aData.aError-smoothdata(aData.aError,2, 'movmedian', ceil(2/aData.frametime));
-    tmp = tmp(1:aData.dsFac:aData.dsFac*size(IM,4));
-    discardFrames{trialIx} = imdilate(tmp>(3*std(tmp)), ones(1,3));
+    tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorr,2, 'movmedian', ceil(2/aData.frametime));
+    discardFrames{trialIx} = imdilate(tmp<-(5*std(tmp)), ones(1,3));
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
 
@@ -93,8 +85,7 @@ for trialIx = length(fns):-1:1
     actIM(1:size(IMc,1),1:size(IMc,2),1,trialIx) = IMc;
 end
 params.sz = size(meanIM, [1 2]);
-params.dsFac = aData.dsFac;
-params.frametime = aData.frametime;
+
 clear aData
 
 %Make template
@@ -165,7 +156,9 @@ frameInd = 0;
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)'; %algo2 doesn't underestimate F0 as badly in noisy conditions
+    F0selDS{trialIx} = svdF0(IMrawSel', 3, params.denoiseWindow_samps, baselineWindow)'; %#ok<AGROW>
+    dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
+    %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
 end
 clear rawIMs
@@ -197,12 +190,12 @@ for trialIx = validTrials
     end 
 
     IMsel = interpArray(IM1, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
-    IMsel = IMsel - min(0, min(mean(IMsel,2, 'omitnan'))); %ensure that the baseline is not overestimated
+    %IMsel = IMsel - min(0, min(mean(IMsel,2, 'omitnan'))); %ensure that the baseline is not overestimated
     
     discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
     IMsel(:,discard) = nan;     %throw away movement frames as above
 
-    [IMsel, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, params);
+    [IMsel, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS{trialIx}, params);
 
     %NMF
     H0 = ones(size(W1,2), size(IMsel,2));
@@ -215,30 +208,58 @@ for trialIx = validTrials
     Wfull(any(selPix,3),:) = W;
     Wfull = reshape(Wfull, sz(1),sz(2), []);
     
+    %Frames where more than 25% of pixels in a source are nan
+    nanFramesH = false(size(H));
+    for sourceIx = 1:size(H,1)
+        support = W(:,sourceIx)>0;
+        nanFramesH(sourceIx,:) = mean(selNans(support,:)) > 0.25;
+    end
+
     %deconvolve out matched filter we applied earlier
-    centeredKernel = fliplr([zeros(1,ceil(8*params.tau_full)) exp(-(0:ceil(8*params.tau_full))/params.tau_full)]);
-    centeredKernel = centeredKernel./sum(centeredKernel);
-    dampar = sqrt(mean(H(:,~discard).^2, 'all'));
-    H2 = deconvlucy(H,centeredKernel, 10, dampar);
+    kernel = [zeros(1,ceil(8*params.tau_full)) exp(-(0:ceil(8*params.tau_full))/params.tau_full)];
+    kernel = kernel./sum(kernel);
+    doubleKernel = conv(kernel, fliplr(kernel), 'same');
+    doubleKernel = doubleKernel./sum(doubleKernel);
+
+    %centeredKernel = fliplr([zeros(1,ceil(8*params.tau_full)) kernel]);
+    %centeredKernel = centeredKernel./sum(centeredKernel);
+    
+    %perform deconvolution, filling in NaNs with reconstructed values every
+    %few iterations:
+    J = deconvlucy({H},doubleKernel, 20);
+    for iter = 1:5
+            recon = convn(J{2}, doubleKernel, 'same');
+            J{1}(nanFramesH) = recon(nanFramesH);
+            J = deconvlucy(J,doubleKernel, 25);
+    end
+    H2 = J{2};
+    H3 = convn(H2, kernel, 'same');
+
+    errH = (H - convn(H2, doubleKernel, 'same')).^2;
+    errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
 
     %compute F0
     F0mean = repmat(mean(F0sel,2, 'omitnan'),1,size(F0sel,2));
-    F0sel(isnan(F0sel)) = max(0, F0mean(isnan(F0sel)));
+    F0sel(~isfinite(F0sel)) = max(0, F0mean(~isfinite(F0sel)));
     F0= (W./max(W,[],1))' *F0sel;
-    F0 = F0 - min(0, min(F0(:),[], 'omitnan')); %ensure positive
-    F0 = F0 + prctile(F0(:),1);
-    F0 = smoothdata(F0, 2, 'movmean', 2*(ceil(params.baselineWindow_Glu_s/params.frametime/2))+1, 'omitmissing');
-
-    %Nan out each source where more than 25% of pixels are nan
-    for sourceIx = 1:size(H,1)
-        support = W(:,sourceIx)>0;
-        nanFrames = mean(selNans(support,:)) > 0.25;
-        H(sourceIx,nanFrames) = nan;
-        H2(sourceIx,nanFrames) = nan;
-        F0(sourceIx,nanFrames) = nan;
+    F0(nanFramesH) = nan;
+    
+    %ensure F0 is positive
+    Fmin = min(F0(:));
+    desMin = prctile(F0(:),1) - Fmin;
+    if Fmin<desMin
+        F0 = F0 + desMin - Fmin;
     end
 
-    exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
+    %NaN out invalid data
+    H(nanFramesH) = nan; %The match filtered signal
+    H2(nanFramesH) = nan; %The detected events
+    H3(nanFramesH) = nan; %The denoised activity
+
+    exptSummary.dFerr{trialIx} = sum(W,1)'.*errH;
+    exptSummary.matchFilt{trialIx}(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
+    exptSummary.events{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
+    exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
     exptSummary.F0{trialIx}(:,:,1) = F0;
     exptSummary.footprints(:,:,1:size(W0,2),trialIx) = Wfull;
     
@@ -246,26 +267,12 @@ for trialIx = validTrials
     if numChannels==2
         F_2 = (W./max(W,[],1))' * IM2sel;
         F0_2 = computeF0(F_2', denoiseWindow, params.baselineWindow_Ca,1);
-
-        exptSummary.dF{trialIx}(:,:,2)
+        exptSummary.dF{trialIx}(:,:,2) = F_2;
         exptSummary.F0{trialIx}(:,:,2) = F0_2;
     end
 
     exptSummary.dFF{trialIx} = exptSummary.dF{trialIx}./exptSummary.F0{trialIx};
-
-    % %correlate against GT
-    % H3 = H2; H3(isnan(H3))=0;
-    % C = corr(H3', GT.activity');
-    % for iter = 1:2
-    %     for srcIx = 1:(min(size(C))-1)
-    %         [~, bestSrc] = max(C(:,srcIx));
-    %         C([srcIx bestSrc],:) = C([bestSrc srcIx],:);
-    %         % H0([srcIx bestSrc],:) = H0([bestSrc srcIx],:);
-    %         % W0(:,[srcIx bestSrc]) = W0(:,[bestSrc srcIx]);
-    %     end
-    % end
 end
-
 
 %prepare file for saving
 exptSummary.fns = fns;
@@ -284,19 +291,22 @@ disp('Done summarizeBergamo_Peaks')
 end
 
 
-function [IMsel, F0,  W, selNans] = prepareNMFproblem(IMsel, W0, params)
+function [IMsel, F0,  W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params)
 if ~params.nmfBackgroundComps
-    denoiseWindow = params.denoiseWindow_samps*params.dsFac+1;
-    baselineWindow = ceil(params.baselineWindow_Glu_s/params.frametime);
-    F0 = computeF0(IMsel', denoiseWindow, baselineWindow, 1)';
-    IMsel = IMsel - F0;  
-    IMsel = matchedExpFilter(IMsel, params.tau_full);
-    %IMsel = IMsel- computeF0(IMsel', params.denoiseWindow*params.dsFac+1, params.baselineWindow*params.dsFac+1, 1)'; %use algo1 after filtering
+    F0 = nan(size(IMsel));
+    for rix = 1:size(F0selDS, 1)
+        F0(rix,:) = interp(F0selDS(rix,:), params.dsFac)./params.dsFac;
+    end
+    %baselineWindow = ceil(params.baselineWindow_Glu_s/params.frametime);
+    %F0 = computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1, baselineWindow, 1)';
+    IMsel = IMsel - F0;
     selNans = isnan(IMsel);
     IMsel(selNans) = 0;
+    IMsel = matchedExpFilter(IMsel, params.tau_full);
+    %IMsel = IMsel- computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1,baselineWindow, 1)';
     W = W0;
 else
-    error('fitting background components not implemented')
+    error('fitting global background components not implemented')
     % NOT IMPLEMENTED! 
     %GOALS
     % %compute a background (F0) per pixel
@@ -381,10 +391,10 @@ mask11 = imtranslate(sel,[1 1]); %shifted 1 row and 1 col
 
 %figure, imshow3D(cat(3,mean(IM(:,:,1:100),3,'omitnan'), mask00*2000));
 
-if shiftRC(1)>0.05
+if shiftRC(1)>0.05 %the subpixel shift is nonnegligible, so interpolate
     R0 = (1-shiftRC(1)).*IM(mask00(:),:) + shiftRC(1).*IM(mask10(:),:);
     R1 = (1-shiftRC(1)).*IM(mask01(:),:) + shiftRC(1).*IM(mask11(:),:);
-else
+else %subpixel shift is negligible, use the unshifted data (this prevents NaNing out good data at edges)
     R0 = IM(mask00(:),:);
     R1 = IM(mask01(:),:);
 end
@@ -549,8 +559,8 @@ nSelPix = sum(anySel(:));
 
 %Temporal filter the movie
 dFselTf = matchedExpFilter(dFsel, params.tau_frames);
-baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
-dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
+%baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
+%dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
 selNans = isnan(dFselTf);
 dFselTf(selNans) = 0;
 
@@ -585,35 +595,48 @@ W0 = W0(:, spatialScore>spaceThresh);
 W0(isnan(W0)) = 0;
 nComp = size(W0,2);
 
-% W0full = nan([sz(1)*sz(2) nComp]);
-% W0full(anySel(:),:) = W0;
-% W0full = reshape(W0full, sz(1),sz(2), []);
+W0full = zeros(sz(1)*sz(2),nComp);
+W0full(anySel(:),:) = W0;
+W0full = reshape(W0full, sz(1),sz(2),[]);
+W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2));
+W0full = reshape(W0full, sz(1)*sz(2),[]);
+W0 =  W0full(anySel,:);
 %figure, imshow3D(W0full(:,:,sortorder));
 
 %Use multiplicative updates NMF, which makes it easy to zero out pixels
-opts1 = statset('MaxIter', 30,  'Display', 'final');%, 'UseParallel', true);
-[W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0', W0, 'options', opts1); %!!nnmf has been modified to allow it to take more than rank(Y) inputs
+opts1 = statset('MaxIter', 6,  'Display', 'final');%, 'UseParallel', true);
+[W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0',W0, 'options', opts1); %!!nnmf has been modified to allow it to take more than rank(Y) inputs
 for bigIter = 1:(params.nmfIter+3)
     disp(['outer loop ' int2str(bigIter) ' of ' int2str(params.nmfIter)]);
-    nW0 = sum(W0>0,1);
 
     %apply sparsity
-    setZero = W0<(params.sparseFac.*max(W0,[],1));
-    setZero(:, nW0<=9) = false; %don't shrink any more once below 9 pixels
-    W0(setZero) = 0;
+    W0 = max(0, W0-params.sparseFac.*max(W0,[],1));
+    %nW0 = sum(W0>0,1);
     
     W0full = zeros(sz(1)*sz(2),nComp);
     W0full(anySel(:),:) = W0;
     W0full = reshape(W0full, sz(1),sz(2),[]);
+    W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2));
 
-    for comp = 1:nComp %find(smallComps)
-        [maxval, maxind] = max(reshape(W0full(:,:,comp),1,[]));
-        [rr,cc] = ind2sub(sz, maxind);
-        if nW0(comp)<5
-            W0full(max(1,min(end,rr+(-1:1))),max(1,min(end,cc+(-1:1))),comp) = maxval/3;
-        end
-        W0full(:,:,comp) = W0full(:,:,comp).*bwselect(W0full(:,:,comp)>0, cc,rr, 4);
-    end
+    % tmp = imgaussfilt(W0full, 1);
+    % for comp = 1:nComp %find(smallComps)
+    %     [maxval, maxind] = max(tmp(:,:,comp),[], 'all', 'omitnan');
+    %     [rr,cc] = ind2sub(sz, maxind);
+    %     sel = zeros(size(tmp, [1 2]));
+    %     sel(rr,cc) = 1;
+    %     sel = imgaussfilt(sel, params.sigma_px);
+    %     sel = sel*maxval./sel(I);
+    %     W0full(:,:,comp) = min(sel, W0full(:,:,comp));
+    %     W0full(:,:,comp) = W0full(:,:,comp).*bwselect(W0full(:,:,comp)>0, cc,rr, 4);
+    % 
+    %     % %source weight * image intensity should monotonically decrease
+    %     % [maxval, maxind] = max(reshape(W0full(:,:,comp),1,[]));
+    %     % [rr,cc] = ind2sub(sz, maxind);
+    %     % if nW0(comp)<5
+    %     %     W0full(max(1,min(end,rr+(-1:1))),max(1,min(end,cc+(-1:1))),comp) = maxval/3;
+    %     % end
+    %     % W0full(:,:,comp) = W0full(:,:,comp).*bwselect(W0full(:,:,comp)>0, cc,rr, 4);
+    % end
     W0full = reshape(W0full, sz(1)*sz(2),[]);
     [W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0', W0full(anySel,:), 'h0', H0, 'options', opts1);
 
@@ -648,10 +671,7 @@ end
 
 function [W,H] = mergeSources (W,H)
 %THIS NEEDS TO BE IMPROVED
-%for pairs of overlapping sources, test whether the rank of their sum is 1
-%Method 1: SVD
-%the ratio of eigenvalues for the sum of two sources with a correlation equal to the mean over all pairs, and an
-%overlap of X, is Y...
+%use percentiles/statistical approach instead of max?
 
 %sort by variance; nnmf usually does htis automatically but we disabled it
 [~, sortorder] = sort(sum(W.^2,1), 'descend');
