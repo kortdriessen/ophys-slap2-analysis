@@ -1,15 +1,15 @@
 function summarizeBergamo_Peaks
     %TO DO:
-    %SIMULATE DATA AND TEST
+    %PARAMETER SENSITIVITY ANALYSIS
 
     %add some global NMF components?
-        %initialize with random values and existing problem
+        %initialize with random values
 
 %cd('\\allen\aind\scratch\ophys\Adrian\iGluSnFR testing\datasets\699943\10-11-23\scans\scan_00002_20231011_115018')
 %cd('C:\temp\SYNAPSES\Test');
+%cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
 
-cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
-params.tau_s = 0.026; % time constant in seconds for glutamate channel
+params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
 params.sigma_px = 1.33;   % space constant in pixels
 params.eventRateThresh_hz = 1/10; % minimum event rate in Hz
 params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
@@ -72,7 +72,7 @@ for trialIx = length(fns):-1:1
 
     %discard motion frames
     tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorr,2, 'movmedian', ceil(2/aData.frametime));
-    discardFrames{trialIx} = imdilate(tmp<-(5*std(tmp)), ones(1,3));
+    discardFrames{trialIx} = imdilate(tmp<-(4*std(tmp)), ones(1,5));
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
 
@@ -156,9 +156,8 @@ frameInd = 0;
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 3, params.denoiseWindow_samps, baselineWindow)'; %#ok<AGROW>
+    F0selDS{trialIx} = svdF0(IMrawSel', 3, baselineWindow)'; %#ok<AGROW>
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
-    %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
 end
 clear rawIMs
@@ -220,9 +219,6 @@ for trialIx = validTrials
     kernel = kernel./sum(kernel);
     doubleKernel = conv(kernel, fliplr(kernel), 'same');
     doubleKernel = doubleKernel./sum(doubleKernel);
-
-    %centeredKernel = fliplr([zeros(1,ceil(8*params.tau_full)) kernel]);
-    %centeredKernel = centeredKernel./sum(centeredKernel);
     
     %perform deconvolution, filling in NaNs with reconstructed values every
     %few iterations:
@@ -389,8 +385,6 @@ mask10 = imtranslate(sel,[0 1]); %shifted 1 row
 mask01 = imtranslate(sel,[1 0]); %shifted 1 col
 mask11 = imtranslate(sel,[1 1]); %shifted 1 row and 1 col
 
-%figure, imshow3D(cat(3,mean(IM(:,:,1:100),3,'omitnan'), mask00*2000));
-
 if shiftRC(1)>0.05 %the subpixel shift is nonnegligible, so interpolate
     R0 = (1-shiftRC(1)).*IM(mask00(:),:) + shiftRC(1).*IM(mask10(:),:);
     R1 = (1-shiftRC(1)).*IM(mask01(:),:) + shiftRC(1).*IM(mask11(:),:);
@@ -441,9 +435,6 @@ selCols = imdilate(any(density,1), ones(1,filtSize));
 PSF = fspecial('gaussian',filtSize,deconvSigma); %prior on loclaization accuracy
 IMest = density;
 IMest(selRows,selCols) = deconvlucy(density(selRows,selCols),PSF, 20); %should replace with our own algorithm
-% 
-% figure, imagesc(IMest)
-% hold on, scatter(upsample*(GT.R-30), upsample*(GT.C-18), 'r')
 
 BW = imregionalmax(IMest);
 BW = BW & IMest>(mean(IMest(IMest>0)));
@@ -601,7 +592,6 @@ W0full = reshape(W0full, sz(1),sz(2),[]);
 W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2));
 W0full = reshape(W0full, sz(1)*sz(2),[]);
 W0 =  W0full(anySel,:);
-%figure, imshow3D(W0full(:,:,sortorder));
 
 %Use multiplicative updates NMF, which makes it easy to zero out pixels
 opts1 = statset('MaxIter', 6,  'Display', 'final');%, 'UseParallel', true);
@@ -611,40 +601,16 @@ for bigIter = 1:(params.nmfIter+3)
 
     %apply sparsity
     W0 = max(0, W0-params.sparseFac.*max(W0,[],1));
-    %nW0 = sum(W0>0,1);
     
     W0full = zeros(sz(1)*sz(2),nComp);
     W0full(anySel(:),:) = W0;
     W0full = reshape(W0full, sz(1),sz(2),[]);
-    W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2));
-
-    % tmp = imgaussfilt(W0full, 1);
-    % for comp = 1:nComp %find(smallComps)
-    %     [maxval, maxind] = max(tmp(:,:,comp),[], 'all', 'omitnan');
-    %     [rr,cc] = ind2sub(sz, maxind);
-    %     sel = zeros(size(tmp, [1 2]));
-    %     sel(rr,cc) = 1;
-    %     sel = imgaussfilt(sel, params.sigma_px);
-    %     sel = sel*maxval./sel(I);
-    %     W0full(:,:,comp) = min(sel, W0full(:,:,comp));
-    %     W0full(:,:,comp) = W0full(:,:,comp).*bwselect(W0full(:,:,comp)>0, cc,rr, 4);
-    % 
-    %     % %source weight * image intensity should monotonically decrease
-    %     % [maxval, maxind] = max(reshape(W0full(:,:,comp),1,[]));
-    %     % [rr,cc] = ind2sub(sz, maxind);
-    %     % if nW0(comp)<5
-    %     %     W0full(max(1,min(end,rr+(-1:1))),max(1,min(end,cc+(-1:1))),comp) = maxval/3;
-    %     % end
-    %     % W0full(:,:,comp) = W0full(:,:,comp).*bwselect(W0full(:,:,comp)>0, cc,rr, 4);
-    % end
+    W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2)); %sculpt the spatial profiles
     W0full = reshape(W0full, sz(1)*sz(2),[]);
     [W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0', W0full(anySel,:), 'h0', H0, 'options', opts1);
 
     if bigIter == params.nmfIter
         disp('Merging sources...')
-
-        %figure('name', 'Data and residuals before merge')
-        %imshow3D(cat(3,dFselTf, W0*H0, dFselTf-W0*H0))
         [W0,H0] = mergeSources (W0,H0);
         disp(['Kept ' int2str(size(W0,2)) ' of ' int2str(nComp) 'sources']);
         nComp = size(W0,2);
@@ -655,25 +621,9 @@ end
 %figure, imshow3D(cat(3,dFselTf, W0*H0, dFselTf-W0*H0));
 end
 
-% function W = discardSources(W,H, Y, nans)
-% % compute a fraction of variance explained for each source based on the
-% % residual variance and the source variance
-% residual = Y - W*H;
-% residual(nans) = nan;
-% residual_norm = mean(residual.^2, 'all', 'omitnan');
-% 
-% for k = 1:size(W,2)
-%     support = W(:,k)>0;
-%     X_norm = sum(mean(W(support,k)*H(k,:).^2,2),1);
-% 
-% end
-% end
-
 function [W,H] = mergeSources (W,H)
-%THIS NEEDS TO BE IMPROVED
-%use percentiles/statistical approach instead of max?
-
 %sort by variance; nnmf usually does htis automatically but we disabled it
+%in nnmf2
 [~, sortorder] = sort(sum(W.^2,1), 'descend');
 W = W(:,sortorder);
 H = H(sortorder,:);
@@ -703,17 +653,3 @@ W = W(:,keep);
 H(merged,:) = H(merged,:)./sum(H(merged,:).^2, 2); %mormalize the activities that we merged
 H = H(keep,:); 
 end
-
-
-%decorrelate selected pixels from surround
-%motion and background activity
-% surround = IMraw(~selPix,:);
-% surround = detrend(surround', 'omitmissing')';
-% surround(isnan(surround))=0;
-% [Usur,Ssur,Vsur] = svds(surround, 1);
-% [Usel,Ssel,Vsel] = svds(IMrawSel, 10);
-% correction = zeros(size(IMrawSel));
-% for pc = 1:size(Ssel,1)
-%     b = mvregress(Vsur,Vsel(:,pc));
-%     correction = correction + Usel(:,pc)*Ssel(pc,pc)*(b'*Vsur');
-% end
