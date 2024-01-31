@@ -124,7 +124,7 @@ for f_ix = 1:length(fns)
         end
         T = ref(trimRows,trimCols,bestZ);
         sel = ~isnan(T) & ~isnan(AA);
-        aRankCorrDS(DSframe) = corr(A(sel), T(sel), 'Spearman');
+        aRankCorrDS(DSframe) = corr(A(sel), T(sel), 'type', 'Spearman');
     end
     fTIF.close;
     
