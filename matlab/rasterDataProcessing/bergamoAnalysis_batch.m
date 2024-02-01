@@ -1,0 +1,12 @@
+dr = uigetdir();
+
+dataDrs = dir(fullfile(dr,'scan_*'));
+
+for idx = 1:length(dataDrs)
+    disp(['Running directory ' dataDrs(idx).name])
+    stripRegistrationBergamo([],fullfile(dataDrs(idx).folder,dataDrs(idx).name,[dataDrs(idx).name '.tif']));
+    
+    tmp = dir(fullfile(dataDrs(idx).folder,dataDrs(idx).name,dataDrs(idx).name,'*_DOWNSAMPLED*'));
+    downsampledFile = tmp.name;
+    summarizeBergamo_Peaks(fullfile(dataDrs(idx).folder,dataDrs(idx).name,dataDrs(idx).name),downsampledFile);
+end
