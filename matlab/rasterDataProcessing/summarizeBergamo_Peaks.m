@@ -1,4 +1,4 @@
-function summarizeBergamo_Peaks
+function summarizeBergamo_Peaks(dr, fns)
     %TO DO:
     %PARAMETER SENSITIVITY ANALYSIS
 
@@ -21,8 +21,11 @@ params.denoiseWindow_samps = 35; %number of samples to average together for deno
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
 
-%select a set of aligned downsampled recordings (trials)
-[fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
+if nargin == 0
+    %select a set of aligned downsampled recordings (trials)
+    [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
+end
+
 if ~iscell(fns)
     fns = {fns};
 end
@@ -31,8 +34,12 @@ savedr = [dr filesep 'ExperimentSummary'];
 if ~exist(savedr, 'dir')
     mkdir(savedr);
 end
-[fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
-
+if nargin == 0
+    [fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
+else
+    fnsave = 'Summary.mat';
+    drsave = savedr;
+end
 %load some metadata
 fnStemEnd = strfind(fns{1}, '_REGISTERED') -1;
 fnStem = fns{1}(1:fnStemEnd);
@@ -262,7 +269,7 @@ for trialIx = validTrials
     %compute channel 2 signals
     if numChannels==2
         F_2 = (W./max(W,[],1))' * IM2sel;
-        F0_2 = computeF0(F_2', denoiseWindow, params.baselineWindow_Ca,1);
+        F0_2 = computeF0(F_2', params.denoiseWindow_samps, params.baselineWindow_Ca_s,1)';
         exptSummary.dF{trialIx}(:,:,2) = F_2;
         exptSummary.F0{trialIx}(:,:,2) = F0_2;
     end
