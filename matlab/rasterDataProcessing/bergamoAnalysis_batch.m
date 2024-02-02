@@ -2,7 +2,7 @@ dr = uigetdir();
 
 dataDrs = dir(fullfile(dr,'scan_*'));
 
-parfor idx = 2 %1:length(dataDrs)
+parfor idx = 1:length(dataDrs)
     disp(['Running directory ' dataDrs(idx).name])
     stripRegistrationBergamo([],fullfile(dataDrs(idx).folder,dataDrs(idx).name,[dataDrs(idx).name '.tif']));
     
