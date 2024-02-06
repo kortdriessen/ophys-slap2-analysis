@@ -1,4 +1,6 @@
 function multiRoiRegistration3D(alignHz)
+
+warning('multiRoiRegistration3D is not recommended; use multiROIRegistration instead')
 maxShift = 50;
 zClipShift = 3;
 
@@ -124,7 +126,7 @@ for f_ix = 1:length(fns)
         end
         T = ref(trimRows,trimCols,bestZ);
         sel = ~isnan(T) & ~isnan(AA);
-        aRankCorrDS(DSframe) = corr(A(sel), T(sel), 'Spearman');
+        aRankCorrDS(DSframe) = corr(A(sel), T(sel), 'type', 'Spearman');
     end
     fTIF.close;
     

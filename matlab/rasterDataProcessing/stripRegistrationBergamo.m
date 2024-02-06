@@ -25,8 +25,8 @@ for f_ix = 1:length(fns)
     desc=A.descriptions();
 
 
-    eval(desc{1})
-    datestr(epoch)
+    eval(desc{1});
+    datestr(epoch);
     %YYYYMMDDHHMMSS
     dateAcqAsString = ['_' num2str(epoch(1), '%04i') num2str(epoch(2), '%02i') num2str(epoch(3), '%02i') '_' num2str(epoch(4), '%02i') num2str(epoch(5), '%02i') num2str(round(epoch(6)), '%02i')];
     if ~exist([dr filesep fn(1:end-4) dateAcqAsString], 'dir')
