@@ -3,7 +3,7 @@ maxshift = 80;
 clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.005; %exponential time constant for template
 if ~nargin || isempty(alignHz)
-    alignHz = 33; %we will align data at this timescale, Hz
+    alignHz = 50; %we will align data at this timescale, Hz
 end
     
 [fns, dr] = uigetfile('*.dat', 'multiselect', 'on');
@@ -24,28 +24,6 @@ for f_ix = 1:length(fns)
     
     %sanity checks
     assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
-
-    %imageData = S2data.getImage(cIx, tIx, dt, zIx);
-    %S2data.hDataFile.numCycles
-
-    % A = ScanImageTiffReader([dr filesep fn]);
-    % Ad = single(A.data);
-    % Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
-    % sz = size(Ad);
-
-    % %temporary; in future need to set invalid data as -1 rather than 0 in the tiff files...
-    % nanMask = imopen(all(all(Ad<=0,3),4), ones(3));
-    % Ad(repmat(nanMask, [1 1 numChannels size(Ad,4)])) = nan;
-
-    % %downsample to align
-    % if nargin<1
-    %     %compute downsampling factor
-    %     % the movie is downsampled using averaging in time by a factor of 2^ds_time
-    %     target_Hz = 20; %downsample to a minimum speed of 25 Hz
-    %     ds_time = max(0, floor(log2(1/frametime/target_Hz))); 
-    % end
-    % dsFac = 2^ds_time;
-
 
     %%%%%Make an initial template
     %crosscorrelate each initial frame to each other

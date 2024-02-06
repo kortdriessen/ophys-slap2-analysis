@@ -1,4 +1,6 @@
 function multiRoiRegistration3D(alignHz)
+
+warning('multiRoiRegistration3D is not recommended; use multiROIRegistration instead')
 maxShift = 50;
 zClipShift = 3;
 

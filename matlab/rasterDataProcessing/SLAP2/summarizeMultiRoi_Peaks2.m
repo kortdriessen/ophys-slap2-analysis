@@ -1,11 +1,15 @@
-function summarizeBergamo_Peaks(dr, fns)
+function summarizeMultiRoi_Peaks2(nDMDs)
     %TO DO:
     %PARAMETER SENSITIVITY ANALYSIS
 
     %add some global NMF components?
         %initialize with random values
 
-cd('\\allen\aind\scratch\ophys\Adrian\iGluSnFR testing\datasets\699943\10-11-23\scans\scan_00002_20231011_115018')
+if nargin<1
+    nDMDs = 2;
+end
+
+cd('\\allen\aind\scratch\ophys\BCI\active_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
 
@@ -21,11 +25,14 @@ params.denoiseWindow_samps = 35; %number of samples to average together for deno
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
 
-if nargin == 0
-    %select a set of aligned downsampled recordings (trials)
-    [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
-end
+% %select a set of aligned downsampled recordings (trials)
+% [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
+% if ~iscell(fns)
+%     fns = {fns};
+% end
 
+%select ALL aligned multiRoi recordings (trials)
+[fns, dr] = uigetfile('*DMD1*REGISTERED*.tif', 'multiselect', 'on');
 if ~iscell(fns)
     fns = {fns};
 end
@@ -34,46 +41,69 @@ savedr = [dr filesep 'ExperimentSummary'];
 if ~exist(savedr, 'dir')
     mkdir(savedr);
 end
-if nargin == 0
-    [fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
-else
-    fnsave = 'Summary.mat';
-    drsave = savedr;
+[fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
+
+%confirm that all files exist for both DMDs
+if nDMDs==2
+for trialIx = length(fns):-1:1
+        fn = fns{trialIx};
+        dmdNumStringIndex = strfind(fn, 'DMD1')+3;
+        fn(dmdNumStringIndex) = '2';
+        assert(exist([dr filesep fn], 'file'), ['Missing aligned file:' fn]);
 end
+end
+
 %load some metadata
 fnStemEnd = strfind(fns{1}, '_REGISTERED') -1;
 fnStem = fns{1}(1:fnStemEnd);
 load([dr filesep fnStem '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
 
+%if isempty(userROIs)
+%call up a GUI for the user to define Soma ROI and regions to exclude
+for DMDix = 1:nDMDs
+    %load image data
+    fn = fns{1};
+    dmdNumStringIndex = strfind(fn, 'DMD1')+3;
+    fn(dmdNumStringIndex) = num2str(DMDix);
+    A = ScanImageTiffReader([dr filesep fn]);
+    IM = squeeze(mean(double(A.data),3, 'omitnan'));
+
+    hROIs(DMDix) = drawROIs(sqrt(max(0,IM)), dr, fn);
+end
+for DMDix = 1:nDMDs
+    waitfor(hROIs(DMDix).hF);
+end
+
 %generate a concensus alignment across trials for further analysis
+for DMDix = nDMDs:-1:1
 meanIM = nan(1,1,numChannels,1);
 actIM = nan(1,1,numChannels,1);
 disp('Loading data and performing localizations...')
 for trialIx = length(fns):-1:1
     fn = fns{trialIx};
+    
+    dmdNumStringIndex = strfind(fn, 'DMD1')+3;
+    fn(dmdNumStringIndex) = num2str(DMDix);
 
     %ensure the high res file exists
-    ind =strfind(fn, '_DOWNSAMPLED');
-    fnRaw{trialIx} = [fn(1:ind) 'RAW.tif'];
-    assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding RAW tiff recording found for file:' fn])
+    ind =strfind(fn, '_REGISTERED');
+    fnRaw{trialIx} = [fn(1:ind-1) '.dat'];
+    assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding DAT file found for downsampled TIFF file:' fn])
 
     %load the tiff
     A = ScanImageTiffReader([dr filesep fn]);
     IM = double(A.data);
-    if size(IM,3)<100
-        error(['The file:' fn 'is very short. You should probably not include it?']);
-    end
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
     meanIM(end:size(IM,1),:,:,:) = nan;
     meanIM(:, end:size(IM,2),:,:) = nan;
     meanIM(:,:,:,trialIx) = nan;
     meanIM(1:size(IM,1),1:size(IM,2),:,trialIx) = mean(IM,4, 'omitnan');
-
+    
     %load alignment data
     fnStemEnd = strfind(fn, '_REGISTERED') -1;
     load([dr filesep fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'], 'aData');
-    aData.dsFac = round(length(aData.motionC)./length(aData.motionDSc));
+    aData.dsFac = 1; %SLAP2 data does not have downsampling per se
     params.dsFac = aData.dsFac;
     params.frametime = aData.frametime;
 
@@ -83,7 +113,7 @@ for trialIx = length(fns):-1:1
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
 
-    [IMc, peaks(trialIx), params] = localizeFlashesBergamo(rawIMs{trialIx}, aData, params);
+    [IMc, peaks(trialIx), params] = localizeFlashesSLAP2(rawIMs{trialIx}, aData, params);
 
     %calculate correlation image
     actIM(end:size(IMc,1),:,:,:) = nan;
@@ -163,8 +193,9 @@ frameInd = 0;
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 3, baselineWindow)'; %#ok<AGROW>
+    F0selDS{trialIx} = svdF0(IMrawSel', 3, params.denoiseWindow_samps, baselineWindow)'; %#ok<AGROW>
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
+    %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
 end
 clear rawIMs
@@ -269,7 +300,7 @@ for trialIx = validTrials
     %compute channel 2 signals
     if numChannels==2
         F_2 = (W./max(W,[],1))' * IM2sel;
-        F0_2 = computeF0(F_2', params.denoiseWindow_samps, params.baselineWindow_Ca_s,1)';
+        F0_2 = computeF0(F_2', denoiseWindow, params.baselineWindow_Ca,1);
         exptSummary.dF{trialIx}(:,:,2) = F_2;
         exptSummary.F0{trialIx}(:,:,2) = F0_2;
     end
@@ -289,10 +320,9 @@ exptSummary.perTrialAlignmentOffsets = motOutput; %the alignment vector for each
 
 %save
 save([drsave filesep fnsave], 'exptSummary');
-
-disp('Done summarizeBergamo_Peaks')
 end
-
+disp('Done summarizeMultiROI_Peaks')
+end
 
 function [IMsel, F0,  W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params)
 if ~params.nmfBackgroundComps
