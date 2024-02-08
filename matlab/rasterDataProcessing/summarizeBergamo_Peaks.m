@@ -133,7 +133,7 @@ end
 
 %identify outliers in alignment quality
 cc = corrCoeff;
-if nargin>1 && forceCorrThresh>0
+if nargin>2 && forceCorrThresh>0
     corrThresh = forceCorrThresh;
 else
     corrThresh = min(0.96, median(cc)-2*std(cc));
@@ -226,6 +226,8 @@ for trialIx = validTrials
     kernel = kernel./sum(kernel);
     doubleKernel = conv(kernel, fliplr(kernel), 'same');
     doubleKernel = doubleKernel./sum(doubleKernel);
+
+    flipKernel = fliplr(kernel);
     
     %perform deconvolution, filling in NaNs with reconstructed values every
     %few iterations:
@@ -237,6 +239,15 @@ for trialIx = validTrials
     end
     H2 = J{2};
     H3 = convn(H2, kernel, 'same');
+
+
+    J = deconvlucy({H},flipKernel, 20);
+    for iter = 1:5
+            recon = convn(J{2}, flipKernel, 'same');
+            J{1}(nanFramesH) = recon(nanFramesH);
+            J = deconvlucy(J,flipKernel, 25);
+    end
+    H4 = J{2};
 
     errH = (H - convn(H2, doubleKernel, 'same')).^2;
     errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
@@ -263,6 +274,7 @@ for trialIx = validTrials
     exptSummary.matchFilt{trialIx}(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
     exptSummary.events{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
     exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
+    exptSummary.dF2{trialIx}(:,:,1) = sum(W,1)'.*H4;
     exptSummary.F0{trialIx}(:,:,1) = F0;
     exptSummary.footprints(:,:,1:size(W0,2),trialIx) = Wfull;
     
@@ -275,6 +287,7 @@ for trialIx = validTrials
     end
 
     exptSummary.dFF{trialIx} = exptSummary.dF{trialIx}./exptSummary.F0{trialIx};
+    exptSummary.dFF2{trialIx} = exptSummary.dF2{trialIx}./exptSummary.F0{trialIx};
 end
 
 %prepare file for saving
