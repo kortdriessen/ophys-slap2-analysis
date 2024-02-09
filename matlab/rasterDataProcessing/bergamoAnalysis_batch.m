@@ -7,7 +7,7 @@ end
 
 
 parfor idx = 1:length(dataDirs)
-    [dFolder, dName] = fileparts(dataDirs);
+    [dFolder, dName] = fileparts(dataDirs{idx});
     disp(['Running directory ' dName])
     stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
     
