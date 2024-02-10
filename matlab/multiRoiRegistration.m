@@ -1,9 +1,12 @@
-function multiRoiRegistration(alignHz)
+function multiRoiRegistration(alignHz, overwriteExisting)
 maxshift = 80;
 clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.005; %exponential time constant for template
 if ~nargin || isempty(alignHz)
     alignHz = 50; %we will align data at this timescale, Hz
+end
+if nargin<2
+    overwriteExisting = false; %by default, don't repeat alignment for files that are already processed
 end
     
 [fns, dr] = uigetfile('*.dat', 'multiselect', 'on');
@@ -14,7 +17,14 @@ end
 for f_ix = 1:length(fns)
     fn = fns{f_ix};
     disp(['Aligning: ' [dr filesep fn]])
-    
+    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(alignHz) 'Hz.tif'];
+    fnAdata = [dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'];
+
+    if exist(fnAdata, 'file')
+        disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
+        continue
+    end
+
     S2data = slap2.Slap2DataFile([dr filesep fn]);
     meta = loadMetadata([dr filesep fn]);
     linerateHz = 1/meta.linePeriod_s;
@@ -30,6 +40,7 @@ for f_ix = 1:length(fns)
     disp('generating template')
     nInitFrames = min(40, floor(numLines/dt));
     for fix = nInitFrames:-1:1
+       Y(:,:,1,fix) = S2data.getImage(1, ceil(fix*dt), dt, 1);
        Y(:,:,1,fix) = S2data.getImage(1, ceil(fix*dt), dt, 1);
        Y(:,:,2,fix) = S2data.getImage(2, ceil(fix*dt), dt, 1);
     end
@@ -73,11 +84,12 @@ for f_ix = 1:length(fns)
     aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
 
     %output TIF
-    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(alignHz) 'Hz.tif'];
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
 
+    registrationFailed = false;
     disp('Registering:');
+    try
     for DSframe = 1:nDSframes
         M1 = S2data.getImage(1, ceil(DSframe*dt), dt, 1); %moving image Ch1
         M1 = M1(trimRows, trimCols);
@@ -122,7 +134,20 @@ for f_ix = 1:length(fns)
         initR = round(motionDSr(DSframe));
         initC = round(motionDSc(DSframe));
     end
+    catch ME
+        print(ME);
+        registrationFailed = true;
+    end
+
     fTIF.close;
+
+    if std(motionDSc)>5 || std(motionDSr)>5
+        registrationFailed = true;
+    end
+    if registrationFailed
+        msgbox(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'PLEASE QC THIS FILE!' newline 'CONTINUING...'])
+        continue
+    end
 
     %save alignment metadata
     aData.numChannels = numChannels;
@@ -134,7 +159,7 @@ for f_ix = 1:length(fns)
     aData.aRankCorrDS = aRankCorrDS;
     aData.cropRow = trimRows(1)-maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-maxshift; %offset to add to ROIs to index into original recording
-    save([dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'], 'aData');
+    save(fnAdata, 'aData');
 end
 
 disp('done multiRoiRegistration.')
