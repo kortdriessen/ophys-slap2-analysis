@@ -20,7 +20,7 @@ for f_ix = 1:length(fns)
     fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(alignHz) 'Hz.tif'];
     fnAdata = [dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'];
 
-    if exist(fnAdata, 'file')
+    if exist(fnAdata, 'file') && exist(fnwrite, 'file')
         disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
         continue
     end
