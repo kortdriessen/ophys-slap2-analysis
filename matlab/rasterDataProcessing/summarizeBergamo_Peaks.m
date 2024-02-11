@@ -378,11 +378,11 @@ else
     % selRows = nValid>median(nValid)*0.9; %rows that we will use to estimate the background
     % 
     % IMBG = IMsel;
-    % IMBG = IMBG - mean(IMBG,2, 'omitmissing');
+    % IMBG = IMBG - mean(IMBG,2, 'omitnan');
     % IMBG(selNans) = 0;
     % [~,~,VV] = svds(IMBG(selRows,:), params.nmfBackgroundComps);
     % pred = cat(2, VV, ones(size(VV,1),1));
-    % IMBG2 = smoothdata(IMBG, 2, 'movmedian', params.baselineWindow, 'omitmissing');
+    % IMBG2 = smoothdata(IMBG, 2, 'movmedian', params.baselineWindow, 'omitnan');
     % %for each row, fill nans with best fit
     % for rix = 1:size(IMBG,1)
     %     b = regress(IMBG2(rix, ~selNans(rix,:))', pred(~selNans(rix,:),:));
@@ -632,7 +632,7 @@ for sourceIx = 1:k
         T = peaks.t(selPeaks(eIx));
         allEventsThisSite(:,eIx) = dFselTf(selSel, T);
     end
-    avgEvent = mean(allEventsThisSite,2, 'omitmissing');
+    avgEvent = mean(allEventsThisSite,2, 'omitnan');
     spatialScore(sourceIx) = corr(avgEvent,spatialTemplate).*sum(avgEvent);
     thresh = max(avgEvent(:))*1e-5;
     avgEvent(avgEvent<thresh) = thresh;
