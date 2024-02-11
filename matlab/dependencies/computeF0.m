@@ -42,7 +42,7 @@ for cix = 1:size(F0,2)
         xi =sampleTimes(dix:nSampsInHull:end);
         F00(:,dix) = interp1(xi, F0(xi,cix), sampleTimes);
     end
-    FF = min(F00,[],2, 'omitmissing'); 
+    FF = min(F00,[],2, 'omitnan'); 
 
     %convert to a smooth curve, discarding untrustworthy samples
     doubt = sum(~isnan(F00),2)<ceil(nSampsInHull/2);
@@ -51,7 +51,7 @@ for cix = 1:size(F0,2)
         if sum(~doubt)>2
                 F2(doubt) = nan;
         end
-        F2 = smoothdata(F2,1,'lowess', 2*ceil(nSampsInHull/2)+1, 'omitmissing');
+        F2 = smoothdata(F2,1,'lowess', 2*ceil(nSampsInHull/2)+1, 'omitnan');
         F0(:,cix) = interp1(sampleTimes,F2,1:T,"pchip");
 end
 F0 = reshape(F0, origsz);
@@ -69,8 +69,8 @@ function F0 = algo2(Fin, denoiseWindow, hullWindow)
 origsz = size(Fin);    
 F0 = reshape(Fin, size(Fin,1), []);
 nans = isnan(F0);
-F0 = smoothdata(F0, 1,'movmedian',denoiseWindow, 'omitmissing');
-F0 = smoothdata(-imdilate(-F0, ones(hullWindow,1)), 1, 'movmean', hullWindow, 'omitmissing');
+F0 = smoothdata(F0, 1,'movmedian',denoiseWindow, 'omitnan');
+F0 = smoothdata(-imdilate(-F0, ones(hullWindow,1)), 1, 'movmean', hullWindow, 'omitnan');
 F0(nans) = nan;
 F0 = reshape(F0, origsz);
 end
@@ -83,17 +83,17 @@ function F0 = algo3(Fin, denoiseWindow, hullWindow)
 origsz = size(Fin);    
 cutoff = 1.5;
 Fin = reshape(Fin, size(Fin,1), []);
-Fin = smoothdata(Fin, 1,'movmedian',10*denoiseWindow, 'omitmissing');
+Fin = smoothdata(Fin, 1,'movmedian',10*denoiseWindow, 'omitnan');
 
-F0 = smoothdata(Fin, 1,'movmedian',10*hullWindow, 'omitmissing');
+F0 = smoothdata(Fin, 1,'movmedian',10*hullWindow, 'omitnan');
 tmp = Fin-F0;
-noise = std(tmp,0,1, 'omitmissing');
+noise = std(tmp,0,1, 'omitnan');
 
 for iter = 1:5
     setZero = abs(tmp./noise)>cutoff;
     tmp(setZero) = nan;
-    noise = std(tmp, 0,1,"omitmissing");
-    F0 = F0 + smoothdata(tmp, 1,'movmean',hullWindow, 'omitmissing');
+    noise = std(tmp, 0,1,"omitnan");
+    F0 = F0 + smoothdata(tmp, 1,'movmean',hullWindow, 'omitnan');
     if iter<5
         tmp = Fin-F0;
     end

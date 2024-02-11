@@ -15,7 +15,7 @@ selPix = mean(IM(~nanframes,:),1)>0.9;
 
 IMsel = IM(~nanframes, selPix);
 
-IMsmooth = smoothdata(IMsel,1, 'movmean', size(IMsel,1)/4, 'omitmissing');
+IMsmooth = smoothdata(IMsel,1, 'movmean', size(IMsel,1)/4, 'omitnan');
 IMsel(isnan(IMsel)) = IMsmooth(isnan(IMsel));
 IMsel(isnan(IMsel)) = 0; %anything left over
 

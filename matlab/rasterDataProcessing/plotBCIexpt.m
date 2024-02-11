@@ -109,8 +109,8 @@ dM= sqrt(mean(cat(4, abs(pData.motionC([2:end end],:,:) -  pData.motionC), abs(p
 thresh = 0.05; %in pixels RMS
 
 %frames with bad alignment errors
-m = median(pData.alignError,1, 'omitmissing');
-e = max(0.02, 2*std(pData.alignError,0,1, 'omitmissing')); % error threshold, in normalized error of dftRegistration
+m = median(pData.alignError,1, 'omitnan');
+e = max(0.02, 2*std(pData.alignError,0,1, 'omitnan')); % error threshold, in normalized error of dftRegistration
 
 censoredFrames = dM>thresh & pData.alignError>(m+e);
 
@@ -248,7 +248,7 @@ for epoch = 1:length(pData)
 
     %mean and standard error of output signal over trials
     mO = mean(output,5, 'omitnan');
-    eO = std(output,0,5, 'omitmissing')./sqrt(sum(~isnan(output),5)-1);
+    eO = std(output,0,5, 'omitnan')./sqrt(sum(~isnan(output),5)-1);
     eO(isnan(eO)) = 0;
 
     hF = figure;
@@ -260,8 +260,8 @@ for epoch = 1:length(pData)
 
     selTime = tt>2 & tt<20; %time window for averaging dFF within trial
     normTime = tt<2;
-    trialMeans{epoch} = squeeze(mean(output(selTime,1,1,1,:),1,'omitmissing'));
-    controlMeans{epoch} = squeeze(mean(output(normTime,1,1,1,:),1,'omitmissing'));
+    trialMeans{epoch} = squeeze(mean(output(selTime,1,1,1,:),1,'omitnan'));
+    controlMeans{epoch} = squeeze(mean(output(normTime,1,1,1,:),1,'omitnan'));
 end
 linkaxes(hAxAvgOut);
 set(hAxAvgOut, 'xlim', [0 20])
@@ -282,7 +282,7 @@ if length(pData)>1 %if multi-epoch
     figure,
     for epoch = 1:length(pData)
         scatter(epoch*ones(1,length(trialMeans{epoch})), trialMeans{epoch},'MarkerEdgeColor',[0.5 0.5 0.5]);
-        hold on, plot(epoch+[-0.2 0.2], mean(trialMeans{epoch}, 'omitmissing')*[1 1], 'k', 'linewidth', 2);
+        hold on, plot(epoch+[-0.2 0.2], mean(trialMeans{epoch}, 'omitnan')*[1 1], 'k', 'linewidth', 2);
 
         if epoch<length(pData)
             %t-test
@@ -305,7 +305,7 @@ end
 % tmpD = D(:,~isSoma, inputCh,1,:); %all input
 % tmpN = N(:,~isSoma, inputCh,1,:);
 % mO = mean(tmpD,5, 'omitnan');
-% ste = std(tmpD,0,5, 'omitmissing')./sqrt(sum(~isnan(tmpD),5)-1);
+% ste = std(tmpD,0,5, 'omitnan')./sqrt(sum(~isnan(tmpD),5)-1);
 % ste(~isfinite(ste)) = 0;
 % scale = mean(tmpN,5, 'omitnan');
 % time = (0:size(tmpD,1)-1)*pData.frametime;

@@ -6,7 +6,7 @@ bfwin = 2*ceil(20*tau)+1;
 nans = isnan(IMf);
 nansC = convn(nans, true(1,1,7), 'same')>0;
 IMf(nansC) = nan;
-IMavg = mean(IMf,3, 'omitmissing');
+IMavg = mean(IMf,3, 'omitnan');
 IMgamma = sqrt(IMavg);
 
 BG = prctile(IMavg(~isnan(IMavg)), 10);
@@ -17,7 +17,7 @@ IMf(nansC) = 0;
 IMf = imgaussfilt(IMf, [sigma sigma])./(imgaussfilt(single(~nansC), [sigma sigma])+0.5); %weight by number of measurements; The samples at the edges will be noisier
 
 %subtract baseline
-IMf = IMf - smoothdata(IMf,3,'movmedian',bfwin, 'omitmissing');
+IMf = IMf - smoothdata(IMf,3,'movmedian',bfwin, 'omitnan');
 
 % normalize by expected poisson noise
 IMavg_nans = isnan(IMavg);
@@ -36,7 +36,7 @@ end
 IMf(nansC) = nan;
 
 %select regions with the most activity to search in
-summary = mean(IMf.^3, 3, 'omitmissing');
+summary = mean(IMf.^3, 3, 'omitnan');
 summary(imdilate(isnan(summary), ones(5))) = nan; %remove noisy edges
 
 validArea = ~imdilate(nansC, ones(5));
