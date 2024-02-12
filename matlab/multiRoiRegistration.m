@@ -18,7 +18,7 @@ for f_ix = 1:length(fns)
     S2data = slap2.Slap2DataFile([dr filesep fn]);
     meta = loadMetadata([dr filesep fn]);
     linerateHz = 1/meta.linePeriod_s;
-    dt = ceil(linerateHz/alignHz);
+    dt = linerateHz/alignHz;
     numChannels = S2data.numChannels;
     numLines = S2data.totalNumLines;
     
@@ -30,8 +30,9 @@ for f_ix = 1:length(fns)
     disp('generating template')
     nInitFrames = min(40, floor(numLines/dt));
     for fix = nInitFrames:-1:1
-       Y(:,:,1,fix) = S2data.getImage(1, ceil(fix*dt), dt, 1);
-       Y(:,:,2,fix) = S2data.getImage(2, ceil(fix*dt), dt, 1);
+        for cix = numChannels:-1:1
+            Y(:,:,cix,fix) = S2data.getImage(cix, ceil(fix*dt), ceil(dt), 1);
+        end
     end
 
     Y = squeeze(sum(Y,3));
@@ -65,7 +66,7 @@ for f_ix = 1:length(fns)
 
     initR = 0; initC = 0;
     nDSframes= floor(numLines/dt); %number of downsampled frames
-    DSframes = (1:nDSframes)*dt;
+    DSframes = ceil((1:nDSframes)*dt);
 
     motionDSr = nan(1,nDSframes); 
     motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
@@ -134,6 +135,18 @@ for f_ix = 1:length(fns)
     aData.aRankCorrDS = aRankCorrDS;
     aData.cropRow = trimRows(1)-maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-maxshift; %offset to add to ROIs to index into original recording
+    
+    %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
+    aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
+    aData.trimCols = trimCols;%used to remap images from the datafile into the space of the saved tiffs
+    aData.viewC = viewC;%used to remap images from the datafile into the space of the saved tiffs
+    aData.viewR = viewR;%used to remap images from the datafile into the space of the saved tiffs
+    %EXAMPLE CODE
+    %  Y = S2data.getImage(channel, lineTime, deltaTime, zPos);
+    %  Ytrimmed = Y(aData.trimRows, aData.trimCols);
+    %  sz = size(Ytrimmed);
+    %  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
+
     save([dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'], 'aData');
 end
 
