@@ -8,7 +8,7 @@ D = reshape(D, size(D,1), []);
 t = (1:window)';
 p = [t ones(size(t))];
 
-sVals = smoothdata(D, mode, window, 'omitmissing');
+sVals = smoothdata(D, mode, window, 'omitnan');
 lVals = nan(length(t), size(D,2));
 for ix = 1:size(D,2)    
     inds = find(~isnan(D(t,ix)));
@@ -18,7 +18,7 @@ end
 weights = t./length(t);
 sVals(t,:) = weights.*sVals(t,:) + (1-weights).*lVals;
 
-mVals = smoothdata(D(1:2*window,:) - sVals(1:2*window,:), mode, window, 'omitmissing');
+mVals = smoothdata(D(1:2*window,:) - sVals(1:2*window,:), mode, window, 'omitnan');
 sVals(1:window,:) = sVals(1:window,:) + mVals(1:window,:);
 sVals = reshape(sVals, origsz);
 end

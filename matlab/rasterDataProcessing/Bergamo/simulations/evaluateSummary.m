@@ -65,7 +65,7 @@ for trial = 1:length(GT)
     ylabel(cb, 'R^2')
 
     GTnorm = GT{trial}.activity./sqrt(mean(GT{trial}.activity.^2, 2));
-    ESTnorm = exptSummary.dFF{trial}./sqrt(mean(exptSummary.dFF{trial}.^2, 2, 'omitmissing'));
+    ESTnorm = exptSummary.dFF{trial}./sqrt(mean(exptSummary.dFF{trial}.^2, 2, 'omitnan'));
     ESTnorm = ESTnorm(closestEstforEachGT,:);
     ROInorm = GTtmp./sqrt(mean(GTtmp.^2,2));
 
