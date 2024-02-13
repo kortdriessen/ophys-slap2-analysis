@@ -45,7 +45,7 @@ for fix = 1:length(fns)
     fn = fns{fix};
 
     A = ScanImageTiffReader(fn);
-    IMavg = mean(A.data,3,'omitmissing');
+    IMavg = mean(A.data,3,'omitnan');
     %IMavg = IMavg(floor((size(IMavg,1)-params.IMsz(1))/2) +(1:params.IMsz(1)), floor((size(IMavg,2)-params.IMsz(2))/2) +(1:params.IMsz(2)));
     BG = prctile(IMavg(~isnan(IMavg)),30);
     IMavg = max(IMavg-BG, 0);

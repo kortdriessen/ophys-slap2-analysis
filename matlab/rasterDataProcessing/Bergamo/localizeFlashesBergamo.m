@@ -15,7 +15,7 @@ baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac
 
 %nanFrames = squeeze(all(isnan(IM),[1 2]));
 nans = isnan(IM);
-IMavg = mean(IM,3, 'omitmissing');
+IMavg = mean(IM,3, 'omitnan');
 IMgamma = sqrt(max(0,IMavg));
 
 BG = prctile(IMavg(~isnan(IMavg)), 10);
@@ -68,7 +68,7 @@ end
 IMf(nans) = nan;
 
 %compute a summary image based on skewness
-summary = mean(IMf.^3, 3, 'omitmissing');
+summary = mean(IMf.^3, 3, 'omitnan');
 summary(imdilate(isnan(summary), ones(5))) = nan; %remove noisy edges
 
 P = getTiledPeaks(IMf, IMavg, summary);
