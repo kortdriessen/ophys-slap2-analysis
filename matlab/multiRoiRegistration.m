@@ -91,10 +91,10 @@ for f_ix = 1:length(fns)
     disp('Registering:');
     try
     for DSframe = 1:nDSframes
-        M1 = S2data.getImage(1, ceil(DSframe*dt), dt, 1); %moving image Ch1
+        M1 = S2data.getImage(1, ceil(DSframe*dt), ceil(dt), 1); %moving image Ch1
         M1 = M1(trimRows, trimCols);
         if numChannels==2
-            M2 =  S2data.getImage(2, ceil(DSframe*dt), dt, 1); %moving image Ch2
+            M2 =  S2data.getImage(2, ceil(DSframe*dt), ceil(dt), 1); %moving image Ch2
             M2 = M2(trimRows, trimCols);
             M = M1+M2;
         else
@@ -135,7 +135,7 @@ for f_ix = 1:length(fns)
         initC = round(motionDSc(DSframe));
     end
     catch ME
-        print(ME);
+        disp(ME);
         registrationFailed = true;
     end
 
@@ -145,7 +145,7 @@ for f_ix = 1:length(fns)
         registrationFailed = true;
     end
     if registrationFailed
-        msgbox(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'PLEASE QC THIS FILE!' newline 'CONTINUING...'])
+        msgbox(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
         continue
     end
 
