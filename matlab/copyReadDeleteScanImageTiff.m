@@ -1,6 +1,18 @@
 function [data, meta]= copyReadDeleteScanImageTiff(remotepath, localDir)
 if nargin<2
-    localDir = 'C:\temp\';
+    %read user settings for local directory
+    thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
+    if exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
+        load([thisDir filesep 'pathToFastDrive.mat'], 'localDir');
+    else
+        localDir = uigetdir('', 'Select a local directory to save temporary files, on your FASTEST local drive!');
+        if exist(localDir, 'dir')
+           save([thisDir filesep 'pathToFastDrive.mat'], 'localDir');
+        else
+            warning('User canceled setting local directory. defaulting to C:/temp')
+            localDir = 'C:\temp\';
+        end
+    end
 end
 if ~exist(localDir, 'dir')
     mkdir(localDir);

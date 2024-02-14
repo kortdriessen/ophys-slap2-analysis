@@ -42,7 +42,8 @@ savedr = [dr filesep 'ExperimentSummary'];
 if ~exist(savedr, 'dir')
     mkdir(savedr);
 end
-[fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
+fnsave = [savedr filesep 'Summary-' int2str(length(fns)) 'filesSelected-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
+%[fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
 
 %confirm that all files exist for both DMDs
 if nDMDs==2
@@ -202,6 +203,7 @@ for trialIx = length(fns):-1:1
          hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
     end
 end
+drawnow
 
 %identify outliers in alignment quality
 ccf = corrCoeff;
