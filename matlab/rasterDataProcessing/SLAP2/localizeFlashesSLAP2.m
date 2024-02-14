@@ -10,7 +10,6 @@ if nargin<4
     doPlot = false;
 end
 
-denoiseWindow = params.denoiseWindow_samps;
 baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 
 %nanFrames = squeeze(all(isnan(IM),[1 2]));
@@ -33,7 +32,6 @@ IMstruct = convn(max(0,IMavg), DoGfilt, 'same'); % filtered structural image, us
 
 %Highpass filter in time
 IMf(nans) = nan;
-keyboard %use ExpSmooth?
 IMf = IMf - smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
 nans = isnan(IMf);
 
@@ -113,22 +111,26 @@ summaryVals = summary(sub2ind(size(summary), rrr, ccc));
 keep = false(1,length(ttt)); %which events to keep
 vNorm = zeros(length(ttt),1); %the event sizes, Z-scored
 
+threshSNR = 5; %the desired SNR as a z-score
+
 for rix = 1:length(tilestartsR)
     for cix = 1:length(tilestartsC)
         selStats = rrr>=tilestartsR(max(1,rix-1)) & rrr<=tileendsR(min(end,rix+1))  & ccc>=tilestartsC(max(1,cix-1)) & ccc<=tileendsC(min(end,cix+1));
 
         S = summary(tilestartsR(max(1,rix-1)):tileendsR(min(end,rix+1)), tilestartsC(max(1,cix-1)):tileendsC(min(end,cix+1)));
-        Sp = prctile(S(:), [1 33]);
-        Sthresh =  Sp(2) + 5*(Sp(2)-Sp(1));
-        selS = summaryVals>Sthresh;
+        if any(S(:))
+            Sp = prctile(S(:), [1 33]);
+            Sthresh =  Sp(2) + 4*(Sp(2)-Sp(1));
+            selS = summaryVals>Sthresh;
 
-        vals = vvv(selStats & selS);
-        ptile = prctile(vals, [1 50]);
-        vals = 3*(vals-ptile(2))./(ptile(2) - ptile(1));
-        thresh = ptile(2) + 2*(ptile(2) - ptile(1)); % threshold is 2*[98% confint], corresponding to an SNR of ~6
-        selTile = rrr>=tilestartsR(rix) & rrr<=tileendsR(rix)  & ccc>=tilestartsC(cix) & ccc<=tileendsC(cix) & vvv>thresh & selS; %the events within this tile that should be kept
-        keep(selTile) = true;
-        vNorm(selStats & selS) = max(vNorm(selStats & selS), vals);
+            vals = vvv(selStats & selS);
+            ptile = prctile(vals, [1 50]);
+            vals = 3*(vals-ptile(2))./(ptile(2) - ptile(1));
+            thresh = ptile(2) + (threshSNR/3)*(ptile(2) - ptile(1)); % The [98% confint] here is about 3 sigma, hence threshSNR/3
+            selTile = rrr>=tilestartsR(rix) & rrr<=tileendsR(rix)  & ccc>=tilestartsC(cix) & ccc<=tileendsC(cix) & vvv>thresh & selS; %the events within this tile that should be kept
+            keep(selTile) = true;
+            vNorm(selStats & selS) = max(vNorm(selStats & selS), vals);
+        end
     end
 end
 
@@ -171,8 +173,8 @@ IM2 = reshape(IM2(:,:,~nanFrames), sz(1)*sz(2), []);
 IM2 = IM2- mean(IM2,2);
 imageGrads = cat(3, IMavg-imtranslate(IMavg,[1 0]), IMavg-imtranslate(IMavg,[0 1]), IMavg-imtranslate(IMavg,[-1 0]), IMavg-imtranslate(IMavg,[0 -1]));
 imageGrads = reshape(imageGrads, sz(1)*sz(2),[]);
-[U,S,V] = svds(IM2(goodPixels,:),nPCs);
-b = mvregress(imageGrads(goodPixels,:),U);
+[U,S,V] = svds(double(IM2(goodPixels(:),:)),nPCs);
+b = imageGrads(goodPixels,:)\U; %mvregress(imageGrads(goodPixels,:),U);
 correction = (imageGrads*b)*S*V';
 IM(:,:, ~nanFrames) = IM(:,:, ~nanFrames) - reshape(correction, sz(1), sz(2), []);
 end

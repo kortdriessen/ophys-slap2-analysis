@@ -8,13 +8,12 @@ function summarizeMultiRoi_Peaks2(nDMDs)
 if nargin<1
     nDMDs = 2;
 end
-
-cd('\\allen\aind\scratch\ophys\BCI\active_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
+cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
 
 params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
-params.sigma_px = 1.33;   % space constant in pixels
+params.sigma_px = 1.6; %1.33;   % space constant in pixels
 params.eventRateThresh_hz = 1/10; % minimum event rate in Hz
 params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
 params.nmfIter = 5; %number of iterations of NMF refinement
@@ -24,6 +23,8 @@ params.nmfBackgroundComps = 0; % <=4, max number of background components to use
 params.denoiseWindow_samps = 35; %number of samples to average together for denoising
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
+
+params.analyzeHz = 200; %frame rate used for analysis
 
 % %select a set of aligned downsampled recordings (trials)
 % [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
@@ -45,12 +46,64 @@ end
 
 %confirm that all files exist for both DMDs
 if nDMDs==2
+keepFns = true(1, length(fns));
 for trialIx = length(fns):-1:1
         fn = fns{trialIx};
+        fnStemEnd = strfind(fn, '_REGISTERED') -1;
+        
+        alignFn =  [fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'];
+        if ~exist([dr filesep alignFn], 'file')
+            disp(['Missing alignData file:' alignFn])
+            keepFns(trialIx) = false;
+        end
+        
         dmdNumStringIndex = strfind(fn, 'DMD1')+3;
         fn(dmdNumStringIndex) = '2';
-        assert(exist([dr filesep fn], 'file'), ['Missing aligned file:' fn]);
+        if ~exist([dr filesep fn], 'file')
+            disp(['Missing aligned file:' fn])
+            keepFns(trialIx) = false;
+        end
+
+        alignFn =  [fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'];
+        if ~exist([dr filesep alignFn], 'file')
+            disp(['Missing alignData file:' alignFn])
+            keepFns(trialIx) = false;
+        end
 end
+if ~all(keepFns)
+    response = questdlg(['Alignment files were missing for ' int2str(sum(~keepFns)) ' trials. Proceed without these trials?']);
+    if strcmpi(response, 'Yes')
+        fns = fns(keepFns);
+    else
+        return
+    end
+end
+end
+
+%if isempty(userROIs)
+%call up a GUI for the user to define Soma ROI and regions to exclude
+fnAnn = [dr filesep 'ANNOTATIONS.mat'];
+if exist(fnAnn, 'file')
+    load(fnAnn, 'ROIs')
+else
+    for DMDix = 1:nDMDs
+        %load image data
+        fn = fns{1};
+        dmdNumStringIndex = strfind(fn, 'DMD1')+3;
+        fn(dmdNumStringIndex) = num2str(DMDix);
+        IM = copyReadDeleteScanImageTiff([dr filesep fn]);
+        IM = squeeze(mean(IM,[3 4], 'omitnan'));
+
+        hROIs(DMDix) = drawROIs(sqrt(max(0,IM)), dr, fn);
+        ROIs(DMDix).dr = dr;
+        ROIs(DMDix).fn = fn;
+    end
+    for DMDix = 1:nDMDs
+        waitfor(hROIs(DMDix).hF);
+        ROIs(DMDix).roiData = hROIs(DMDix).roiData;
+    end
+
+    save(fnAnn, 'ROIs'); clear hROIs;
 end
 
 %load some metadata
@@ -58,22 +111,6 @@ fnStemEnd = strfind(fns{1}, '_REGISTERED') -1;
 fnStem = fns{1}(1:fnStemEnd);
 load([dr filesep fnStem '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
-
-%if isempty(userROIs)
-%call up a GUI for the user to define Soma ROI and regions to exclude
-for DMDix = 1:nDMDs
-    %load image data
-    fn = fns{1};
-    dmdNumStringIndex = strfind(fn, 'DMD1')+3;
-    fn(dmdNumStringIndex) = num2str(DMDix);
-    A = ScanImageTiffReader([dr filesep fn]);
-    IM = squeeze(mean(double(A.data),3, 'omitnan'));
-
-    hROIs(DMDix) = drawROIs(sqrt(max(0,IM)), dr, fn);
-end
-for DMDix = 1:nDMDs
-    waitfor(hROIs(DMDix).hF);
-end
 
 %generate a concensus alignment across trials for further analysis
 for DMDix = nDMDs:-1:1
@@ -92,8 +129,8 @@ for trialIx = length(fns):-1:1
     assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding DAT file found for downsampled TIFF file:' fn])
 
     %load the tiff
-    A = ScanImageTiffReader([dr filesep fn]);
-    IM = double(A.data);
+    %A = ScanImageTiffReader([dr filesep fn]);
+    IM = copyReadDeleteScanImageTiff([dr filesep fn]);
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
     meanIM(end:size(IM,1),:,:,:) = nan;
     meanIM(:, end:size(IM,2),:,:) = nan;
@@ -106,9 +143,14 @@ for trialIx = length(fns):-1:1
     aData.dsFac = 1; %SLAP2 data does not have downsampling per se
     params.dsFac = aData.dsFac;
     params.frametime = aData.frametime;
+    
+    alignData{trialIx} = aData;
+    % motionDSc{trialIx} = aData.motionDSc;
+    % motionDSr{trialIx} = aData.motionDSr;
+    % DSframes{trialIx} = aData.DSframes;
 
     %discard motion frames
-    tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorr,2, 'movmedian', ceil(2/aData.frametime));
+    tmp = aData.aRankCorrDS(:)-smoothExp(aData.aRankCorrDS(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
     discardFrames{trialIx} = imdilate(tmp<-(4*std(tmp)), ones(1,5));
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
@@ -127,7 +169,7 @@ clear aData
 
 %Make template
 disp('Making template for aligning across trials...')
-maxshift = 12;
+maxshift = 5;
 M = squeeze(sum(meanIM, 3));
 template = makeTemplateMultiRoi(M, maxshift);
 
@@ -162,13 +204,13 @@ for trialIx = length(fns):-1:1
 end
 
 %identify outliers in alignment quality
-cc = corrCoeff;
+ccf = corrCoeff;
 if nargin>1 && forceCorrThresh>0
     corrThresh = forceCorrThresh;
 else
-    corrThresh = min(0.96, median(cc)-2*std(cc));
+    corrThresh = min(0.96, median(ccf)-2*std(ccf));
 end
-validTrials= find(cc>corrThresh);
+validTrials= find(ccf>corrThresh);
 exptSummary.meanIM = mean(meanAligned,4, 'omitnan');
 exptSummary.actIM = mean(actAligned, 4, 'omitnan');
 
@@ -193,7 +235,7 @@ frameInd = 0;
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 3, params.denoiseWindow_samps, baselineWindow)'; %#ok<AGROW>
+    F0selDS{trialIx} = svdF0(IMrawSel', 3, baselineWindow)'; %#ok<AGROW> IM, nPCs, baselineWindow)
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
     %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
@@ -204,29 +246,70 @@ clear rawIMs
 [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
 
 %for each file, load high res data and refine
-params.tau_full=params.tau_frames*params.dsFac;
+params.tau_full=params.tau_s*params.analyzeHz;
 exptSummary.params = params;
 for trialIx = validTrials
     fn = fnRaw{trialIx};
+    disp('Loading high-res data for file:')
+    disp([dr filesep fn])
+
+    %load the high time resolution data
+    S2data = slap2.Slap2DataFile([dr filesep fn]);
+    meta = loadMetadata([dr filesep fn]);
+    %numChannels = S2data.numChannels;
+    numLines = S2data.totalNumLines;
+    linerateHz = 1/meta.linePeriod_s;
+    dt = linerateHz/params.analyzeHz;
+    frameLines = ceil(dt:dt:numLines);
+    nFrames= length(frameLines);
+    selPx2D = any(selPix,3);
+
+    %upsample motion
+    motionC = interp1(alignData{trialIx}.DSframes, alignData{trialIx}.motionDSc, frameLines, 'pchip', 'extrap') + motOutput(2,trialIx);
+    motionR = interp1(alignData{trialIx}.DSframes, alignData{trialIx}.motionDSr, frameLines, 'pchip', 'extrap') + motOutput(1,trialIx);
     
-    %load the high time resolution tiff
-    A = ScanImageTiffReader([dr filesep fn]);
-    IM = double(A.data);
+    Ysz = [length(alignData{trialIx}.trimRows) length(alignData{trialIx}.trimCols)];
+    %interpolate the raw data at the shifted coordinates
+    for fix = nFrames:-1:1
+        if ~mod(fix, 100)
+            disp(fix)
+        end
+        for cix = 1:numChannels
+            Y = S2data.getImage(1, frameLines(fix), ceil(dt), 1);
+            Y = Y(alignData{trialIx}.trimRows, alignData{trialIx}.trimCols);
+            Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData{trialIx}.viewC+motionC(fix), alignData{trialIx}.viewR+motionR(fix), 'linear', nan);
+            if cix==1
+                IMsel(:, fix) = Y(selPx2D);
+            elseif cix==2
+                IM2sel(:, fix) = Y(selPx2D);
+            end
 
-    %rearrange IM into correct dimensions
-    IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);
-    IM1 = squeeze(IM(:,:,1,:));
-    if numChannels==2
-        IM2 =  squeeze(IM(:,:,2,:));
-        clear IM;
-        IM2sel = interpArray(IM2, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
-        clear IM2;
-        IM2sel = IM2sel - min(0, min(mean(IM2sel,2, 'omitnan')));%ensure that the baseline is not overestimated
-    else %1 channel
-        clear IM;
-    end 
+            %compute user ROI activity
+            for rix = 1:length(ROIs(DMDix).roiData)
+                mask = ROIs(DMDix).roiData.mask;
+                ROIs(DMDix).F(rix, fix,cix) = sum(Y(mask));
+            end
 
-    IMsel = interpArray(IM1, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
+            if fix<200 & cix==1
+                sanitycheckTMP{trialIx}(:,:,201-fix) = Y;
+            end
+        end
+    end
+
+    % %rearrange IM into correct dimensions
+    % IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);
+    % IM1 = squeeze(IM(:,:,1,:));
+    % if numChannels==2
+    %     IM2 =  squeeze(IM(:,:,2,:));
+    %     clear IM;
+    %     IM2sel = interpArray(IM2, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
+    %     clear IM2;
+    %     IM2sel = IM2sel - min(0, min(mean(IM2sel,2, 'omitnan')));%ensure that the baseline is not overestimated
+    % else %1 channel
+    %     clear IM;
+    % end 
+
+    
     %IMsel = IMsel - min(0, min(mean(IMsel,2, 'omitnan'))); %ensure that the baseline is not overestimated
     
     discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
@@ -254,23 +337,30 @@ for trialIx = validTrials
 
     %deconvolve out matched filter we applied earlier
     kernel = [zeros(1,ceil(8*params.tau_full)) exp(-(0:ceil(8*params.tau_full))/params.tau_full)];
+    fKernel = fliplr(kernel);
     kernel = kernel./sum(kernel);
-    doubleKernel = conv(kernel, fliplr(kernel), 'same');
+    doubleKernel = conv(kernel, fKernel, 'same');
     doubleKernel = doubleKernel./sum(doubleKernel);
     
     %perform deconvolution, filling in NaNs with reconstructed values every
     %few iterations:
     J = deconvlucy({H},doubleKernel, 20);
+    Js = deconvlucy({H},fKernel, 20);
     for iter = 1:5
             recon = convn(J{2}, doubleKernel, 'same');
             J{1}(nanFramesH) = recon(nanFramesH);
             J = deconvlucy(J,doubleKernel, 25);
+
+            recon2 =  convn(Js{2}, fKernel, 'same');
+            Js{1}(nanFramesH) = recon2(nanFramesH);
+            Js = deconvlucy(Js,fKernel, 25);
     end
     H2 = J{2};
     H3 = convn(H2, kernel, 'same');
+    H4 = Js{2};
 
-    errH = (H - convn(H2, doubleKernel, 'same')).^2;
-    errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
+    %errH = (H - convn(H2, doubleKernel, 'same')).^2;
+    %errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
 
     %compute F0
     F0mean = repmat(mean(F0sel,2, 'omitnan'),1,size(F0sel,2));
@@ -290,10 +380,11 @@ for trialIx = validTrials
     H2(nanFramesH) = nan; %The detected events
     H3(nanFramesH) = nan; %The denoised activity
 
-    exptSummary.dFerr{trialIx} = sum(W,1)'.*errH;
+    %exptSummary.dFerr{trialIx} = sum(W,1)'.*errH;
     exptSummary.matchFilt{trialIx}(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
     exptSummary.events{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
-    exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
+    exptSummary.denoised{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
+    exptSummary.dFraw{trialIx}(:,:,1) = sum(W,1)'.*H4; %[source#, time, channel]
     exptSummary.F0{trialIx}(:,:,1) = F0;
     exptSummary.footprints(:,:,1:size(W0,2),trialIx) = Wfull;
     
@@ -307,6 +398,9 @@ for trialIx = validTrials
 
     exptSummary.dFF{trialIx} = exptSummary.dF{trialIx}./exptSummary.F0{trialIx};
 end
+
+keyboard %CHECK THAT sanitycheckTMP images are not translated ralative to each other!!
+figure, 
 
 %prepare file for saving
 exptSummary.fns = fns;
@@ -327,8 +421,11 @@ end
 function [IMsel, F0,  W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params)
 if ~params.nmfBackgroundComps
     F0 = nan(size(IMsel));
+    szDS = size(F0selDS);
+    xo = 1:szDS(2);
+    xq = linspace(1, szDS(2), size(IMsel,2));
     for rix = 1:size(F0selDS, 1)
-        F0(rix,:) = interp(F0selDS(rix,:), params.dsFac)./params.dsFac;
+        F0(rix,:) = interp1(xo,F0selDS(rix,:), xq);
     end
     %baselineWindow = ceil(params.baselineWindow_Glu_s/params.frametime);
     %F0 = computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1, baselineWindow, 1)';
@@ -421,6 +518,63 @@ mask00 = sel;                    %unshifted
 mask10 = imtranslate(sel,[0 1]); %shifted 1 row
 mask01 = imtranslate(sel,[1 0]); %shifted 1 col
 mask11 = imtranslate(sel,[1 1]); %shifted 1 row and 1 col
+
+if shiftRC(1)>0.05 %the subpixel shift is nonnegligible, so interpolate
+    R0 = (1-shiftRC(1)).*IM(mask00(:),:) + shiftRC(1).*IM(mask10(:),:);
+    R1 = (1-shiftRC(1)).*IM(mask01(:),:) + shiftRC(1).*IM(mask11(:),:);
+else %subpixel shift is negligible, use the unshifted data (this prevents NaNing out good data at edges)
+    R0 = IM(mask00(:),:);
+    R1 = IM(mask01(:),:);
+end
+if shiftRC(2)>0.05
+    IMsel(inds,:) = (1-shiftRC(2)).*R0 + shiftRC(2).*R1;
+else
+    IMsel(inds,:) = R0;
+end
+end
+
+
+function IMsel = interpS2 (S2dat, meta, sel, shiftRC)
+%linearly interpolate the 3D matrix IM in each 2D plane at the selected
+%pixels sel, shifted by shiftRC
+%returns a 2D array: [sum(sel) x size(IM,3)]
+sz = size(IM);
+IMsel = nan(sum(sel(:)), sz(3));
+IM = reshape(IM, sz(1)*sz(2), []);
+
+inds = zeros(size(sel));
+inds(sel) = 1:sum(sel(:));
+
+sel = sel(1:sz(1), 1:sz(2));
+inds = inds(1:sz(1), 1:sz(2));
+
+intShift = floor(shiftRC);
+shiftRC = shiftRC-intShift;
+sel = imtranslate(sel, [intShift(2) intShift(1)]);
+inds = imtranslate(inds, [intShift(2) intShift(1)]);
+
+%ensure that all the masks have the same number of values:
+if shiftRC(1)>0.05
+    sel(end,:) = false; inds(end,:) = false;
+end
+if shiftRC(2)>0.05
+    sel(:,end) = false; inds(:,end) = false;
+end
+inds = inds(sel);
+
+mask00 = sel;                    %unshifted
+mask10 = imtranslate(sel,[0 1]); %shifted 1 row
+mask01 = imtranslate(sel,[1 0]); %shifted 1 col
+mask11 = imtranslate(sel,[1 1]); %shifted 1 row and 1 col
+
+for fix = nFrames:-1:1
+    for cix = numChannels:-1:1
+        IM = S2data.getImage(cix, fix, dt, 1);
+
+
+
+    end
+end
 
 if shiftRC(1)>0.05 %the subpixel shift is nonnegligible, so interpolate
     R0 = (1-shiftRC(1)).*IM(mask00(:),:) + shiftRC(1).*IM(mask10(:),:);

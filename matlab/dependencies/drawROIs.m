@@ -13,6 +13,7 @@ classdef drawROIs < handle
         hEditCh;
 
         hROIs;
+        roiData; %ROI information for immediate export
         hIm; %image object
 
         chDim = 3; %images are in XYC order
@@ -96,6 +97,17 @@ classdef drawROIs < handle
         end
 
         function close(obj, evnt,~)
+            roiData = {};
+            for rix = 1:length(obj.hROIs)
+                try
+                    S = rmfield(get(obj.hROIs(rix)), {'Parent', 'Children', 'ContextMenu'});
+                    S.mask = createMask(obj.hROIs(rix));
+                    roiData = [roiData {S}];
+                catch
+                    %this object didn't exist
+                end
+            end
+            obj.roiData = roiData;
             close(obj.hF);
         end
 
@@ -117,6 +129,7 @@ classdef drawROIs < handle
                     %this object didn't exist
                 end
             end
+            obj.roiData = roiData;
             save([obj.drsave filesep obj.fnsave], 'roiData');
 
             %save figure
@@ -240,9 +253,13 @@ classdef drawROIs < handle
             end
         end
 
-        function drawPolygon(obj, arg1, arg2)
+        function drawPolygon(obj, arg1, arg2) 
             L = length(obj.hROIs)+1;
-            obj.hROIs(L) = drawpolygon(obj.hAx);
+            if L==1
+                obj.hROIs = drawpolygon(obj.hAx);
+            else
+                obj.hROIs(L) = drawpolygon(obj.hAx);
+            end
             set(obj.hROIs(L), 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
             cm = get(obj.hROIs(L), 'ContextMenu');
             uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
@@ -251,7 +268,11 @@ classdef drawROIs < handle
 
         function drawCircle(obj, arg1, arg2)
             L = length(obj.hROIs)+1;
-            obj.hROIs(L) = drawellipse(obj.hAx);
+            if L==1
+                obj.hROIs = drawellipse(obj.hAx);
+            else
+                obj.hROIs(L) = drawellipse(obj.hAx);
+            end
             set(obj.hROIs(L), 'FaceAlpha', 0, 'labelAlpha', 0 , 'labelTextColor', 'y', 'linewidth', 0.5, 'MarkerSize', 1);
             cm = get(obj.hROIs(L), 'ContextMenu');
             uimenu(cm,'Text','Set Label','MenuSelectedFcn',@(arg1,arg2)(obj.setLabel(obj.hROIs(L)))); %add a 'Set Label' context menu
