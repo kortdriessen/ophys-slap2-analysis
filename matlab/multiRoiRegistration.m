@@ -1,7 +1,5 @@
 function multiRoiRegistration(alignHz, overwriteExisting)
-maxshift = 80;
-clipShift = 5;%the maximum allowable shift per frame
-alpha = 0.005; %exponential time constant for template
+
 if ~nargin || isempty(alignHz)
     alignHz = 50; %we will align data at this timescale, Hz
 end
@@ -14,21 +12,32 @@ if ~iscell(fns)
     fns = {fns};
 end
 
-for f_ix = 1:length(fns)
-    fn = fns{f_ix};
-    disp(['Aligning: ' [dr filesep fn]])
-    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(alignHz) 'Hz.tif'];
+aData.alignHz = alignHz;
+aData.maxshift = 50;
+aData.clipShift = 5;%the maximum allowable shift per frame
+aData.alpha = 0.005; %exponential time constant for template
+
+parfor f_ix = 1:length(fns)
+    alignAsync(dr, fns{f_ix}, aData, overwriteExisting);
+end
+
+disp('done multiRoiRegistration.')
+end
+
+function alignAsync(dr, fn, aData, overwriteExisting)
+disp(['Aligning: ' [dr filesep fn]])
+    fnwrite = [dr filesep fn(1:end-4) '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
     fnAdata = [dr filesep fn(1:end-4) '_ALIGNMENTDATA.mat'];
 
-    if exist(fnAdata, 'file') && exist(fnwrite, 'file')
+    if ~overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
         disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
-        continue
+        return
     end
 
     S2data = slap2.Slap2DataFile([dr filesep fn]);
     meta = loadMetadata([dr filesep fn]);
     linerateHz = 1/meta.linePeriod_s;
-    dt = linerateHz/alignHz;
+    dt = linerateHz/aData.alignHz;
     numChannels = S2data.numChannels;
     numLines = S2data.totalNumLines;
     
@@ -48,8 +57,8 @@ for f_ix = 1:length(fns)
     Y = squeeze(sum(Y,3));
     
     %make data smaller for alignment 
-    trimRows = [find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last')]; 
-    trimCols = [find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last')]; 
+    trimRows = find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last'); 
+    trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last'); 
     Y = Y(trimRows, trimCols,:);
     sz = size(Y);
 
@@ -65,8 +74,8 @@ for f_ix = 1:length(fns)
     [bestR, maxind] = max(median(R));
     frameInds = find(R(:,maxind)>=bestR);
     
-    [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshift))-maxshift, (1:(sz(2)+2*maxshift))-maxshift); %view matrices for interpolation
-    template = nan(2*maxshift+sz(1), 2*maxshift+sz(2));
+    [viewR, viewC] = ndgrid((1:(sz(1)+2*aData.maxshift))-aData.maxshift, (1:(sz(2)+2*aData.maxshift))-aData.maxshift); %view matrices for interpolation
+    template = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2));
     for fix = 1:length(frameInds)
         template(:,:,fix) = interp2(1:sz(2), 1:sz(1), Y(:,:,frameInds(fix)),viewC-motion(2,frameInds(fix), maxind), viewR-motion(1,frameInds(fix), maxind), 'linear', nan);
     end
@@ -106,9 +115,9 @@ for f_ix = 1:length(fns)
         end
 
         Ttmp = mean(cat(3, T0,template),3, 'omitnan');
-        T = Ttmp(maxshift-initR + (1:sz(1)), maxshift-initC+(1:sz(2)));
+        T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
         
-        [motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], clipShift);
+        [motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
         motionDSr(DSframe) = initR+motOutput(1);
         motionDSc(DSframe) = initC+motOutput(2);
         aErrorDS(DSframe) = 1-corrCoeff^2;
@@ -129,7 +138,7 @@ for f_ix = 1:length(fns)
 
         nantmp = sel & isnan(template);
         template(nantmp) = A(nantmp);
-        template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
+        template(sel) = (1-aData.alpha)*template(sel) + aData.alpha*(A(sel));
         
         initR = round(motionDSr(DSframe));
         initC = round(motionDSc(DSframe));
@@ -145,20 +154,20 @@ for f_ix = 1:length(fns)
         registrationFailed = true;
     end
     if registrationFailed
-        msgbox(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
-        continue
+        disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
+        return
     end
 
     %save alignment metadata
     aData.numChannels = numChannels;
-    aData.frametime = 1/alignHz;
+    aData.frametime = 1/aData.alignHz;
     aData.DSframes = DSframes;
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.aError = aErrorDS;
     aData.aRankCorrDS = aRankCorrDS;
-    aData.cropRow = trimRows(1)-maxshift; %offset to add to ROIs to index into original recording
-    aData.cropCol = trimCols(1)-maxshift; %offset to add to ROIs to index into original recording
+    aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
+    aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
     %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
     aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
@@ -172,39 +181,6 @@ for f_ix = 1:length(fns)
     %  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
 
     save(fnAdata, 'aData');
-end
-
-disp('done multiRoiRegistration.')
-end
-
-function Y = downsampleTime(Y, ds_time)
-for ix = 1:ds_time
-    Y = Y(:,:,:,1:2:(2*floor(end/2)))+ Y(:,:,:,2:2:end);
-end
-end
-
-function [Y, readsuccess, done] = readFrames(tiffObj, nFramesToRead, nChannels)
-nReads = nFramesToRead*nChannels;
-done = false;
-Y = single(tiffObj.read);
-Y(:,:,2:nReads) = nan;
-try
-    for r = 2:nReads
-        tiffObj.nextDirectory;
-        Y(:,:,r) = tiffObj.read;
-    end
-catch ME
-    readsuccess = false;
-    return
-end
-Y = reshape(Y, size(Y,1), size(Y,2), nChannels, nFramesToRead);
-readsuccess = true;
-try
-    tiffObj.nextDirectory;
-catch
-    disp('reached End of File');
-    done = true;
-end
 end
 
 function meta = loadMetadata(datFilename)
