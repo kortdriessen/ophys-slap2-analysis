@@ -20,7 +20,8 @@ end
 
 assert(exist(remotepath, 'file'));
 randName = [int2str(round(1e10*rand+0.1)) '.tif'];
-localpath = [localDir randName];
+localpath = [localDir  filesep   randName];
+disp(localpath)
 copyfile(remotepath, localpath);
 A = ScanImageTiffReader(localpath);
 data = A.data();

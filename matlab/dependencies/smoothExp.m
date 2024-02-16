@@ -5,6 +5,7 @@ function sVals = smoothExp(D, mode, window)
 %first dimension is time
 origsz = size(D);
 D = reshape(D, size(D,1), []);
+window = min(window, size(D,1));
 t = (1:window)';
 p = [t ones(size(t))];
 
@@ -18,7 +19,7 @@ end
 weights = t./length(t);
 sVals(t,:) = weights.*sVals(t,:) + (1-weights).*lVals;
 
-mVals = smoothdata(D(1:2*window,:) - sVals(1:2*window,:), mode, window, 'omitnan');
+mVals = smoothdata(D(1:min(end,2*window),:) - sVals(1:min(end,2*window),:), mode, window, 'omitnan');
 sVals(1:window,:) = sVals(1:window,:) + mVals(1:window,:);
 sVals = reshape(sVals, origsz);
 end
