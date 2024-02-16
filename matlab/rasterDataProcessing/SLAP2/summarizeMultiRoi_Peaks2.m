@@ -251,8 +251,10 @@ clear rawIMs
 %for each file, load high res data and refine
 params.tau_full=params.tau_s*params.analyzeHz;
 roiData = ROIs(DMDix).roiData;
-parfor trialIx = validTrials
-    E{trialIx} = processTrialAsync(dr, fnRaw{trialIx}, W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, motOutput(:,trialIx), roiData, params);
+vTrialIxs = 1:length(validTrials);
+parfor vtIx = vTrialIxs
+    trialIx = validTrials(vtIx); 
+    E{vtIx} = processTrialAsync(dr, fnRaw{trialIx}, W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, motOutput(:,trialIx), roiData, params);
 end
 
 %per-trial images

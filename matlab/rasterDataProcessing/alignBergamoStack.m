@@ -16,11 +16,21 @@ tiffFn = fullfile(dr,fn);
 tiffFn = sort_nat(tiffFn);
 
 [IMs,meta] = readTiff(tiffFn{1});
-try
-    eval(meta);
-catch ME
-    disp(ME.message);
+metaLines = strsplit(meta, '\n');
+for lineIx = 1:length(metaLines)
+    try
+        eval([metaLines{lineIx} ';']);
+    catch ME
+        continue
+    end
 end
+
+% try
+%     eval(meta);
+% catch ME
+%     disp(ME.message);
+% end
+
 
 numChannels = length(SI.hChannels.channelSave);
 numFramesPerSlice = SI.hStackManager.framesPerSlice;
