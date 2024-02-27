@@ -7,7 +7,9 @@
 
 [fn, dr] = uigetfile('*.tif*', 'Select ONE FILE PER PLANE', 'multiselect', 'on');
 if isnumeric(fn)
-    return % user abort
+    return %
+    % 
+    % user abort
 end
 if ~iscell(fn)
     fn = {fn};

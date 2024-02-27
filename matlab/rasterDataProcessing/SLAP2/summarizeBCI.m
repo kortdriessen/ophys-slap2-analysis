@@ -1,77 +1,74 @@
-function summarizeMultiRoi_Peaks2(nDMDs)
+function summarizeBCI(dr)
     %TO DO:
     %PARAMETER SENSITIVITY ANALYSIS
 
     %add some global NMF components?
         %initialize with random values
-
-if nargin<1
-    nDMDs = 2;
-end
-cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
+%cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
+nDMDs = 2;
 
-params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
+%general params
+params.analyzeHz = 200; %frame rate used for analysis
+
+%filtering params
 params.sigma_px = 1.5; %1.33;   % space constant in pixels
-params.eventRateThresh_hz = 1/10; % minimum event rate in Hz
-params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
-params.nmfIter = 5; %number of iterations of NMF refinement
-params.dXY = 3; %how large sources can be (radius), pixels
-params.upsample = 3; %how many times to upsample the imaging resolution for finding local maxima to identify sources; affects maximum source density
-params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
+params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
 params.denoiseWindow_samps = 35; %number of samples to average together for denoising; REFACTOR THIS OUT AND USE SECONDS!
 params.denoiseWindow_s = 0.75; %number of samples to average together for denoising
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
-params.analyzeHz = 200; %frame rate used for analysis
 
-% %select a set of aligned downsampled recordings (trials)
-% [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
-% if ~iscell(fns)
-%     fns = {fns};
-% end
+%localization params
+params.eventRateThresh_hz = 0.01; % minimum event rate in Hz
+params.tilesizeLoc = 64; %Tile size used for computing statistics for localization; Accounts for image statistics varying slowly across FOV.
+params.threshSNRloc = 6; % Z-score threshold for calling a localization
+params.threshSKloc = 4; %threshold on skewness-based summary statistic for pixels to consider for localizations
+params.upsample = 3; %how many times to upsample the imaging resolution for finding local maxima to identify sources; affects maximum source density
 
-%select ALL aligned multiRoi recordings (trials)
-[fns, dr] = uigetfile('*DMD1*REGISTERED*.tif', 'multiselect', 'on');
-if ~iscell(fns)
-    fns = {fns};
-end
+%NMF params
+params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
+params.nmfIter = 5; %number of iterations of NMF refinement
+params.dXY = 3; %how large sources can be (radius), pixels
+params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
+
+%load trial table
+load([dr filesep 'trialTable.mat'], 'trialTable');
 
 savedr = [dr filesep 'ExperimentSummary'];
 if ~exist(savedr, 'dir')
     mkdir(savedr);
 end
-fnsave = [savedr filesep 'Summary-' int2str(length(fns)) 'filesSelected-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
-%[fnsave, drsave] = uiputfile([savedr filesep 'Summary.mat'], 'Set filename for saving summary for this condition');
+fnsave = [savedr filesep 'Summary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %confirm that all files exist for both DMDs
-keepFns = true(1, length(fns));
-for trialIx = length(fns):-1:1
+nTrials = length(trialTable.trueTrialIx);
+keepTrials = true(1, nTrials);
+for trialIx = nTrials:-1:1
     for DMDix = 1:nDMDs
-        fn = fns{trialIx};
-        dmdNumStringIndex = strfind(fn, 'DMD1')+3;
-        fn(dmdNumStringIndex) = int2str(DMDix);
-        fnStemEnd = strfind(fn, '_REGISTERED') -1;
-        
-        alignFn =  [fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'];
+        trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
+        tiffFn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
+        if ~exist([dr filesep tiffFn], 'file')
+            disp(['Missing tiff file:' tiffFn])
+            keepTrials(trialIx) = false;
+        end
+        alignFn =  [trialStr '_ALIGNMENTDATA.mat'];
         if ~exist([dr filesep alignFn], 'file')
             disp(['Missing alignData file:' alignFn])
-            keepFns(trialIx) = false;
+            keepTrials(trialIx) = false;
         end
-        fnRaw{trialIx} = [fn(1:fnStemEnd) '.dat'];
-        if ~exist([dr filesep alignFn], 'file')
+        fnRaw{trialIx} = trialTable.(strcat('DMD', int2str(DMDix), 'filename')){trialIx};
+        if ~exist([dr filesep fnRaw{trialIx}], 'file')
             disp(['Missing Dat file:' alignFn])
-            keepFns(trialIx) = false;
+            keepTrials(trialIx) = false;
         end
     end
 end
-if ~all(keepFns)
-    msgbox(['Alignment files were missing for ' int2str(sum(~keepFns)) ' trials. Proceeding without them.']);
-    fns = fns(keepFns);
+if ~all(keepTrials)
+    msgbox(['Files were missing for ' int2str(sum(~keepTrials)) ' trials; likely failed alignments. Proceeding without them.']);
 end
 
-%if isempty(userROIs)
 %call up a GUI for the user to define Soma ROI and regions to exclude
 fnAnn = [dr filesep 'ANNOTATIONS.mat'];
 if exist(fnAnn, 'file')
@@ -79,9 +76,8 @@ if exist(fnAnn, 'file')
 else
     for DMDix = 1:nDMDs
         %load image data
-        fn = fns{1};
-        dmdNumStringIndex = strfind(fn, 'DMD1')+3;
-        fn(dmdNumStringIndex) = num2str(DMDix);
+        trialStr = ['E' int2str(trialTable.epoch(1)) 'T1' 'DMD' int2str(DMDix)];
+        fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
         IM = copyReadDeleteScanImageTiff([dr filesep fn]);
         IM = squeeze(mean(IM,[3 4], 'omitnan'));
         hROIs(DMDix) = drawROIs(sqrt(max(0,IM)), dr, fn);
@@ -96,9 +92,7 @@ else
 end
 
 %load some metadata
-fnStemEnd = strfind(fns{1}, '_REGISTERED') -1;
-fnStem = fns{1}(1:fnStemEnd);
-load([dr filesep fnStem '_ALIGNMENTDATA.mat'], 'aData');
+load([dr filesep trialStr '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
 params.numChannels = numChannels;
 params.dsFac = 1; %aData.dsFac;
@@ -110,67 +104,24 @@ for DMDix = nDMDs:-1:1
 %actIM = nan(1,1,numChannels,1);
 disp('Loading data and performing localizations...')
 
-parfor trialIx = 1:length(fns)
-    fn = fns{trialIx};
-    dmdNumStringIndex = strfind(fn, 'DMD1')+3;
-    fn(dmdNumStringIndex) = num2str(DMDix);
-    [rawIMs{trialIx}, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks(trialIx), discardFrames{trialIx}]= loadAndLocalizeTrialAsync(dr, fn, numChannels, params)
+%Perform Localizations
+rawIMs = cell(1,nTrials); mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); discardFrames = cell(1,nTrials);
+parfor trialIx = 1:nTrials
+    if keepTrials(trialIx)
+        trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
+        fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
+        [rawIMs{trialIx}, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks(trialIx), discardFrames{trialIx}]= loadAndLocalizeTrialAsync(dr, fn, numChannels, params)
+    end
 end
+%Assemble same-sized mean images from different-sized trial means
 szm1 = max(cellfun(@(x)size(x,1),mIM)); szm2 = max(cellfun(@(x)size(x,2), aIM));
-meanIM = nan(szm1,szm2,numChannels, length(fns)); actIM = nan(szm1,szm2,1, length(fns));
-for trialIx = 1:length(fns)
+meanIM = nan(szm1,szm2,numChannels, nTrials); actIM = nan(szm1,szm2,1, nTrials);
+for trialIx = 1:nTrials
     tmp =  mIM{trialIx};
     meanIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp; 
     tmp =  aIM{trialIx};
     actIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp; 
 end
-clear mIM aIM
-
-% for trialIx = length(fns):-1:1
-%     fn = fns{trialIx};
-%     dmdNumStringIndex = strfind(fn, 'DMD1')+3;
-%     fn(dmdNumStringIndex) = num2str(DMDix);
-% 
-%     %ensure the high res file exists
-%     ind =strfind(fn, '_REGISTERED');
-%     fnRaw{trialIx} = [fn(1:ind-1) '.dat'];
-%     assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding DAT file found for downsampled TIFF file:' fn])
-% 
-%     %load the tiff
-%     %A = ScanImageTiffReader([dr filesep fn]);
-%     IM = copyReadDeleteScanImageTiff([dr filesep fn]);
-%     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
-%     meanIM(end:size(IM,1),:,:,:) = nan;
-%     meanIM(:, end:size(IM,2),:,:) = nan;
-%     meanIM(:,:,:,trialIx) = nan;
-%     meanIM(1:size(IM,1),1:size(IM,2),:,trialIx) = mean(IM,4, 'omitnan');
-% 
-%     %load alignment data
-%     fnStemEnd = strfind(fn, '_REGISTERED') -1;
-%     load([dr filesep fn(1:fnStemEnd) '_ALIGNMENTDATA.mat'], 'aData');
-%     aData.dsFac = 1; %SLAP2 data does not have downsampling per se
-%     params.dsFac = aData.dsFac;
-%     params.frametime = aData.frametime;
-% 
-%     alignData{trialIx} = aData;
-%     % motionDSc{trialIx} = aData.motionDSc;
-%     % motionDSr{trialIx} = aData.motionDSr;
-%     % DSframes{trialIx} = aData.DSframes;
-% 
-%     %discard motion frames
-%     tmp = aData.aRankCorrDS(:)-smoothExp(aData.aRankCorrDS(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
-%     discardFrames{trialIx} = imdilate(tmp<-(4*std(tmp)), ones(1,5));
-%     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
-%     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
-% 
-%     [IMc, peaks(trialIx)] = localizeFlashesSLAP2(rawIMs{trialIx}, aData, params);
-% 
-%     %calculate correlation image
-%     actIM(end:size(IMc,1),:,:,:) = nan;
-%     actIM(:,end:size(IMc,2),:,:) = nan;
-%     actIM(:,:,:,trialIx) = nan;
-%     actIM(1:size(IMc,1),1:size(IMc,2),1,trialIx) = IMc;
-% end
 params.sz = size(meanIM, [1 2]);
 
 clear aData
@@ -179,15 +130,20 @@ clear aData
 disp('Making template for aligning across trials...')
 maxshift = 5;
 M = squeeze(sum(meanIM, 3));
-template = makeTemplateMultiRoi(M, maxshift);
+template = makeTemplateMultiRoi(M(:,:,keepTrials), maxshift);
 
 %align all mean images to template
 disp('Aligning across trials...')
-meanAligned = []; actAligned = []; motOutput = [];
+meanAligned = []; actAligned = []; 
+corrCoeff = nan(1,nTrials);
+motOutput = nan(2,nTrials);
 peaksCat = struct;
 Mpad = nan([size(template) size(M,3)]);
 Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
-for trialIx = length(fns):-1:1
+for trialIx = nTrials:-1:1
+    if ~keepTrials(trialIx)
+        continue %skip
+    end
     disp(['trial: ' int2str(trialIx)])
     mot1 = xcorr2_nans(Mpad(:,:,trialIx), template, [0 ; 0], maxshift);
     [motOutput(:,trialIx), corrCoeff(trialIx)] = xcorr2_nans(Mpad(:,:,trialIx), template, round(mot1'), maxshift);
@@ -198,7 +154,7 @@ for trialIx = length(fns):-1:1
     end
     actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
 
-    if trialIx==length(fns)
+    if trialIx==nTrials
         peaksCat.row = peaks(trialIx).row - motOutput(1,trialIx);
         peaksCat.col = peaks(trialIx).col - motOutput(2,trialIx);
         peaksCat.val = peaks(trialIx).val;
@@ -221,7 +177,7 @@ ccf = corrCoeff;
 if nargin>1 && forceCorrThresh>0
     corrThresh = forceCorrThresh;
 else
-    corrThresh = min(0.96, median(ccf)-2*std(ccf));
+    corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
 end
 validTrials= find(ccf>corrThresh);
 exptSummary.meanIM = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
@@ -245,7 +201,7 @@ nSelPix = sum(any(selPix,3), 'all'); %number of selected pixels
 dFsel = nan(nSelPix, totalFrames); %extize
 baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 frameInd = 0;
-F0selDS = cell(length(fns),1);
+F0selDS = cell(nTrials,1);
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
@@ -262,10 +218,13 @@ clear rawIMs
 %for each file, load high res data and refine
 params.tau_full=params.tau_s*params.analyzeHz;
 roiData = ROIs(DMDix).roiData;
-E = cell(length(fns),1);
-parfor trialIx = 1:length(fns)
+E = cell(nTrials,1);
+parfor trialIx = 1:nTrials
     if any(validTrials==trialIx)
-        E{trialIx} = processTrialAsync(dr, fnRaw{trialIx}, W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, motOutput(:,trialIx), roiData, params);
+        fnRaw = trialTable.(strcat('DMD', int2str(DMDix), 'filename')){trialIx};
+        startLine=trialTable.(strcat('DMD', int2str(DMDix), 'firstLine'))(trialIx);
+        endLine =trialTable.(strcat('DMD', int2str(DMDix), 'lastLine'))(trialIx);
+        E{trialIx} = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
     end
 end
 
@@ -279,11 +238,11 @@ exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector f
 end
 
 %prepare file for saving
-exptSummary.fns = fns;
+exptSummary.trialTable = trialTable;
 exptSummary.dr = dr;
 
 %save
-save([drsave filesep fnsave], 'exptSummary');
+save(fnsave, 'exptSummary', "-v7.3");
 disp('Done summarizeMultiROI_Peaks')
 end
 

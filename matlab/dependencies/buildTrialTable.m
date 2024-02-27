@@ -25,6 +25,9 @@ epoch = 0;
 while ~isempty(unpickedfiles)
     epoch = epoch+1;
     [indx,tf] = listdlg('ListString',{unpickedfiles.name}, 'PromptString',['Select files for EPOCH ' int2str(epoch)]);
+    if ~tf
+        return
+    end
     epochfiles{epoch} = unpickedfiles(indx);
     unpickedfiles(indx) = [];
 end

@@ -1,4 +1,4 @@
-function [summary, P, params] = localizeFlashesSLAP2(IM, aData, params, doPlot)
+function [summary, P] = localizeFlashesSLAP2(IM, aData, params, doPlot)
 %inputs:
 %IM:        3D recording, X x Y x Time
 %aData:     alignment metadata
@@ -66,7 +66,7 @@ IMf(nans) = nan;
 summary = mean(IMf.^3, 3, 'omitmissing');
 summary(imdilate(isnan(summary), ones(5))) = nan; %remove noisy edges
 
-P = getTiledPeaks(IMf, IMavg, summary);
+P = getTiledPeaks(IMf, IMavg, summary, params);
 
 %plot a figure
 if doPlot
@@ -82,7 +82,7 @@ hold on,
 scatter(P.col,P.row,100*(P.val./mean(P.val)).^2, 'm')
 end
 
-function P = getTiledPeaks(IM, IMavg, summary)
+function P = getTiledPeaks(IM, IMavg, summary, params)
 valid = ~imdilate(isnan(IM), ones(5)); 
 peaks = valid;
 for dim = 1:3
@@ -100,7 +100,7 @@ vvv = IM(linInds);
 %vvv_ = vvv.*sqrt(IMavg(sub2ind(size(IMavg), rrr,ccc))); %signals normalized to image brightness
 
 sz = size(IM);
-tilesize = 64;
+tilesize = params.tilesizeLoc; %64;
 tilestartsR = 1:tilesize/2:(sz(1)-tilesize/4);
 tileendsR = min(sz(1), tilestartsR+tilesize-1);
 tilestartsC = 1:tilesize/2:(sz(2)-tilesize/4);
@@ -111,7 +111,7 @@ summaryVals = summary(sub2ind(size(summary), rrr, ccc));
 keep = false(1,length(ttt)); %which events to keep
 vNorm = zeros(length(ttt),1); %the event sizes, Z-scored
 
-threshSNR = 5; %the desired SNR as a z-score
+threshSNR = params.threshSNRloc; %5; %the desired SNR as a z-score
 
 for rix = 1:length(tilestartsR)
     for cix = 1:length(tilestartsC)
@@ -120,7 +120,7 @@ for rix = 1:length(tilestartsR)
         S = summary(tilestartsR(max(1,rix-1)):tileendsR(min(end,rix+1)), tilestartsC(max(1,cix-1)):tileendsC(min(end,cix+1)));
         if any(S(:))
             Sp = prctile(S(:), [1 33]);
-            Sthresh =  Sp(2) + 4*(Sp(2)-Sp(1));
+            Sthresh =  Sp(2) + params.threshSKloc*(Sp(2)-Sp(1));
             selS = summaryVals>Sthresh;
 
             vals = vvv(selStats & selS);

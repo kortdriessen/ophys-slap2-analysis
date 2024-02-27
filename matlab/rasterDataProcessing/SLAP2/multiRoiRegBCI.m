@@ -17,10 +17,10 @@ aData.clipShift = 5;%the maximum allowable shift per frame
 aData.alpha = 0.005; %exponential time constant for template
 
 parfor f_ix = 1:length(trialTable.trueTrialIx)
-    fnWrite = ['E' int2str(trialTable.epoch(fix)) 'T' int2str(f_ix) 'DMD1')];
-    alignAsync(dr, trialTable.DMD1filename{f_ix}, fnWrite, trialTable.DMD1firstLine, trialTable.DMD1lastLine, aData, overwriteExisting);
-    fnWrite = ['E' int2str(trialTable.epoch(fix)) 'T' int2str(f_ix) 'DMD2')];
-    alignAsync(dr, trialTable.DMD2filename{f_ix}, fnWrtie, trialTable.DMD2firstLine, trialTable.DMD2lastLine, aData, overwriteExisting);
+    fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD1'];
+    alignAsync(dr, trialTable.DMD1filename{f_ix}, fnWrite, trialTable.DMD1firstLine(f_ix), trialTable.DMD1lastLine(f_ix), aData, overwriteExisting);
+    fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD2'];
+    alignAsync(dr, trialTable.DMD2filename{f_ix}, fnWrite, trialTable.DMD2firstLine(f_ix), trialTable.DMD2lastLine(f_ix), aData, overwriteExisting);
 end
 
 disp('done multiRoiRegistration.')
@@ -155,7 +155,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     fTIF.close;
 
-    if std(motionDSc)>5 || std(motionDSr)>5
+    if std(motionDSc)>1 || std(motionDSr)>1
         registrationFailed = true;
     end
     if registrationFailed
@@ -171,6 +171,7 @@ disp(['Aligning: ' [dr filesep fn]])
     aData.motionDSr = motionDSr;
     aData.aError = aErrorDS;
     aData.aRankCorrDS = aRankCorrDS;
+    aData.recNegErr = recNegErr;
     aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 

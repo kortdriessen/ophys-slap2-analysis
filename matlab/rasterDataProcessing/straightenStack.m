@@ -12,7 +12,11 @@ for Z1 = 1:(size(IM, 4)-1)
     output = dftregistration_clipped(Z1fft,Z2fft,4,maxShift);
     dX = dX + output(4); dY = dY+output(3);
     IMout(:,:,:,Z1+1) = imtranslate(IM(:,:,:,Z1+1), [dX dY]);
-    IMc(:,:,:,Z1+1) = imtranslate(IMc(:,:,:,Z1+1), [dX dY]/scalingFac);
-    IMsk(:,:,:,Z1+1) = imtranslate(IMsk(:,:,:,Z1+1), [dX dY]/scalingFac);
+    if nargout>1
+        IMc(:,:,:,Z1+1) = imtranslate(IMc(:,:,:,Z1+1), [dX dY]/scalingFac);
+    end
+    if nargout>2
+        IMsk(:,:,:,Z1+1) = imtranslate(IMsk(:,:,:,Z1+1), [dX dY]/scalingFac);
+    end
 end
 end

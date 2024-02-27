@@ -16,10 +16,12 @@ tiffFn = fullfile(dr,fn);
 tiffFn = sort_nat(tiffFn);
 
 [IMs,meta] = readTiff(tiffFn{1});
-try
-    eval(meta);
-catch ME
-    disp(ME.message);
+metaLines = strsplit(meta, '\n');
+for lineIx = 1:length(metaLines)
+    try
+        eval([metaLines{lineIx} ';']);
+    catch
+    end
 end
 
 numChannels = length(SI.hChannels.channelSave);
@@ -61,7 +63,7 @@ IM = max(0, IM- prctile(IM(:), 1));
 
 %convert correlation image 
 IMc2 = max(0, IMc2- prctile(IMc2(:), 1));
-IMc2 = IMc2./max(IMc2, [], 'all');
+IMc2 = IMc2./prctile(IMc2(:), 99.9);
 IMc2(~isfinite(IMc2)) = 0;
 IMc2 = uint16(IMc2.*65000);
 IMsk2 = max(0, IMsk2- prctile(IMsk2(:), 1));
@@ -87,6 +89,7 @@ outputPathCh1corr = [tiffFn{1}(1:end-4) '-CORR_Ch1.ome.tif'];
 outputPathCh2corr = [tiffFn{1}(1:end-4) '-CORR_Ch2.ome.tif'];
 outputPathCh1sk = [tiffFn{1}(1:end-4) '-SK_Ch1.ome.tif'];
 outputPathCh2sk = [tiffFn{1}(1:end-4) '-SK_Ch2.ome.tif'];
+outputPathCh2corrSummary = [tiffFn{1}(1:end-4) '-CORR_2D_Ch2.ome.tif'];
 
 bfCheckJavaPath;
 metadata1 = createMinimalOMEXMLMetadata(squeeze(IM(:,:,1,:)));
@@ -102,6 +105,7 @@ bfsave(squeeze(IMc(:,:,1,:)), outputPathCh1corr, 'BigTiff', true);
 bfsave(squeeze(IMc(:,:,2,:)), outputPathCh2corr, 'BigTiff', true);
 bfsave(squeeze(IMsk(:,:,1,:)), outputPathCh1sk, 'BigTiff', true);
 bfsave(squeeze(IMsk(:,:,2,:)), outputPathCh2sk, 'BigTiff', true);
+bfsave(IMc2, outputPathCh2corrSummary);
 
 function [refPlane, corrPlane, skewPlane] = alignMultiChannel(IMs, b,a)
 Y = squeeze(makeHighPass(sum(IMs,3))); % data order is XYCTZV

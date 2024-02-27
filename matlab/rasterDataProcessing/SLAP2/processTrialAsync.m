@@ -1,4 +1,4 @@
-function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discardFrames, alignData, motOutput, roiData, params)
+function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0selDS, selPix, discardFrames, alignData, meanIM, motOutput, roiData, params)
     fn = fnRaw;
     disp('Loading high-res data for file:')
     disp([dr filesep fn])
@@ -7,10 +7,10 @@ function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discard
     S2data = slap2.Slap2DataFile([dr filesep fn]);
     meta = loadMetadata([dr filesep fn]);
     numChannels = S2data.numChannels;
-    numLines = S2data.totalNumLines;
+    %numLines = S2data.totalNumLines;
     linerateHz = 1/meta.linePeriod_s;
     dt = linerateHz/params.analyzeHz;
-    frameLines = ceil(dt:dt:numLines);
+    frameLines = ceil(startLine:dt:endLine);
     nFrames= length(frameLines);
     selPx2D = any(selPix,3);
     sz = size(selPx2D);
@@ -19,14 +19,18 @@ function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discard
     motionC = interp1(alignData.DSframes, alignData.motionDSc, frameLines, 'pchip', 'extrap') + motOutput(2);
     motionR = interp1(alignData.DSframes, alignData.motionDSr, frameLines, 'pchip', 'extrap') + motOutput(1);
     
+    labeled = medfilt2(meanIM(:,:,1), [3 3]);
+    labeled = labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
+    for cix = numChannels:-1:1
+        tmp = double(meanIM(:,:,cix));
+        mLabeled{cix} = tmp(labeled);
+    end
+
     Ysz = [length(alignData.trimRows) length(alignData.trimCols)];
     %interpolate the raw data at the shifted coordinates
     for fix = nFrames:-1:1
-        if ~mod(fix, 100)
-            disp(fix)
-        end
         for cix = 1:numChannels
-            Y = S2data.getImage(1, frameLines(fix), ceil(dt), 1);
+            Y = S2data.getImage(cix, frameLines(fix), ceil(dt), 1);
             Y = Y(alignData.trimRows, alignData.trimCols);
             Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData.viewC+motionC(fix), alignData.viewR+motionR(fix), 'linear', nan);
             if cix==1
@@ -35,15 +39,24 @@ function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discard
                 IM2sel(:, fix) = Y(selPx2D);
             end
 
+            %compute global ROI activity
+            mIM = meanIM(:,:,cix);
+            yLabeled = double(Y(labeled)); nans= isnan(yLabeled);
+            FF = (sum(yLabeled(~nans))./sum(mLabeled{cix}(~nans))).*sum(mLabeled{cix});
+            exptSummary.global.F(fix,cix) = FF;
+
             %compute user ROI activity
             for rix = 1:length(roiData)
-                mask = roiData.mask;
-                ROIs.F(rix, fix,cix) = sum(Y(mask));
+                mask = roiData{rix}.mask;
+                tmp1 = Y(mask); tmp2 = mIM(mask);
+                nans= isnan(tmp1);
+                FF = (sum(tmp1(~nans))./sum(tmp2(~nans))).*sum(tmp2);
+                exptSummary.ROIs.F(rix, fix,cix) = FF;
             end
 
-            if fix<200 && cix==1
-                sanitycheckTMP(:,:,201-fix) = Y;
-            end
+            % if fix<200 && cix==1
+            %     sanitycheckTMP(:,:,201-fix) = Y;
+            % end
         end
     end
 
@@ -125,7 +138,7 @@ function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discard
     exptSummary.F0(:,:,1) = F0;
     exptSummary.footprints = Wfull;
     
-    exptSummary.sanityCheck = mean(sanitycheckTMP,3, 'oimitnan');
+    %exptSummary.sanityCheck = mean(sanitycheckTMP,3, 'omitnan');
 
     %compute channel 2 signals
     if numChannels==2
@@ -135,5 +148,5 @@ function exptSummary = processTrialAsync(dr, fnRaw, W0, F0selDS, selPix, discard
         exptSummary.F0(:,:,2) = F0_2;
     end
 
-    exptSummary.dFF = exptSummary.dF./exptSummary.F0;
+    exptSummary.dFF = exptSummary.dFraw./exptSummary.F0;
 end

@@ -91,6 +91,7 @@ disp(['Aligning: ' [dr filesep fn]])
     motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
     aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
     aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
+    recNegErr = nan(1,nDSframes); %rectified negative residual, a better measure of alignment quality
 
     %output TIF
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
@@ -135,6 +136,7 @@ disp(['Aligning: ' [dr filesep fn]])
         sel = ~isnan(A);
         selCorr = sel & ~isnan(template);
         aRankCorrDS(DSframe) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
+        recNegErr(DSframe) = mean(min(0, A(selCorr)-template(selCorr)).^2);
 
         nantmp = sel & isnan(template);
         template(nantmp) = A(nantmp);
@@ -150,7 +152,8 @@ disp(['Aligning: ' [dr filesep fn]])
 
     fTIF.close;
 
-    if std(motionDSc)>5 || std(motionDSr)>5
+    %QUALITY CONTROL: DISCARD TRIALS IF 
+    if std(motionDSc)>1 || std(motionDSr)>1
         registrationFailed = true;
     end
     if registrationFailed
@@ -166,6 +169,7 @@ disp(['Aligning: ' [dr filesep fn]])
     aData.motionDSr = motionDSr;
     aData.aError = aErrorDS;
     aData.aRankCorrDS = aRankCorrDS;
+    aData.recNegErr = recNegErr;
     aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
