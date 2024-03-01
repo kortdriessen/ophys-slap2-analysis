@@ -20,7 +20,7 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     motionR = interp1(alignData.DSframes, alignData.motionDSr, frameLines, 'pchip', 'extrap') + motOutput(1);
     
     labeled = medfilt2(meanIM(:,:,1), [3 3]);
-    labeled = labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
+    labeled = ~isnan(meanIM(:,:,1)) & labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
     for cix = numChannels:-1:1
         tmp = double(meanIM(:,:,cix));
         mLabeled{cix} = tmp(labeled);
@@ -48,7 +48,7 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
             %compute user ROI activity
             for rix = 1:length(roiData)
                 mask = roiData{rix}.mask;
-                tmp1 = Y(mask); tmp2 = mIM(mask);
+                tmp1 = Y(mask); tmp2 = mIM(mask);   tmp2(isnan(tmp2)) = 0;
                 nans= isnan(tmp1);
                 FF = (sum(tmp1(~nans))./sum(tmp2(~nans))).*sum(tmp2);
                 exptSummary.ROIs.F(rix, fix,cix) = FF;
@@ -64,6 +64,8 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     
     discard = reshape(repmat(discardFrames(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
     IMsel(:,discard) = nan;     %throw away movement frames as above
+    exptSummary.global.F(discard,:) = nan;
+    exptSummary.ROIs.F(:, discard,:) = nan;
 
     [IMsel, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);
 
@@ -137,7 +139,7 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     exptSummary.dFraw(:,:,1) = sum(W,1)'.*H4; %[source#, time, channel]
     exptSummary.F0(:,:,1) = F0;
     exptSummary.footprints = Wfull;
-    
+    exptSummary.discardFrames = discard;
     %exptSummary.sanityCheck = mean(sanitycheckTMP,3, 'omitnan');
 
     %compute channel 2 signals

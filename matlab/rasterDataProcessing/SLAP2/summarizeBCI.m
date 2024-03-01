@@ -238,6 +238,7 @@ exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector f
 end
 
 %prepare file for saving
+exptSummary.params = params;
 exptSummary.trialTable = trialTable;
 exptSummary.dr = dr;
 
