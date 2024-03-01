@@ -60,8 +60,10 @@ for trialIx = length(fns):-1:1
     assert(exist([dr filesep fnRaw{trialIx}], 'file'), ['No corresponding RAW tiff recording found for file:' fn])
 
     %load the tiff
-    A = ScanImageTiffReader([dr filesep fn]);
-    IM = double(A.data);
+    [IM, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+    IM = double(IM);
+    % A = ScanImageTiffReader([dr filesep fn]);
+    % IM = double(A.data);
     if size(IM,3)<100
         error(['The file:' fn 'is very short. You should probably not include it?']);
     end
@@ -195,8 +197,10 @@ for trialIx = validTrials
     fn = fnRaw{trialIx};
     
     %load the high time resolution tiff
-    A = ScanImageTiffReader([dr filesep fn]);
-    IM = double(A.data);
+    [IM, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+    IM = double(IM);
+    % A = ScanImageTiffReader([dr filesep fn]);
+    % IM = double(A.data);
 
     %rearrange IM into correct dimensions
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);

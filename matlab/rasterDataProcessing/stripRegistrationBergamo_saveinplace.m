@@ -4,7 +4,7 @@ clipShift = 5;%the maximum allowable shift per frame
 alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
 if nargin<1 || isempty(ds_time)
-    ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
+    ds_time = 1; % the movie is downsampled using averaging in time by a factor of 2^ds_time
 end
 dsFac = 2^ds_time;
 if nargin<2 || isempty(fn)
@@ -21,8 +21,10 @@ for f_ix = 1:length(fns)
     fn = fns{f_ix};
     disp(['Aligning: ' [dr filesep fn]])
 
-    A = ScanImageTiffReader([dr filesep fn]);
-    desc=A.descriptions();
+    [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+
+    % A = ScanImageTiffReader([dr filesep fn]);
+    % desc=A.descriptions();
 
 
     eval(desc{1});
@@ -36,7 +38,7 @@ for f_ix = 1:length(fns)
     fnstem = [dr filesep fn(1:end-4)];
     % copyfile([dr filesep fn], [fnstem '.tif']);
 
-    meta = A.metadata;
+    % meta = A.metadata;
     metaLines = strsplit(meta, '\n');
     for lineIx = 1:length(metaLines)
         try
@@ -54,7 +56,7 @@ for f_ix = 1:length(fns)
 
     frametime = median(diff(timestamp(1:numChannels:end)));
 
-    Ad = single(A.data);
+    % Ad = single(A.data);
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
     Ad = Ad(removeLines+1:end,:,:,:);
 
