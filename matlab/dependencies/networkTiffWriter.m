@@ -5,7 +5,7 @@ function networkTiffWriter(mat, fnwrite, pixelscale, localDr)
 writeDr = dr;
 
 if fname(1:2) == 'Z:'
-    if isempty(localDr); localDr = 'F:\tmp_tiffIO'; end
+    if ~exist('localDr', 'var'); localDr = 'F:\tmp_tiffIO'; end
   
     writeDr = localDr;
     if exist(writeDr,'dir') ~= 7; mkdir(writeDr); end

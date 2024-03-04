@@ -148,7 +148,7 @@ for f_ix = 1:length(fns)
     Bsum = zeros([size(viewR') numChannels]);
     Bcount = zeros([size(viewR') numChannels]);
 
-    tiffSave = single(zeros(length(viewR), length(viewC), nDSframes*numChannels));
+    tiffSave = single(zeros([size(viewR, [2 1]) nDSframes*numChannels]));
 
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
@@ -185,7 +185,7 @@ for f_ix = 1:length(fns)
     %save an original-time-resolution recording
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
     % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-    tiffSave = single(zeros(length(viewR), length(viewC), length(motionC)*numChannels));
+    tiffSave = single(zeros([size(viewR, [2 1]) length(motionC)*numChannels]));
     for frame = 1:length(motionC)
         for ch = 1:numChannels
             B = interp2(1:sz(2), 1:sz(1), Ad(:,:,ch,frame),viewC+motionC(frame), viewR+motionR(frame), 'linear', nan)';
@@ -193,6 +193,7 @@ for f_ix = 1:length(fns)
             % fTIF.WriteIMG(single(B));
         end
     end
+    clear('tiffSave')
     % fTIF.close;
 
     %save alignment metadata

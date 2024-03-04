@@ -3,7 +3,7 @@ function [data, desc, meta] = networkScanImageTiffReader(fname, localDr)
 [dr, name, ext] = fileparts(fname);
 
 if fname(1:2) == 'Z:'
-    if isempty(localDr); localDr = 'F:\tmp_tiffIO'; end
+    if ~exist('localDr', 'var'); localDr = 'F:\tmp_tiffIO'; end
 
     dr = localDr;
 
@@ -28,6 +28,8 @@ data = single(A.data);
 
 clear('A');
 
-delete(fullfile(dr, [name ext]));
+if fname(1:2) == 'Z:'
+    delete(fullfile(localDr, [name ext]));
+end
 
 end
