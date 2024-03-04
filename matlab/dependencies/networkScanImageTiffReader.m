@@ -1,9 +1,11 @@
-function [data, desc, meta] = networkScanImageTiffReader(fname)
+function [data, desc, meta] = networkScanImageTiffReader(fname, localDr)
 
 [dr, name, ext] = fileparts(fname);
 
 if fname(1:2) == 'Z:'
-    dr = 'F:\tmp_tiffReader';
+    if isempty(localDr); localDr = 'F:\tmp_tiffIO'; end
+
+    dr = localDr;
 
     if exist(dr,'dir') ~= 7; mkdir(dr); end
 

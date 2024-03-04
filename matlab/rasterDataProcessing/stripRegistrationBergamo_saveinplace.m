@@ -144,22 +144,30 @@ for f_ix = 1:length(fns)
 
     %save a downsampled aligned recording
     fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
     Bsum = zeros([size(viewR') numChannels]);
     Bcount = zeros([size(viewR') numChannels]);
+
+    tiffSave = single(zeros(length(viewR), length(viewC), nDSframes*numChannels));
+
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
         YY = downsampleTime(Ad(:,:,:, readFrames), ds_time);
         for ch = 1:numChannels
             B =  interp2(1:sz(2), 1:sz(1), YY(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan)';
-            fTIF.WriteIMG(single(B));
+            tiffSave(:,:,(DSframe-1)*numChannels+ch) = single(B);
+            % fTIF.WriteIMG(single(B));
 
             Bcount(:,:,ch) = Bcount(:,:,ch) + ~isnan(B);
             B(isnan(B)) = 0;
             Bsum(:,:,ch) = Bsum(:,:,ch)+double(B);
         end
     end
-    fTIF.close;
+
+    networkTiffWriter(tiffSave, fnwrite, pixelscale);
+    clear('tiffSave');
+
+    % fTIF.close;
 
     %save an average image for each channel
     for ch = 1:numChannels
@@ -168,21 +176,24 @@ for f_ix = 1:length(fns)
         maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
         Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
         fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
-        fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-        fTIF.WriteIMG(single(Bmean));
-        fTIF.close;
+        networkTiffWriter(single(Bmean), fnwrite, pixelscale);
+        % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+        % fTIF.WriteIMG(single(Bmean));
+        % fTIF.close;
     end
 
     %save an original-time-resolution recording
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    tiffSave = single(zeros(length(viewR), length(viewC), length(motionC)*numChannels));
     for frame = 1:length(motionC)
         for ch = 1:numChannels
             B = interp2(1:sz(2), 1:sz(1), Ad(:,:,ch,frame),viewC+motionC(frame), viewR+motionR(frame), 'linear', nan)';
-            fTIF.WriteIMG(single(B));
+            tiffSave(:,:,(frame-1)*numChannels+ch) = single(B);
+            % fTIF.WriteIMG(single(B));
         end
     end
-    fTIF.close;
+    % fTIF.close;
 
     %save alignment metadata
     aData.numChannels = numChannels;
