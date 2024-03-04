@@ -9,7 +9,7 @@ end
 parfor idx = 1:length(dataDirs)
     [dFolder, dName] = fileparts(dataDirs{idx});
     disp(['Running directory ' dName])
-    % stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
+    stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
     
     tmp = dir(fullfile(dFolder,dName,'*_DOWNSAMPLED*'));
     downsampledFile = tmp.name;

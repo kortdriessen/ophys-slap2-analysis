@@ -4,8 +4,8 @@ function networkTiffWriter(mat, fnwrite, pixelscale, localDr)
 
 writeDr = dr;
 
-if fname(1:2) == 'Z:'
     if ~exist('localDr', 'var'); localDr = 'F:\tmp_tiffIO'; end
+if all(fnwrite(1:2) == 'Z:') || all(fnwrite(1:2) == '\\')
   
     writeDr = localDr;
     if exist(writeDr,'dir') ~= 7; mkdir(writeDr); end
@@ -19,7 +19,7 @@ end
 
 fTIF.close;
 
-if fname(1:2) == 'Z:'
+if all(fnwrite(1:2) == 'Z:') || all(fnwrite(1:2) == '\\')
     try
         copyfile(fullfile(writeDr, [name ext]),dr);
         delete(fullfile(writeDr, [name ext]));

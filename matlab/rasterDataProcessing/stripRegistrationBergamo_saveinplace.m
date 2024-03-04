@@ -193,6 +193,7 @@ for f_ix = 1:length(fns)
             % fTIF.WriteIMG(single(B));
         end
     end
+    networkTiffWriter(single(tiffSave), fnwrite, pixelscale);
     clear('tiffSave')
     % fTIF.close;
 
