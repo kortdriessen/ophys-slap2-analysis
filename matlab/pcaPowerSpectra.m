@@ -1,0 +1,32 @@
+[UU,~,VV] = svds(IMsel',10);
+% Assume VV is your TxN matrix where T is the number of time points
+% and N is the number of time series.
+[T, N] = size(VV); % Get the dimensions of the matrix
+% Frequency vector (assuming sampling rate is 1, adjust as necessary)
+Fs = T/120; % Sampling frequency
+f = (0:T/2-1)*(Fs/T); % Frequency vector
+% Pre-allocate space for power spectra
+powerSpectra = zeros(length(f), N);
+% Prepare a figure outside the loop for all plots
+figure;
+hold on; % This allows all plots to be drawn on the same figure
+% Loop through each time series
+for i = 1:N
+% Compute the Fourier Transform of the time series
+Y = fft(VV(:,i));
+% Compute the two-sided spectrum P2. Then compute the single-sided spectrum P1 based on P2 and the even-valued signal length L.
+P2 = abs(Y/T);
+P1 = P2(1:T/2);
+P1(2:end-1) = 2*P1(2:end-1);
+% Normalize the power spectrum
+P1_normalized = P1 / max(P1);
+% Store the normalized power spectrum in the matrix
+powerSpectra(:,i) = P1_normalized;
+% Plot the normalized power spectrum
+plot(f, P1_normalized, 'DisplayName', ['Series ' num2str(i)]);
+end
+hold off; % No more plots to add
+title('Normalized Power Spectra of Time Series');
+xlabel('Frequency (Hz)');
+ylabel('Normalized Power');
+legend show; % Display a legend to identify each time 
