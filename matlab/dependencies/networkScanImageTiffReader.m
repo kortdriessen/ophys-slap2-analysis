@@ -2,8 +2,8 @@ function [data, desc, meta] = networkScanImageTiffReader(fname, localDr)
 
 [dr, name, ext] = fileparts(fname);
 
-    if ~exist('localDr', 'var'); localDr = 'F:\tmp_tiffIO'; end
 if all(fname(1:2) == 'Z:') || all(fname(1:2) == '\\')
+    if ~exist('localDr', 'var'); localDr = 'C:\temp'; end % 'F:\tmp_tiffIO'; end
 
     dr = localDr;
 

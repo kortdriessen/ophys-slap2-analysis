@@ -205,7 +205,7 @@ F0selDS = cell(nTrials,1);
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 3, baselineWindow)'; %#ok<AGROW> IM, nPCs, baselineWindow)
+    F0selDS{trialIx} = svdF0(IMrawSel', 4, baselineWindow)'; %#ok<AGROW> IM, nPCs, baselineWindow)
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
     %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
@@ -230,6 +230,7 @@ end
 
 %per-trial images
 exptSummary.E(:,DMDix) = E; %experiment data
+exptSummary.aData(:,DMDix) = alignData;
 exptSummary.userROIs{DMDix} = roiData;
 exptSummary.peaks{DMDix}= peaks;
 exptSummary.perTrialMeanIMs{DMDix} = meanIM;
@@ -485,6 +486,8 @@ end
 end
 
 function [W0,H0] = extractSourcesLoRes(dFsel, peaks, sources, selPix, params)
+%dFsel: delta fluorescence over selected pixels;  has dimensions [pixels time]
+
 k = length(sources.R);
 sz = size(selPix, [1 2]);
 anySel = any(selPix,3);
@@ -496,7 +499,8 @@ dFselTf = matchedExpFilter(dFsel, tau);
 %baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 %dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
 selNans = isnan(dFselTf);
-dFselTf(selNans) = 0;
+meanDF = repmat(mean(dFselTf,2, 'omitnan'), 1, size(dFsel,2));
+dFselTf(selNans) = meanDF(selNans);
 
 nComp = k; %we could use extra components for background if desired
 W0 = nan(nSelPix, nComp);

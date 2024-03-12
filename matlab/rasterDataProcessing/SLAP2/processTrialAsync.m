@@ -144,7 +144,11 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
 
     %compute channel 2 signals
     if numChannels==2
-        F_2 = (W./max(W,[],1))' * IM2sel;
+        for rix = size(W,2):-1:1
+            sel = W(:,rix)>0;
+            Wr = W(sel,rix)./max(W(sel,rix));
+            F_2(rix,:) = Wr'*IM2sel(sel,:);
+        end
         F0_2 = computeF0(F_2', ceil(params.denoiseWindow_s*params.analyzeHz), ceil(params.baselineWindow_Ca_s*params.analyzeHz),1)';
         exptSummary.dFraw(:,:,2) = F_2;
         exptSummary.F0(:,:,2) = F0_2;
