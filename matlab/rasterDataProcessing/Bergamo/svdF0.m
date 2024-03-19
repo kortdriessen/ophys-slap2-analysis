@@ -33,10 +33,12 @@ Y = IM(~nanframes,:);
 for px = 1:size(IM,2)
     y = Y(:,px);
     selT = ~isnan(y);
-    if sum(selT)>2*sum(selU) && sum(selU)>2
+    if sum(selT)>2*sum(selU) && sum(selT)>5
         %use iteratively reweighted least squares to fit
         b = robustfit(VV(selT,selU), y(selT), 'bisquare', 2, true);
         Y(selT, px) = [ones(sum(selT),1) VV(selT,selU)  ]*b;
+    else
+        Y(selT,px) = nan; %very few timepoints valid
     end
 end
 F0 = nan(size(IM));

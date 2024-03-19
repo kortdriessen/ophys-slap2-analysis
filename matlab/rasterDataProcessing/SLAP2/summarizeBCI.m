@@ -7,6 +7,9 @@ function summarizeBCI(dr)
 %cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
+
+disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
+disp(dr)
 nDMDs = 2;
 
 %general params
@@ -68,6 +71,9 @@ end
 if ~all(keepTrials)
     msgbox(['Files were missing for ' int2str(sum(~keepTrials)) ' trials; likely failed alignments. Proceeding without them.']);
 end
+if ~any(keepTrials)
+    error('All trials were rejected due to missing alignment files!');
+end
 
 %call up a GUI for the user to define Soma ROI and regions to exclude
 fnAnn = [dr filesep 'ANNOTATIONS.mat'];
@@ -92,6 +98,8 @@ else
 end
 
 %load some metadata
+firstValidTrial = find(keepTrials,1,'first');
+trialStr = ['E' int2str(trialTable.epoch(firstValidTrial)) 'T' int2str(firstValidTrial) 'DMD1'];
 load([dr filesep trialStr '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
 params.numChannels = numChannels;
@@ -213,7 +221,11 @@ end
 clear rawIMs
 
 %extract sources from the downsampled movies
-[W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
+try
+    [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
+catch
+    keyboard
+end
 
 %for each file, load high res data and refine
 params.tau_full=params.tau_s*params.analyzeHz;
@@ -489,7 +501,7 @@ function [W0,H0] = extractSourcesLoRes(dFsel, peaks, sources, selPix, params)
 %dFsel: delta fluorescence over selected pixels;  has dimensions [pixels time]
 
 k = length(sources.R);
-sz = size(selPix, [1 2]);
+sz = size(selPix, [1 2]);mf
 anySel = any(selPix,3);
 nSelPix = sum(anySel(:));
 
@@ -542,7 +554,7 @@ W0 =  W0full(anySel,:);
 
 %Use multiplicative updates NMF, which makes it easy to zero out pixels
 opts1 = statset('MaxIter', 6,  'Display', 'final');%, 'UseParallel', true);
-[W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0',W0, 'options', opts1); %!!nnmf has been modified to allow it to take more than rank(Y) inputs
+[W0,H0] = nnmf2(dFselTf, nComp,'algorithm', 'mult', 'w0',W0, 'options', opts1); %!!nnmf has been modified to allow it to take more than rank(Y) inputs
 for bigIter = 1:(params.nmfIter+3)
     disp(['outer loop ' int2str(bigIter) ' of ' int2str(params.nmfIter)]);
 
@@ -554,7 +566,7 @@ for bigIter = 1:(params.nmfIter+3)
     W0full = reshape(W0full, sz(1),sz(2),[]);
     W0full = min(W0full, imgaussfilt(W0full, params.sigma_px/2)); %sculpt the spatial profiles
     W0full = reshape(W0full, sz(1)*sz(2),[]);
-    [W0,H0] = nnmf(dFselTf, nComp,'algorithm', 'mult', 'w0', W0full(anySel,:), 'h0', H0, 'options', opts1);
+    [W0,H0] = nnmf2(dFselTf, nComp,'algorithm', 'mult', 'w0', W0full(anySel,:), 'h0', H0, 'options', opts1);
 
     if bigIter == params.nmfIter
         disp('Merging sources...')
