@@ -14,6 +14,7 @@ nDMDs = 2;
 
 %general params
 params.analyzeHz = 200; %frame rate used for analysis
+params.discardInitial_s = 0.25; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
 
 %filtering params
 params.sigma_px = 1.5; %1.33;   % space constant in pixels
@@ -69,7 +70,7 @@ for trialIx = nTrials:-1:1
     end
 end
 if ~all(keepTrials)
-    msgbox(['Files were missing for ' int2str(sum(~keepTrials)) ' trials; likely failed alignments. Proceeding without them.']);
+    disp(['Files were missing for ' int2str(sum(~keepTrials)) ' trials; likely failed alignments. Proceeding without them.']);
 end
 if ~any(keepTrials)
     error('All trials were rejected due to missing alignment files!');
@@ -223,7 +224,8 @@ clear rawIMs
 %extract sources from the downsampled movies
 try
     [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
-catch
+catch ME
+    disp('fatal Error extracting sources')
     keyboard
 end
 
@@ -501,7 +503,7 @@ function [W0,H0] = extractSourcesLoRes(dFsel, peaks, sources, selPix, params)
 %dFsel: delta fluorescence over selected pixels;  has dimensions [pixels time]
 
 k = length(sources.R);
-sz = size(selPix, [1 2]);mf
+sz = size(selPix, [1 2]);
 anySel = any(selPix,3);
 nSelPix = sum(anySel(:));
 
@@ -512,6 +514,7 @@ dFselTf = matchedExpFilter(dFsel, tau);
 %dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
 selNans = isnan(dFselTf);
 meanDF = repmat(mean(dFselTf,2, 'omitnan'), 1, size(dFsel,2));
+meanDF(isnan(meanDF)) = 0;
 dFselTf(selNans) = meanDF(selNans);
 
 nComp = k; %we could use extra components for background if desired
@@ -540,7 +543,7 @@ for sourceIx = 1:k
 end
 
 %discard sources with poor spatial profiles/response amplitudes
-spaceThresh = median(spatialScore)/3;
+spaceThresh = median(spatialScore, 'omitmissing')/3;
 W0 = W0(:, spatialScore>spaceThresh);
 W0(isnan(W0)) = 0;
 nComp = size(W0,2);
