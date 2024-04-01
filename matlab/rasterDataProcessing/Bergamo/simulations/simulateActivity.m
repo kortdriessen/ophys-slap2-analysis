@@ -41,44 +41,56 @@ skernel(sw+1,sw+1) = 1;
 skernel = imgaussfilt(skernel, [params.sigma params.sigma]);
 skernel = skernel./max(skernel(:));
 
-for fix = 1:length(fns)
+for fix = 1:length(fns) %for every .tif file in the selected directory
     fn = fns{fix};
 
-    A = ScanImageTiffReader(fn);
-    IMavg = mean(A.data,3,'omitnan');
+    A = ScanImageTiffReader(fn); %load the file
+    IMavg = mean(A.data,3,'omitnan'); %take the average in time
     %IMavg = IMavg(floor((size(IMavg,1)-params.IMsz(1))/2) +(1:params.IMsz(1)), floor((size(IMavg,2)-params.IMsz(2))/2) +(1:params.IMsz(2)));
+    
+    %Normalize out the background so minimum is zero and ~max is 1
     BG = prctile(IMavg(~isnan(IMavg)),30);
     IMavg = max(IMavg-BG, 0);
     IMavg = IMavg./prctile(IMavg(:), 99);
+
+    %select rows and columns
     selR = floor((size(IMavg,1)-params.IMsz(1))/2) +(1:params.IMsz(1));
     selC = floor((size(IMavg,2)-params.IMsz(2))/2) +(1:params.IMsz(2));
 
     %%%%simulate synapses
     %valid pixels for release sites
     tmp = medfilt2(IMavg, [3 3]);
+    %select the brightest pixels:
     tmp = tmp>min(prctile(tmp(:), 97), 4*(mean(tmp(:))));
     tmp([1:selR(1) selR(end):end], :) = false;
     tmp(:, [1:selC(1) selC(end):end]) = false;
     tmp = find(tmp);
 
+    %randomly sample a bunhc of simulated release sites from the brightest
+    %pixels
     releaseSites = randsample(tmp, params.nsites);
-    [rr,cc] = ind2sub(size(IMavg), releaseSites);
+    [rr,cc] = ind2sub(size(IMavg), releaseSites); %nearest integer pixel
     dr = rand(size(rr))-0.5; %subpixel location
     dc = rand(size(cc))-0.5; %subpixel location
 
+    %initialize GT, the ground truth:
     GT.R = rr+dr-selR(1)+1; %in the coordinates of the saved image
     GT.C = cc+dc-selC(1)+1; %in the coordinates of the saved image
-    for trialIx = 1:5
+    for trialIx = 1:5 %we'll simulate 5 trials
         aData = struct(); %extize;
         fnstem = ['SIMULATION_' fn(1:11) SimDescription '_Trial' int2str(trialIx)];
 
-        B = params.brightness*exp(-(1:params.T)./params.bleachTau);
-        activity = zeros(params.nsites, params.T);
-        spikes = rand(size(activity))<smoothdata(rand(size(activity))<params.activityThresh,2, 'movmean', 40).^2;
+        B = params.brightness*exp(-(1:params.T)./params.bleachTau); %generate a baseline
+        activity = zeros(params.nsites, params.T); %initialize activity
+        spikes = rand(size(activity))<smoothdata(rand(size(activity))<params.activityThresh,2, 'movmean', 40).^2; %generate autocorrelated spike times
         activity(spikes) =min(params.maxspike, max(params.minspike,params.spikeAmp*randn(1, sum(spikes(:)))));
         activity = convn(activity, kernel, 'same');
 
-        movie = repmat(IMavg, [1 1 params.T]);
+        %make a movie
+        movie = repmat(IMavg, [1 1 params.T]); %initialize as just hte average image
+        
+        %generate the spatial filters corresponding to each release site
+        %and add their activity to the movie
         idealFilts = zeros([size(IMavg) params.nsites]);
         for siteN = params.nsites:-1:1
             S = IMavg(rr(siteN)+(-sw:sw),cc(siteN)+ (-sw:sw));
@@ -89,25 +101,26 @@ for fix = 1:length(fns)
         end
         movie = single(movie);
 
+        %simulate motion as a 2d signal
         envelope = sin(cumsum(randn(1,params.T)/20)).^2;
         motionPC1 =  smooth(envelope .* sin(smoothdata(randn(1,params.T).^3,2, 'movmean', 40)/10) .* params.motionAmp, 5);
         motionPC2 = smooth(envelope .* sin(smoothdata(randn(1,params.T).^3,2, 'movmean', 40)/10) .* params.motionAmp,5);
         GT.motionR = 0.8*motionPC1 + 0.4*motionPC2;
         GT.motionC = 0.2*motionPC1 - 0.2*motionPC2;
 
+        %simulate all the frames in a loop
         for frameIx = params.T:-1:1
-            tmp = imtranslate(movie(:,:,frameIx), [GT.motionC(frameIx), GT.motionR(frameIx)]);
-            excessNoise = max(0.5, min(2, 1+randn(length(selR), length(selC))/2));
+            tmp = imtranslate(movie(:,:,frameIx), [GT.motionC(frameIx), GT.motionR(frameIx)]); %translate the ground truth image using the motion vector
+            excessNoise = max(0.5, min(2, 1+randn(length(selR), length(selC))/2)); %compute an excess noise factor related to detector gain variation
             Ad(:,:,1,frameIx) = poissrnd(tmp(selR,selC).*B(frameIx) + params.darkrate).*excessNoise.*params.photonScale;
         end
         Ad = reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []);
         sz = size(Ad);
+GT.activity = activity;
 
+        %%%%ALIGN THE SIMULATED MOVIE
         T0 = padarray(IMavg(selR,selC), params.maxshift * [1 1], 0);
         template = T0;
-
-        GT.activity = activity;     
-
         initR = 0; initC = 0;
         nDSframes= floor(sz(4)./(params.dsFac)); %number of downsampled frames
         motionDSr = nan(1,nDSframes); motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
