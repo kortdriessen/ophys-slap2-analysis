@@ -14,7 +14,7 @@ nDMDs = 2;
 
 %general params
 params.analyzeHz = 200; %frame rate used for analysis
-params.discardInitial_s = 0.25; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
+params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
 
 %filtering params
 params.sigma_px = 1.5; %1.33;   % space constant in pixels
@@ -114,12 +114,12 @@ for DMDix = nDMDs:-1:1
 disp('Loading data and performing localizations...')
 
 %Perform Localizations
-rawIMs = cell(1,nTrials); mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); discardFrames = cell(1,nTrials);
+mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); discardFrames = cell(1,nTrials); %rawIMs = cell(1,nTrials);
 parfor trialIx = 1:nTrials
     if keepTrials(trialIx)
         trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
         fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
-        [rawIMs{trialIx}, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks(trialIx), discardFrames{trialIx}]= loadAndLocalizeTrialAsync(dr, fn, numChannels, params)
+        [~, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks(trialIx), discardFrames{trialIx}]= loadAndLocalizeTrialAsync(dr, fn, numChannels, params); %rawIMs{trialIx}
     end
 end
 %Assemble same-sized mean images from different-sized trial means
@@ -163,7 +163,7 @@ for trialIx = nTrials:-1:1
     end
     actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
 
-    if trialIx==nTrials
+    if ~isfield(peaksCat, 'row')
         peaksCat.row = peaks(trialIx).row - motOutput(1,trialIx);
         peaksCat.col = peaks(trialIx).col - motOutput(2,trialIx);
         peaksCat.val = peaks(trialIx).val;
@@ -174,7 +174,7 @@ for trialIx = nTrials:-1:1
         peaksCat.row = cat(2, peaks(trialIx).row - motOutput(1,trialIx),peaksCat.row);
         peaksCat.col = cat(2, peaks(trialIx).col - motOutput(2,trialIx), peaksCat.col);
         peaksCat.val = cat(1, peaks(trialIx).val, peaksCat.val);
-        peaksCat.t = peaksCat.t + size(rawIMs{trialIx},3);
+        peaksCat.t = peaksCat.t + size(discardFrames{trialIx},1);
         peaksCat.t = cat(1, peaks(trialIx).t,peaksCat.t);
          hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
     end
@@ -189,11 +189,11 @@ else
     corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
 end
 validTrials= find(ccf>corrThresh);
-exptSummary.meanIM = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
-exptSummary.actIM = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
+exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
+exptSummary.actIM{DMDix} = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
 
 %cluster localizations
-totalFrames = sum(cellfun(@(x)(size(x,3)), rawIMs));
+totalFrames = sum(cellfun(@(x)(sum(~x)), discardFrames));
 params.minEvents = totalFrames*params.frametime*params.dsFac*params.eventRateThresh_hz;
 [~, P, sources.R, sources.C, params] = clusterLocalizations(peaksCat, params);
 k = length(sources.R); %number of sources
@@ -208,18 +208,32 @@ for sourceIx = k:-1:1
 end
 nSelPix = sum(any(selPix,3), 'all'); %number of selected pixels
 dFsel = nan(nSelPix, totalFrames); %extize
+rawSelTest = nan(nSelPix, totalFrames); %extize
 baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 frameInd = 0;
 F0selDS = cell(nTrials,1);
 for trialIx = validTrials
-    szTmp = size(rawIMs{trialIx});
-    IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 4, baselineWindow)'; %#ok<AGROW> IM, nPCs, baselineWindow)
+
+    %re-generate the 'raw image' for this trial
+    trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
+    fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
+    rawIM = copyReadDeleteScanImageTiff([dr filesep fn]);
+    rawIM = reshape(rawIM, size(rawIM,1), size(rawIM,2), numChannels, []); %deinterleave;
+    rawIM = squeeze(rawIM(:,:,1,:));
+    rawIM(:,:,discardFrames{trialIx}) = nan;
+
+    szTmp = size(rawIM);
+    sel2D = any(selPix,3); 
+    sel2D = sel2D(1:szTmp(1), 1:szTmp(2));
+    
+    IMrawSel = interpArray(rawIM, sel2D, motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
+    F0selDS{trialIx} = svdF0_slap2(IMrawSel', 8, params.denoiseWindow_samps, baselineWindow)';
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
+    rawSelTest(:,frameInd+(1:szTmp(3))) = IMrawSel;
     %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
     frameInd = frameInd+szTmp(3);
 end
-clear rawIMs
+clear rawIM
 
 %extract sources from the downsampled movies
 try
@@ -267,6 +281,7 @@ function IMsel = interpArray (IM, sel, shiftRC)
 %pixels sel, shifted by shiftRC
 %returns a 2D array: [sum(sel) x size(IM,3)]
 sz = size(IM);
+assert(all(size(sel)==sz(1:2)));
 IMsel = nan(sum(sel(:)), sz(3));
 IM = reshape(IM, sz(1)*sz(2), []);
 

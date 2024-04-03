@@ -10,9 +10,12 @@ if ~params.nmfBackgroundComps
     %baselineWindow = ceil(params.baselineWindow_Glu_s/params.frametime);
     %F0 = computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1, baselineWindow, 1)';
     IMsel = IMsel - F0;
+    
+    IMsel = matchedExpFilter(IMsel, params.tau_full);
+    
     selNans = isnan(IMsel);
     IMsel(selNans) = 0;
-    IMsel = matchedExpFilter(IMsel, params.tau_full);
+
     %IMsel = IMsel- computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1,baselineWindow, 1)';
     W = W0;
 else

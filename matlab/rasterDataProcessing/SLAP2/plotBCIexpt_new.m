@@ -7,9 +7,10 @@ function [pData, hF] = plotBCIexpt_new(exptSummary)
 anParams.taskWindow_s = [0.5 20]; %window of time, in seconds, during which to average somatic output to get mean trial activity
 
 %make plots
+hF2 = plotAllTraces(exptSummary, anParams);
 hF3 = plotTrialAverages(exptSummary, anParams);
 hF1 = plotTotalInput(exptSummary, anParams);
-hF2 = plotAllTraces(exptSummary, anParams);
+
 
 
 
@@ -105,23 +106,23 @@ end
 
 function hF = plotAllTraces(exptSummary, anParams)
 outputCh = 2;
-nEpochs = max(exptSummary.trialTable.epoch);
+%nEpochs = max(exptSummary.trialTable.epoch);
 colors = [0 1 0 ; 1 0 1];
 
-dF = accumTraces(exptSummary, 'dFraw', 1); %fieldname, channel
 dFFsom = accumSoma(exptSummary, outputCh); %channel
 
-%Figure with 2 subplots: 1 for soma, 1 for all synapses
-for epoch = 1:nEpochs
-    selEpoch = exptSummary.trialTable.epoch==epoch;
-    nTrials = sum(selEpoch);
+for spineCh = [1,2]
+    [dF, Dixs] = accumTraces(exptSummary, 'dFraw', spineCh); %fieldname, channel
 
-    for spineCh = [1,2]
+    %Figure with 2 subplots: 1 for soma, 1 for all synapses
+        %selEpoch = exptSummary.trialTable.epoch==epoch;
+
+
         %denoised = accumTraces(exptSummary, 'denoised', spineCh); %fieldname, channel
         %dFnoise = estimatenoise(dF(:,1:3:end,:),2);
-        
-        D = dF(:,:,selEpoch); %shiftdim(sqrt(pData(epoch).noise(:,:,pData(epoch).traceType,:)), -1); %normalized to noise estimate
-        
+
+        D = dF; %shiftdim(sqrt(pData(epoch).noise(:,:,pData(epoch).traceType,:)), -1); %normalized to noise estimate
+
         %get trial lengths
         keepFrames = true(1, size(D,2)*size(D,3));
         for trialIx = size(D,3):-1:1
@@ -134,10 +135,10 @@ for epoch = 1:nEpochs
         end
         trialbounds = cumsum(trialLength);
 
-        hF(spineCh) = figure('name', ['All trials, epoch ' int2str(epoch)]);
-        
+        hF(spineCh) = figure('name', ['All trials, Ch' int2str(spineCh)]);
+
         hAxSoma = subplot(10,1,1);
-        tmp = reshape(dFFsom(:,:,selEpoch), 1, []);
+        tmp = reshape(dFFsom, 1, []);
         tmp(:, ~keepFrames) = []; %remove ends of trials
         T = (1:size(tmp,2))/exptSummary.params.analyzeHz;
         plot(T, tmp, 'color', colors(outputCh,:)); hold on;
@@ -150,19 +151,17 @@ for epoch = 1:nEpochs
         hAxSpines = subplot(10,1,2:9);
         tmp = reshape(D, size(D,1), []); %tmp is now 2D [ROIs allTime]
         tmp(:, ~keepFrames) = []; %remove ends of trials
-        
-        %tmp = tmp-median(tmp,2, 'omitmissing');
+
         tmpSel = true(size(tmp));
         tmpErr = std(tmp,0,2, 'omitmissing');
-        for iter = 1:3 %normalize to std, ignoring outliers
-            for rix = 1:size(tmp,1)
-                tmpSel(rix,:) = tmp(rix,:)./tmpErr(rix)<4;
-                tmpErr(rix) = std(tmp(rix, tmpSel(rix,:)));
-            end
-        end
+        % for iter = 1:3 %normalize to std, ignoring outliers
+        %     for rix = 1:size(tmp,1)
+        %         tmpSel(rix,:) = tmp(rix,:)./tmpErr(rix)<4;
+        %         tmpErr(rix) = std(tmp(rix, tmpSel(rix,:)));
+        %     end
+        % end
         tmp= tmp./tmpErr;
-        %tmp = tmp + 6*(0:(size(tmp,1)-1))'; %offset for plotting
-      
+
         T = (1:size(tmp,2))/exptSummary.params.analyzeHz;
         for traceIx = 1:size(tmp,1)
             offset = 10*traceIx;
@@ -179,7 +178,9 @@ for epoch = 1:nEpochs
         end
         set(hAxSpines, 'ytick', [], 'xticklabel', [], 'tickdir', 'out', 'box', 'on', 'xgrid', 'on');
         ylabel('Z-score')
-    end
+        xlabel('time (s)');
+        set([hAxSoma hAxSpines], 'box', 'off')
+        linkaxes([hAxSoma hAxSpines], 'x');
 
     %Plot motion
     %plot X,Y motion, Z motion? recNegErr?
@@ -192,7 +193,7 @@ for epoch = 1:nEpochs
     % [UU,SS,~] = svds(tmp, 2); %PCA motion down to top 2 dimensions
     % motPCs = (UU.*diag(SS)')/sqrt(2);
     % motPCs(nans,:) = nan;
-    % 
+    %
     % hAxMotion = subplot(10,1,10);
     % plot(T, motPCs(:,1), 'color', 'b');
     % hold on,
@@ -200,24 +201,23 @@ for epoch = 1:nEpochs
     % for tb = 1:length(trialbounds)
     %     plot(sData(1).frametime*trialbounds(tb)*[1 1], ylim, 'k-');
     % end
-    % xlabel('time (s)'); ylabel('Brain Movement')
+    %ylabel('Brain Movement')
 
-    set([hAxSoma hAxSpines hAxMotion], 'box', 'off')
-    linkaxes([hAxSoma hAxSpines hAxMotion], 'x');
-    end
 
-    % %export to json for collaborators
-    % jsonS.epoch = epoch;
-    % jsonS.channelNames = {'Glutamate', 'Calcium'};
-    % jsonS.dataDescription = 'delta Photons';
-    % jsonS.data = permute(D, [1 2 3 5 4]);
-    % jsonS.dataDimensions = {'time (frames at 100Hz)', 'ROI#', 'Channel', 'Trial'};
-    % jsonS.isSoma = isSoma;
-    % jsonS.motion = single(cat(3, pData(epoch).motionC, pData(epoch).motionR));
-    % jString = jsonencode(jsonS);
-    % fileID = fopen(['epoch' int2str(epoch) '.json'], 'w');
-    % fwrite(fileID, jString);
-    % fclose(fileID);
+end
+
+% %export to json for collaborators
+% jsonS.epoch = epoch;
+% jsonS.channelNames = {'Glutamate', 'Calcium'};
+% jsonS.dataDescription = 'delta Photons';
+% jsonS.data = permute(D, [1 2 3 5 4]);
+% jsonS.dataDimensions = {'time (frames at 100Hz)', 'ROI#', 'Channel', 'Trial'};
+% jsonS.isSoma = isSoma;
+% jsonS.motion = single(cat(3, pData(epoch).motionC, pData(epoch).motionR));
+% jString = jsonencode(jsonS);
+% fileID = fopen(['epoch' int2str(epoch) '.json'], 'w');
+% fwrite(fileID, jString);
+% fclose(fileID);
 end
 
 function [dFF, F, F0] = accumSoma(exptSummary, ch)
@@ -265,7 +265,7 @@ for dix = 1:2
     tix = find(~cellfun(@isempty,exptSummary.E(:,dix)),1, 'first');
     nSites(dix) = size(exptSummary.E{tix, dix}.F0,1); %#ok<AGROW>
 end
-
+Dixs = [ones(1,size(exptSummary.E{tix, 1}.F0,1)) 2*ones(1,size(exptSummary.E{tix, 2}.F0,1))];
 F = [];
 
 for tix = 1:nTrials
@@ -274,12 +274,12 @@ for tix = 1:nTrials
         tmp = nan(sum(nSites),1);
     elseif isempty(exptSummary.E{tix,1}) && ~isempty(exptSummary.E{tix,2})
         tmp2 = exptSummary.E{tix,2}.(field)(:,:,ch);
-        tmp = cat(1, nan(nSites(1), size(tmp2,2)), tmp2); 
+        tmp = cat(1, nan(nSites(1), size(tmp2,2)), tmp2);
     elseif ~isempty(exptSummary.E{tix,1}) && isempty(exptSummary.E{tix,2})
         tmp1 = exptSummary.E{tix,1}.(field)(:,:,ch);
-        tmp = cat(1, tmp1, nan(nSites(2), size(tmp1,2))); 
+        tmp = cat(1, tmp1, nan(nSites(2), size(tmp1,2)));
     else
-        tmp = cat(1, exptSummary.E{tix,1}.(field)(:,:,ch), exptSummary.E{tix,2}.(field)(:,:,ch)); 
+        tmp = cat(1, exptSummary.E{tix,1}.(field)(:,:,ch), exptSummary.E{tix,2}.(field)(:,:,ch));
     end
 
     if size(tmp,2)>size(F,2)
@@ -309,7 +309,7 @@ for epoch = 1:nEpochs
     eO = std(output,0,3, 'omitnan')./sqrt(sum(~isnan(output),3)-1);
     eO(isnan(eO)) = 0;
 
-    hF = figure;
+    hF = figure('name', ['Epoch ' int2str(epoch) ' Soma trial average']);
     hAxAvgOut(epoch) = axes; %#ok<AGROW>
     plot(tt, squeeze(output), 'color', colors(outputCh,:));
     hold on, plot(tt, mO, 'k', 'linewidth', 2);
@@ -330,7 +330,7 @@ set(hAxAvgOut, 'xlim', [0 20])
 if nEpochs>1 %if multi-epoch
     alltrials = cell2mat(trialMeans');
     edges = cumsum(cellfun(@length, trialMeans));
-    figure, plot(alltrials, 'o-');
+    figure('name', ['Soma activity across trials']); plot(alltrials, 'o-');
     hold on,
     for E = 1:length(edges)
         plot(edges(E)*[1 1], ylim, 'color', [0.5 0.5 0.5], 'linewidth', 2)
@@ -338,7 +338,7 @@ if nEpochs>1 %if multi-epoch
     xlabel('trial number');
     ylabel('mean activity');
 
-    figure,
+    figure('name', ['Soma mean activity across epochs']),
     for epoch = 1:nEpochs
         scatter(epoch*ones(1,length(trialMeans{epoch})), trialMeans{epoch},'MarkerEdgeColor',[0.5 0.5 0.5]);
         hold on, plot(epoch+[-0.2 0.2], mean(trialMeans{epoch}, 'omitnan')*[1 1], 'k', 'linewidth', 2);
@@ -398,7 +398,7 @@ colors = [0 1 0 ; 1 0 1];
 
 dF = accumTraces(exptSummary, 'dFraw', inputCh); %fieldname, channel
 dFFsom = accumSoma(exptSummary, outputCh); %channel
-    
+
 for epoch = 1:nEpochs
     selEpoch = exptSummary.trialTable.epoch==epoch;
     nTrials = sum(selEpoch);
@@ -417,7 +417,7 @@ for epoch = 1:nEpochs
         keepFrames(((trialIx-1)*size(input,2)+trialLength(trialIx)+1):(trialIx*size(input,2))) = false;
     end
 
-    % 
+    %
     % tmpOut = D(:,isSoma,outputCh,:,:);
     % %tmpOut = tmpOut - mean(tmpOut, [1 5], 'omitnan');
     % output = sum(tmpOut, 2, 'omitnan');%in case there are multiple soma ROIs, sum them
@@ -434,7 +434,7 @@ for epoch = 1:nEpochs
     tmpIn = tmpIn - mean(tmpIn, 2, 'omitnan');
     sumInput = sum(tmpIn, 1, 'omitnan'); % omitting nans assumed mean dF=0 where not measured
     sumInput(all(isnan(tmpIn),1)) = nan;
-    figure,
+    figure ('name', ['Sum Input, Epoch ' int2str(epoch)]),
 
     hAx(1) = subplot(2,1,1);
     plot(output(:), 'color', colors(outputCh,:));
@@ -446,7 +446,7 @@ for epoch = 1:nEpochs
 
     %%%
     [r_io, r_io_shuff, lags] = xcorr_vs_shuffle(squeeze(sumInput), squeeze(output), 5*exptSummary.params.analyzeHz);
-    hF(1) = figure;
+    hF(1) = figure('Name',['Epoch ' int2str(epoch) ' Input-Output X-Corr']);
     plot(lags/exptSummary.params.analyzeHz, r_io, 'color', 'b', 'linewidth', 2);
     hold on, plot(lags/exptSummary.params.analyzeHz,  r_io_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
     hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
@@ -455,7 +455,7 @@ for epoch = 1:nEpochs
     legend({'', 'trial shuffle'})
 
     [r_ii, r_ii_shuff, lags] = xcorr_vs_shuffle(squeeze(sumInput), squeeze(sumInput), 5*exptSummary.params.analyzeHz);
-    hF(2) = figure;
+    hF(2) = figure('name', ['Epoch ' int2str(epoch) ' Input-Input autoCorr']);
     plot(lags/exptSummary.params.analyzeHz, r_ii, 'color', colors(inputCh,:),'linewidth', 2);
     hold on, plot(lags/exptSummary.params.analyzeHz,  r_ii_shuff, 'color', [0.5 0.5 0.5],'linewidth', 2);
     hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
@@ -464,7 +464,7 @@ for epoch = 1:nEpochs
     legend({'', 'trial shuffle'})
 
     [r_oo, r_oo_shuff, lags] = xcorr_vs_shuffle(squeeze(output), squeeze(output), 5*exptSummary.params.analyzeHz);
-    hF(3) = figure;
+    hF(3) = figure('name', ['Epoch ' int2str(epoch) ' Output-Output autoCorr']);
     plot(lags/exptSummary.params.analyzeHz, r_oo, 'color',  colors(outputCh,:), 'linewidth', 2);
     hold on, plot(lags/exptSummary.params.analyzeHz,  r_oo_shuff,'color', [0.5 0.5 0.5], 'linewidth', 2);
     hold on, plot([0 0],  get(gca, 'ylim'), 'k:','linewidth', 2);
