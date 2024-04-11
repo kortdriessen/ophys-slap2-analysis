@@ -176,11 +176,11 @@ frameInd = 0;
 for trialIx = validTrials
     szTmp = size(rawIMs{trialIx});
     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 3, baselineWindow)'; %#ok<AGROW>
+    F0selDS{trialIx} = svdF0(IMrawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)'; %#ok<AGROW>
     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
     if numChannels == 2
         IM2rawSel = interpArray(rawIM2s{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-        F02selDS{trialIx} = svdF0(IM2rawSel', 3, baselineWindow)';
+        F02selDS{trialIx} = svdF0(IM2rawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)';
         dF2sel(:,frameInd+(1:szTmp(3))) = IM2rawSel - F02selDS{trialIx};
     end
     frameInd = frameInd+szTmp(3);

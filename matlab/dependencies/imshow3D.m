@@ -477,10 +477,10 @@ set(gcf,'ResizeFcn', @figureResized)
         set(hPlayBtn, 'value', false); set(hPlayBtn, 'String', 'Play'); stop(hPlayTimer);
         
         w = VideoWriter([dr filesep fn]);
-        w.FrameRate = 3;
+        w.FrameRate = 10;
         
         open(w);
-        for iter = 1:10
+        for iter = 1:1
         for v = 1:sno
             S = v;
             set(findobj(hdl_im,'Type', 'Image'),'cdata',squeeze(Img(:,:,S,:)))

@@ -36,19 +36,22 @@ Fs = frames / 120;
 
 IM1filt = filtfilt(b,a,double(IM1)')';
 
+% F0 = computeF0(IM1',35,ceil(2/aData.frametime))';
+
 [UU1filt,~,VV1filt] = svds(double(IM1filt),5);
 selU1 = corr(abs(UU1filt),mean(IM1,2));
 selU1 = selU1 > mean(selU1);
-correction1 = (UU1filt(:,selU1) \ IM1);
+correction1 = (UU1filt(:,selU1) \ IM1filt); % (IM1-F0));
 fixedIM1 = IM1 - UU1filt(:,selU1) * correction1;
 fixedIM1(IM1nans) = nan;
 
 if numChannels == 2
+    % F0 = computeF0(IM2',35,ceil(2/aData.frametime))';
     IM2filt = filtfilt(b,a,double(IM2)')';
     [UU2filt,~,VV2filt] = svds(double(IM2filt),5);
     selU2 = corr(abs(UU2filt),mean(IM2,2));
     selU2 = selU2 > mean(selU2);
-    correction2 = (UU1filt(:,selU2) \ IM2);
+    correction2 = (UU2filt(:,selU2) \ IM2filt); %(IM2-F0));
     fixedIM2 = IM2 - UU2filt(:,selU2) * correction2;
     fixedIM2(IM2nans) = nan;
 end
