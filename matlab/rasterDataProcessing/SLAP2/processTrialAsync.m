@@ -82,20 +82,30 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     exptSummary.ROIs.F(:, discard,:) = nan;
     exptSummary.ROIs.Fsvd(:,discard,:) = nan;
 
-    [IMsel, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);
-
+    [IMselFilt, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);
+    
     %NMF
-    % H0 = ones(size(W1,2), size(IMsel,2));
-    % for iter = 1:3 %perform nonnegative matrix division to initialize H0 with W0 constant
-    %     H0 = H0.*(W1'*IMsel)./((W1'*W1)*(H0 + mean(H0(:)/100))); %confirm this is right; per Lee and Seung NIPS 2000 'Algorithms for nonnegative matrix factorization'
-    % end
-    % %'h0', H0
-    % H0 = max(max(H0(:)/100), H0 + max(H0(:)/100));
-    opts = statset('MaxIter', 10,  'Display', 'final');
-    [W,H] = nnmf2(IMsel, size(W1,2),'algorithm', 'mult', 'w0', W1, 'options', opts); %!!nnmf2 has been modified to keep the ordering of the provided factors
+    H0 = ones(size(W1,2), size(IMselFilt,2));
+    for iter = 1:3 %perform nonnegative matrix division to initialize H0 with W0 constant
+        H0 = H0.*(max(0,W1'*IMselFilt))./((W1'*W1)*(H0 + mean(H0(:)/100))); %confirm this is right; per Lee and Seung NIPS 2000 'Algorithms for nonnegative matrix factorization'
+    end
+    %'h0', H0
+    H0 = max(max(H0(:)/100), H0 + max(H0(:)/100));
+    opts = statset('MaxIter', 3,  'Display', 'final');
+    [W,H] = nnmf2(IMselFilt, size(W1,2),'algorithm', 'mult', 'w0', W1, 'h0', H0, 'options', opts); %!!nnmf2 has been modified to keep the ordering of the provided factors
     Wfull = nan([sz(1)*sz(2) size(W,2)]);
     Wfull(any(selPix,3),:) = W;
     Wfull = reshape(Wfull, sz(1),sz(2), []);
+
+    %Visualize the difference between the initialized footprints and fit
+    %footprints
+    % W1full = nan([sz(1)*sz(2) size(W1,2)]);
+    % W1full(any(selPix,3),:) = W1;
+    % W1full = reshape(W1full, sz(1),sz(2), []);
+
+    % figure('name', 'original'), imshow3D(Wfull./sum(Wfull,[1 2], 'omitnan'));
+    % figure('name', 'refit'), imshow3D(W1full./sum(W1full,[1 2], 'omitnan'));
+    % figure('name', 'difference'), imshow3D(1000*((Wfull./sum(Wfull,[1 2], 'omitnan'))-(W1full./sum(W1full,[1 2], 'omitnan'))));
 
     %Frames where more than 25% of pixels in a source are nan
     nanFramesH = false(size(H));
@@ -116,19 +126,23 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     %perform deconvolution, filling in NaNs with reconstructed values every
     %few iterations:
     J = deconvlucy({H},doubleKernel, 20,[], deconvWeights);
-    Js = deconvlucy({H},fKernel, 20,[],deconvWeights);
-    for iter = 1:5
+    Js = deconvlucy({H},fKernel, 10,[],deconvWeights);
+    for iter = 1:3
             recon = convn(J{2}, doubleKernel, 'same');
             J{1}(nanFramesH) = recon(nanFramesH);
-            J = deconvlucy(J,doubleKernel, 25, [], deconvWeights);
+            J = deconvlucy(J,doubleKernel, 20, [], deconvWeights);
 
             recon2 =  convn(Js{2}, fKernel, 'same');
             Js{1}(nanFramesH) = recon2(nanFramesH);
-            Js = deconvlucy(Js,fKernel, 25, [], deconvWeights);
+            Js = deconvlucy(Js,fKernel, 10, [], deconvWeights);
     end
     H2 = J{2}; %an estimate of the underlying spikes; deconvolving out the double kernel from the match-filtetred data
     H3 = convn(H2, kernel, 'same'); %the denoised trace, composed of the events convolved witht he forward kernel
-    H4 = Js{2}; %an estimate of raw fluorescence (no denoisings), deconvolving out the matched kernel that was applied prior to NMF
+    H4 = Js{2}; %an estimate of raw fluorescence (no denoising), deconvolving out the matched kernel that was applied prior to NMF
+
+    %assess residuals
+    %assessResiduals(W*H3, IMsel, selPx2D)
+    %assess F0
 
     %compute F0
     setNan = imdilate(nanFramesH, ones(1,2*floor(params.tau_full)+1));

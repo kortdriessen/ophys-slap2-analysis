@@ -9,7 +9,7 @@ end
     
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep 'trialTable.mat'], 'trialTable');
-alignHz = 50; %we will align data at this timescale, Hz
+alignHz = 80; %we will align data at this timescale, Hz
 
 aData.alignHz = alignHz;
 aData.maxshift = 50;
@@ -174,6 +174,9 @@ disp(['Aligning: ' [dr filesep fn]])
     aData.recNegErr = recNegErr;
     aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
+
+    disp('Getting online motion correction offsets')
+    [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
 
     %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
     aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs

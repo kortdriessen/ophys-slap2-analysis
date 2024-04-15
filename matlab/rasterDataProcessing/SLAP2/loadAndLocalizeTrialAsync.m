@@ -7,7 +7,7 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndLocalizeTri
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
 
     meanIM= mean(IM,4, 'omitnan');
-    nanPx = repmat(mean(isnan(IM), [3 4])>0.2, 1,1,size(IM,3));
+    nanPx = repmat(mean(isnan(IM), [3 4])>0.3, 1,1,size(IM,3));
     meanIM(nanPx) = nan;
 
     rawIMs = squeeze(IM(:,:,1,:));

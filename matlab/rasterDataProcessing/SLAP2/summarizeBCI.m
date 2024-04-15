@@ -8,6 +8,8 @@ function summarizeBCI(dr)
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
 
+%RUNNING OUT OF RAM- SETUP PARALLEL POOL W ~18 workers
+%parpool('processes',18);
 disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
 disp(dr)
 nDMDs = 2;
@@ -19,8 +21,8 @@ params.discardInitial_s = 0.1; %discard the first short period of each trial as 
 %filtering params
 params.sigma_px = 1.5; %1.33;   % space constant in pixels
 params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
-params.denoiseWindow_samps = 35; %number of samples to average together for denoising; REFACTOR THIS OUT AND USE SECONDS!
-params.denoiseWindow_s = 0.75; %number of samples to average together for denoising
+%params.denoiseWindow_samps = 20; %number of samples to average together for denoising; REFACTOR THIS OUT AND USE SECONDS!
+params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
 params.baselineWindow_Glu_s = 2; %timescale for calculating F0 in glutamate channel, seconds
 params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel, seconds
 
@@ -32,9 +34,9 @@ params.threshSKloc = 4; %threshold on skewness-based summary statistic for pixel
 params.upsample = 3; %how many times to upsample the imaging resolution for finding local maxima to identify sources; affects maximum source density
 
 %NMF params
-params.sparseFac = 0.1; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
+params.sparseFac = 0.08; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
 params.nmfIter = 5; %number of iterations of NMF refinement
-params.dXY = 3; %how large sources can be (radius), pixels
+params.dXY = 4; %how large sources can be (radius), pixels
 params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
 
 %load trial table
@@ -52,8 +54,8 @@ keepTrials = true(1, nTrials);
 for trialIx = nTrials:-1:1
     for DMDix = 1:nDMDs
         trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
-        tiffFn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
-        if ~exist([dr filesep tiffFn], 'file')
+        tiffFn = [trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif'];
+        if isempty(dir([dr filesep tiffFn]))
             disp(['Missing tiff file:' tiffFn])
             keepTrials(trialIx) = false;
         end
@@ -84,7 +86,8 @@ else
     for DMDix = 1:nDMDs
         %load image data
         trialStr = ['E' int2str(trialTable.epoch(1)) 'T1' 'DMD' int2str(DMDix)];
-        fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
+        fobj = dir([dr filesep trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif']);
+        fn = fobj(1).name;
         IM = copyReadDeleteScanImageTiff([dr filesep fn]);
         IM = squeeze(mean(IM,[3 4], 'omitnan'));
         hROIs(DMDix) = drawROIs(sqrt(max(0,IM)), dr, fn);
@@ -118,7 +121,8 @@ mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); dis
 parfor trialIx = 1:nTrials
     if keepTrials(trialIx)
         trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
-        fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
+        fobj = dir([dr filesep trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif']);
+        fn = fobj(1).name;
         [~, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks(trialIx), discardFrames{trialIx}]= loadAndLocalizeTrialAsync(dr, fn, numChannels, params); %rawIMs{trialIx}
     end
 end
@@ -206,41 +210,27 @@ for sourceIx = k:-1:1
     cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
     selPix(rr,cc,sourceIx) = true;
 end
-nSelPix = sum(any(selPix,3), 'all'); %number of selected pixels
-dFsel = nan(nSelPix, totalFrames); %extize
-rawSelTest = nan(nSelPix, totalFrames); %extize
-baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
-frameInd = 0;
-F0selDS = cell(nTrials,1);
-for trialIx = validTrials
+pxAlwaysValid = mean(isnan(meanAligned(:,:,1,validTrials)),4)<0.05;
+selPix = selPix & repmat(pxAlwaysValid, 1, 1, k); %ADJUST SELECTED PIXELS NOT TO INCLUDE POORLY MEASURED PIXELS
 
-    %re-generate the 'raw image' for this trial
-    trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
-    fn = [trialStr '_REGISTERED_DOWNSAMPLED-50Hz.tif'];
-    rawIM = copyReadDeleteScanImageTiff([dr filesep fn]);
-    rawIM = reshape(rawIM, size(rawIM,1), size(rawIM,2), numChannels, []); %deinterleave;
-    rawIM = squeeze(rawIM(:,:,1,:));
-    rawIM(:,:,discardFrames{trialIx}) = nan;
-
-    szTmp = size(rawIM);
-    sel2D = any(selPix,3); 
-    sel2D = sel2D(1:szTmp(1), 1:szTmp(2));
-    
-    IMrawSel = interpArray(rawIM, sel2D, motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0_slap2(IMrawSel', 8, params.denoiseWindow_samps, baselineWindow)';
-    dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
-    rawSelTest(:,frameInd+(1:szTmp(3))) = IMrawSel;
-    %dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - computeF0(IMrawSel', params.denoiseWindow_samps, baselineWindow, 1)';
-    frameInd = frameInd+szTmp(3);
+%accumulate dF of selected pixels for initial NMF of downsampled movies
+F0selDS = cell(nTrials,1); dFsel = cell(1,nTrials);
+parfor trialIx = 1:nTrials
+    if any(validTrials==trialIx)
+        trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
+        fobj = dir([dr filesep trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif']);
+        fn = fobj(1).name;
+        [dFsel{trialIx}, F0selDS{trialIx}] = DFselAsync([dr filesep fn], discardFrames{trialIx}, selPix, motOutput(:,trialIx), params); %path, discardFrames, selPix, motOutput, params
+    end
 end
-clear rawIM
+dFsel = cell2mat(dFsel); %collapse into an array
 
-%extract sources from the downsampled movies
+%extract sources from downsampled movie dF
 try
     [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
 catch ME
     disp('fatal Error extracting sources')
-    keyboard
+    rethrow(ME)
 end
 
 %for each file, load high res data and refine
@@ -323,64 +313,6 @@ else
     IMsel(inds,:) = R0;
 end
 end
-
-
-function IMsel = interpS2 (S2dat, meta, sel, shiftRC)
-%linearly interpolate the 3D matrix IM in each 2D plane at the selected
-%pixels sel, shifted by shiftRC
-%returns a 2D array: [sum(sel) x size(IM,3)]
-sz = size(IM);
-IMsel = nan(sum(sel(:)), sz(3));
-IM = reshape(IM, sz(1)*sz(2), []);
-
-inds = zeros(size(sel));
-inds(sel) = 1:sum(sel(:));
-
-sel = sel(1:sz(1), 1:sz(2));
-inds = inds(1:sz(1), 1:sz(2));
-
-intShift = floor(shiftRC);
-shiftRC = shiftRC-intShift;
-sel = imtranslate(sel, [intShift(2) intShift(1)]);
-inds = imtranslate(inds, [intShift(2) intShift(1)]);
-
-%ensure that all the masks have the same number of values:
-if shiftRC(1)>0.05
-    sel(end,:) = false; inds(end,:) = false;
-end
-if shiftRC(2)>0.05
-    sel(:,end) = false; inds(:,end) = false;
-end
-inds = inds(sel);
-
-mask00 = sel;                    %unshifted
-mask10 = imtranslate(sel,[0 1]); %shifted 1 row
-mask01 = imtranslate(sel,[1 0]); %shifted 1 col
-mask11 = imtranslate(sel,[1 1]); %shifted 1 row and 1 col
-
-for fix = nFrames:-1:1
-    for cix = numChannels:-1:1
-        IM = S2data.getImage(cix, fix, dt, 1);
-
-
-
-    end
-end
-
-if shiftRC(1)>0.05 %the subpixel shift is nonnegligible, so interpolate
-    R0 = (1-shiftRC(1)).*IM(mask00(:),:) + shiftRC(1).*IM(mask10(:),:);
-    R1 = (1-shiftRC(1)).*IM(mask01(:),:) + shiftRC(1).*IM(mask11(:),:);
-else %subpixel shift is negligible, use the unshifted data (this prevents NaNing out good data at edges)
-    R0 = IM(mask00(:),:);
-    R1 = IM(mask01(:),:);
-end
-if shiftRC(2)>0.05
-    IMsel(inds,:) = (1-shiftRC(2)).*R0 + shiftRC(2).*R1;
-else
-    IMsel(inds,:) = R0;
-end
-end
-
 
 function [density, peaks, sourceR, sourceC, params] = clusterLocalizations(peaks, params)
 sz = params.sz; %XY size of the summary image, should be at least as large as the largest individual session; ideally all sessions are same shape 
@@ -527,10 +459,13 @@ tau = params.tau_s./(params.frametime*params.dsFac); %time constant in frames
 dFselTf = matchedExpFilter(dFsel, tau);
 %baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 %dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
-selNans = isnan(dFselTf);
+
+selNans = imopen(isnan(dFselTf), ones(1, 2*ceil(0.25*params.baselineWindow_Glu_s/params.frametime)+1));
 meanDF = repmat(mean(dFselTf,2, 'omitnan'), 1, size(dFsel,2));
 meanDF(isnan(meanDF)) = 0;
 dFselTf(selNans) = meanDF(selNans);
+
+keyboard %DO NANS IN DFSELTF LOOK RARE AND SPARSE?
 
 nComp = k; %we could use extra components for background if desired
 W0 = nan(nSelPix, nComp);
@@ -571,9 +506,10 @@ W0full = reshape(W0full, sz(1)*sz(2),[]);
 W0 =  W0full(anySel,:);
 
 %Use multiplicative updates NMF, which makes it easy to zero out pixels
-opts1 = statset('MaxIter', 6,  'Display', 'final');%, 'UseParallel', true);
+opts1 = statset('MaxIter', 6,  'Display', 'final');
 [W0,H0] = nnmf2(dFselTf, nComp,'algorithm', 'mult', 'w0',W0, 'options', opts1); %!!nnmf has been modified to allow it to take more than rank(Y) inputs
 for bigIter = 1:(params.nmfIter+3)
+    H0 = H0+sqrt(0.1/size(H0,2)); %get rid of zeroing out effect
     disp(['outer loop ' int2str(bigIter) ' of ' int2str(params.nmfIter)]);
 
     %apply sparsity
@@ -588,7 +524,7 @@ for bigIter = 1:(params.nmfIter+3)
 
     if bigIter == params.nmfIter
         disp('Merging sources...')
-        [W0,H0] = mergeSources (W0,H0);
+        [W0,H0] = mergeSources(W0,H0, dFselTf, anySel);
         disp(['Kept ' int2str(size(W0,2)) ' of ' int2str(nComp) 'sources']);
         nComp = size(W0,2);
     end
@@ -598,35 +534,20 @@ end
 %figure, imshow3D(cat(3,dFselTf, W0*H0, dFselTf-W0*H0));
 end
 
-function [W,H] = mergeSources (W,H)
-%sort by variance; nnmf usually does htis automatically but we disabled it
-%in nnmf2
-[~, sortorder] = sort(sum(W.^2,1), 'descend');
-W = W(:,sortorder);
-H = H(sortorder,:);
-
-% compute correlation in activity
-C = corr(H'); C(logical(eye(size(C)))) = nan; 
-overlap = ((W>0)'*(W>0))>2;
-k = size(W,2);
-keep = true(1,k);
-merged = false(1,k); 
-for sourceIx = k:-1:2 % assumes inputs are already sorted by variance explained
-    if merged(sourceIx)
-        continue %this source already has had others merged into it; don't merge recursively
-    end
-    %if a source is better predicted by an overlapping higher-variance source than by any
-    %non-overlapping source, and vice versa, merge them
-    [maxC, maxInd] = max(C(sourceIx, 1:sourceIx-1).^2);
-    if overlap(sourceIx, maxInd) && maxC==max(C(maxInd, ~overlap(maxInd,:)).^2)
-       %merge 
-       keep(sourceIx) = false;
-       merged(maxInd) = true;
-       W(:,maxInd) = W(:,maxInd) + W(:,sourceIx);
-       H(maxInd,:) = H(maxInd,:) +  H(sourceIx,:);
-    end
-end
-W = W(:,keep);
-H(merged,:) = H(merged,:)./sum(H(merged,:).^2, 2); %mormalize the activities that we merged
-H = H(keep,:); 
+function [dFsel, F0selDS] = DFselAsync(path, discardFrames, selPix, motOutput, params)
+    baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
+    denoiseWindow = ceil(params.denoiseWindow_s/(params.frametime*params.dsFac)); %params.denoiseWindow_samps;
+    
+    rawIM = copyReadDeleteScanImageTiff(path);
+    rawIM = reshape(rawIM, size(rawIM,1), size(rawIM,2), params.numChannels, []); %deinterleave;
+    rawIM = squeeze(rawIM(:,:,1,:));
+    rawIM(:,:,discardFrames) = nan;
+    
+    szTmp = size(rawIM);
+    sel2D = any(selPix,3); 
+    sel2D = sel2D(1:szTmp(1), 1:szTmp(2));
+    
+    IMrawSel = interpArray(rawIM, sel2D, motOutput); %interpolates the movie at the shifted coordinates
+    F0selDS = svdF0_slap2(IMrawSel', 8, denoiseWindow, baselineWindow)';
+    dFsel = IMrawSel - F0selDS;
 end
