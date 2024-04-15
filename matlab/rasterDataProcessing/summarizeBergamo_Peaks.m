@@ -674,7 +674,7 @@ for bigIter = 1:(params.nmfIter+3)
 
     if bigIter == params.nmfIter
         disp('Merging sources...')
-        [W0,H0] = mergeSources (W0,H0);
+        [W0,H0] = mergeSources (W0,H0,dFselTf,anySel);
         disp(['Kept ' int2str(size(W0,2)) ' of ' int2str(nComp) 'sources']);
         nComp = size(W0,2);
     end
@@ -684,35 +684,35 @@ end
 %figure, imshow3D(cat(3,dFselTf, W0*H0, dFselTf-W0*H0));
 end
 
-function [W,H] = mergeSources (W,H)
-%sort by variance; nnmf usually does htis automatically but we disabled it
-%in nnmf2
-[~, sortorder] = sort(sum(W.^2,1), 'descend');
-W = W(:,sortorder);
-H = H(sortorder,:);
-
-% compute correlation in activity
-C = corr(H'); C(logical(eye(size(C)))) = nan; 
-overlap = ((W>0)'*(W>0))>2;
-k = size(W,2);
-keep = true(1,k);
-merged = false(1,k); 
-for sourceIx = k:-1:2 % assumes inputs are already sorted by variance explained
-    if merged(sourceIx)
-        continue %this source already has had others merged into it; don't merge recursively
-    end
-    %if a source is better predicted by an overlapping higher-variance source than by any
-    %non-overlapping source, and vice versa, merge them
-    [maxC, maxInd] = max(C(sourceIx, 1:sourceIx-1).^2);
-    if overlap(sourceIx, maxInd) && maxC==max(C(maxInd, ~overlap(maxInd,:)).^2)
-       %merge 
-       keep(sourceIx) = false;
-       merged(maxInd) = true;
-       W(:,maxInd) = W(:,maxInd) + W(:,sourceIx);
-       H(maxInd,:) = H(maxInd,:) +  H(sourceIx,:);
-    end
-end
-W = W(:,keep);
-H(merged,:) = H(merged,:)./sum(H(merged,:).^2, 2); %mormalize the activities that we merged
-H = H(keep,:); 
-end
+% function [W,H] = mergeSources (W,H)
+% %sort by variance; nnmf usually does htis automatically but we disabled it
+% %in nnmf2
+% [~, sortorder] = sort(sum(W.^2,1), 'descend');
+% W = W(:,sortorder);
+% H = H(sortorder,:);
+% 
+% % compute correlation in activity
+% C = corr(H'); C(logical(eye(size(C)))) = nan; 
+% overlap = ((W>0)'*(W>0))>2;
+% k = size(W,2);
+% keep = true(1,k);
+% merged = false(1,k); 
+% for sourceIx = k:-1:2 % assumes inputs are already sorted by variance explained
+%     if merged(sourceIx)
+%         continue %this source already has had others merged into it; don't merge recursively
+%     end
+%     %if a source is better predicted by an overlapping higher-variance source than by any
+%     %non-overlapping source, and vice versa, merge them
+%     [maxC, maxInd] = max(C(sourceIx, 1:sourceIx-1).^2);
+%     if overlap(sourceIx, maxInd) && maxC==max(C(maxInd, ~overlap(maxInd,:)).^2)
+%        %merge 
+%        keep(sourceIx) = false;
+%        merged(maxInd) = true;
+%        W(:,maxInd) = W(:,maxInd) + W(:,sourceIx);
+%        H(maxInd,:) = H(maxInd,:) +  H(sourceIx,:);
+%     end
+% end
+% W = W(:,keep);
+% H(merged,:) = H(merged,:)./sum(H(merged,:).^2, 2); %mormalize the activities that we merged
+% H = H(keep,:); 
+% end
