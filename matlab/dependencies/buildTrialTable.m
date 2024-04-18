@@ -6,6 +6,32 @@ function trialTable = buildTrialTable(dr)
 %parameters
 lineDiffThresh = 2000; %difference threshold for calling two recordings the same length, in lines. ~0.2 seconds
 
+%first, load the reference images, deduce the imaging plane of the ROI, and
+% %compute the soma ROI
+% DMDixs = [1 2];
+% %find the files within the entire folder structure named REFERENCE
+% for DMDix = DMDixs
+%     list = dir([dr '/**/*DMD' int2str(DMDix) '-REFERENCE*']);
+%     %old format, two reference files
+%     switch length(list)
+%     case 0
+%         error(['Could not find reference image within folder: ' dr])
+%     case 1
+%         DMD1refFn = fullfile(list(1).folder, list(1).name);
+%         A = ScanImageTiffReader(DMD1refFn);
+%         IM = A.data;
+%         keyboard
+%     case 2
+%         for cix = 1:2
+%             DMD1refFn = fullfile(list(cix).folder, list(cix).name);
+%             A = ScanImageTiffReader(DMD1refFn);
+%             refStack{DMDix}.IM(:,:,:,cix) = A.data;
+%         end
+%     otherwise
+%         error('Too many reference stacks found in the specified directory!');
+%     end
+% end
+
 trialTable.DMD1filename = {};
 trialTable.DMD1firstLine = [];
 trialTable.DMD1lastLine = [];

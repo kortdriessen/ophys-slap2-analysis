@@ -210,8 +210,15 @@ for sourceIx = k:-1:1
     cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
     selPix(rr,cc,sourceIx) = true;
 end
-pxAlwaysValid = mean(isnan(meanAligned(:,:,1,validTrials)),4)<0.05;
+pxAlwaysValid = mean(isnan(meanAligned(:,:,1,validTrials)),4)<0.1;
 selPix = selPix & repmat(pxAlwaysValid, 1, 1, k); %ADJUST SELECTED PIXELS NOT TO INCLUDE POORLY MEASURED PIXELS
+
+%prune any sources that got clipped by pixel selection process
+keepSources = sum(selPix, [1 2])>5;
+k = sum(keepSources, 'all');
+sources.R = sources.R(keepSources);
+sources.C = sources.C(keepSources);
+selPix = selPix(:,:,keepSources);
 
 %accumulate dF of selected pixels for initial NMF of downsampled movies
 F0selDS = cell(nTrials,1); dFsel = cell(1,nTrials);
@@ -460,12 +467,10 @@ dFselTf = matchedExpFilter(dFsel, tau);
 %baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
 %dFselTf = dFselTf - computeF0(dFselTf', params.denoiseWindow_samps, baselineWindow, 1)'; %subtracting F0 again to emphasize large events; we could uniformly subtract a quantile instead
 
-selNans = imopen(isnan(dFselTf), ones(1, 2*ceil(0.25*params.baselineWindow_Glu_s/params.frametime)+1));
+selNans = imclose(isnan(dFselTf), ones(1, 2*ceil(params.denoiseWindow_s/params.frametime)+1));
 meanDF = repmat(mean(dFselTf,2, 'omitnan'), 1, size(dFsel,2));
 meanDF(isnan(meanDF)) = 0;
 dFselTf(selNans) = meanDF(selNans);
-
-keyboard %DO NANS IN DFSELTF LOOK RARE AND SPARSE?
 
 nComp = k; %we could use extra components for background if desired
 W0 = nan(nSelPix, nComp);
