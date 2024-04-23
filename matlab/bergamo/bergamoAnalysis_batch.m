@@ -5,6 +5,7 @@ for i = 1:length(dirs)
     dataDirs = [dataDirs, findAllScanDirs(dirs{i})];
 end
 
+parpool(4);
 parfor idx = 1:length(dataDirs)
     [dFolder, dName] = fileparts(dataDirs{idx});
     disp(['Running directory ' dName])
