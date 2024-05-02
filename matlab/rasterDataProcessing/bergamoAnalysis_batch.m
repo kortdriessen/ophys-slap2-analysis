@@ -5,22 +5,28 @@ for i = 1:length(dirs)
     dataDirs = [dataDirs, findAllScanDirs(dirs{i})];
 end
 
+parpool(8);
 parfor idx = 1:length(dataDirs)
     [dFolder, dName] = fileparts(dataDirs{idx});
     disp(['Running directory ' dName])
-    stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
-
-    if ~exist(fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']),'file')
-        copyfile(fullfile(dFolder,dName,[dName '_ALIGNMENTDATA.mat']),fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']));
+    try
+        stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
+    
+        if ~exist(fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']),'file')
+            copyfile(fullfile(dFolder,dName,[dName '_ALIGNMENTDATA.mat']),fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']));
+        end
+    
+        tmp = dir(fullfile(dFolder,dName,[dName '_REGISTERED_RAW*']));
+        registeredRawFile = tmp.name;
+        denoise20Hz(fullfile(dFolder,dName),registeredRawFile);
+    
+        tmp = dir(fullfile(dFolder,dName,'*_DENOISED_REGISTERED_DOWNSAMPLED-2x*'));
+        downsampledFile = tmp.name;
+        
+        summarizeBergamo_Peaks(fullfile(dFolder,dName),downsampledFile);
+    catch ME
+        fprintf("%s: %s\n",dName, ME.message)
     end
-
-    tmp = dir(fullfile(dFolder,dName,[dName '_REGISTERED_RAW*']));
-    registeredRawFile = tmp.name;
-    denoise20Hz(fullfile(dFolder,dName),registeredRawFile);
-
-    tmp = dir(fullfile(dFolder,dName,'*_DENOISED_REGISTERED_DOWNSAMPLED-2x*'));
-    downsampledFile = tmp.name;
-    summarizeBergamo_Peaks(fullfile(dFolder,dName),downsampledFile);
 end
 
 %%
