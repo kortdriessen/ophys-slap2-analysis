@@ -11,7 +11,8 @@ meta = A.descriptions();
 metaS = jsondecode(meta{1});
 
 % Get the XY pixel size
-XYpixelSize = (metaS.dmdPixel2SampleTransform(1,1) + metaS.dmdPixel2SampleTransform(2,2))/2; % this doesn't work
+% XYpixelSize = (metaS.dmdPixel2SampleTransform(1,1) + metaS.dmdPixel2SampleTransform(2,2))/2; % this doesn't work
+XYpixelSize = getPixelPitchUm(metaS.dmdPixel2SampleTransform);
 
 % Find the Z pixel spacing in a robust way by finding the first and second
 % distinct z values and then calculating the difference
@@ -38,3 +39,11 @@ im = double(A.data());
 im = im(:,:,analyzeChannel:nChan:end);
 
 characterizeBeads(im, XYpixelSize, dZ, [dr filesep fn(1:end-4)]);
+end
+
+function XYpixelSize = getPixelPitchUm(dmdPixel2SampleTransform)
+    pixels_dmd = [0 0 0
+        1 1 0];
+    pixels_sample = most.coordinates.util.xformPoints(pixels_dmd,dmdPixel2SampleTransform);
+    XYpixelSize = vecnorm(pixels_sample(2,:) - pixels_sample(1,:),2)/sqrt(2);
+end
