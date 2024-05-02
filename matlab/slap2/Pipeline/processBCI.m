@@ -1,6 +1,8 @@
-function processBCI
+function processBCI(dr)
 
-dr = uigetdir;
+if ~nargin
+    dr = uigetdir;
+end
 
 %generate the trial table
 if ~exist([dr filesep 'trialTable.mat'], 'file')

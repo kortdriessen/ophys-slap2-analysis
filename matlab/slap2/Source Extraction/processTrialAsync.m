@@ -56,9 +56,9 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
                 exptSummary.ROIs.F(rix, fix,cix) = FF;
             end
 
-            if fix<300 && cix==1
-                sanitycheckTMP(:,:,301-fix) = Y;
-            end
+            % if fix<300 && cix==1
+            %     sanitycheckTMP(:,:,301-fix) = Y;
+            % end
         end
     end
 
@@ -172,7 +172,7 @@ function exptSummary = processTrialAsync(dr, fnRaw, startLine, endLine, W0, F0se
     exptSummary.F0(:,:,1) = F0;
     exptSummary.footprints = Wfull;
     exptSummary.discardFrames = discard;
-    exptSummary.sanityCheck = mean(sanitycheckTMP,3, 'omitnan');
+    %exptSummary.sanityCheck = mean(sanitycheckTMP,3, 'omitnan');
 
     %compute channel 2 signals
     if numChannels==2
