@@ -6,41 +6,6 @@ function trialTable = buildTrialTable(dr)
 %parameters
 lineDiffThresh = 2000; %difference threshold for calling two recordings the same length, in lines. ~0.2 seconds
 
-%first, load the reference images, deduce the imaging plane of the ROI, and
-% %compute the soma ROI
-% DMDixs = [1 2];
-% %find the files within the entire folder structure named REFERENCE
-% for DMDix = DMDixs
-%     list = dir([dr '/**/*DMD' int2str(DMDix) '-REFERENCE*']);
-%     %old format, two reference files
-%     switch length(list)
-%     case 0
-%         error(['Could not find reference image within folder: ' dr])
-%     case 1
-%         DMD1refFn = fullfile(list(1).folder, list(1).name);
-%         A = ScanImageTiffReader(DMD1refFn);
-%         IM = A.data;
-%         keyboard
-%     case 2
-%         for cix = 1:2
-%             DMD1refFn = fullfile(list(cix).folder, list(cix).name);
-%             A = ScanImageTiffReader(DMD1refFn);
-%             refStack{DMDix}.IM(:,:,:,cix) = A.data;
-%         end
-%     otherwise
-%         error('Too many reference stacks found in the specified directory!');
-%     end
-% end
-
-trialTable.DMD1filename = {};
-trialTable.DMD1firstLine = [];
-trialTable.DMD1lastLine = [];
-trialTable.DMD2filename = {};
-trialTable.DMD2firstLine = [];
-trialTable.DMD2lastLine = [];
-trialTable.trialEndTimeFromPC = [];
-trialTable.trialStartTimeInferred = [];
-
 %get a list of dat files in a given folder
 if ~nargin
     dr = uigetdir;
@@ -57,6 +22,46 @@ while ~isempty(unpickedfiles)
     epochfiles{epoch} = unpickedfiles(indx);
     unpickedfiles(indx) = [];
 end
+
+%first, load the reference images, deduce the imaging plane of the ROI, and
+% %compute the soma ROI
+DMDixs = [1 2];
+%find the files within the entire folder structure named REFERENCE
+for DMDix = DMDixs
+    list = dir([dr '/**/*DMD' int2str(DMDix) '-REFERENCE*']);
+    %old format, two reference files
+    switch length(list)
+    case 0
+        error(['Could not find reference image within folder: ' dr])
+    case 1
+        DMD1refFn = fullfile(list(1).folder, list(1).name);
+        A = ScanImageTiffReader(DMD1refFn);
+        refStack{DMDix}.IM = A.data;
+    
+        %load metadata for the reference stack and BCI ROI
+        %desc = A.descriptions;
+    case 2
+        for cix = 1:2
+            DMD1refFn = fullfile(list(cix).folder, list(cix).name);
+            A = ScanImageTiffReader(DMD1refFn);
+            refStack{DMDix}.IM(:,:,:,cix) = A.data;
+        end
+    otherwise
+        error('Too many reference stacks found in the specified directory!');
+    end
+
+
+end
+trialTable.refStack = refStack; clear refStack;
+
+trialTable.DMD1filename = {};
+trialTable.DMD1firstLine = [];
+trialTable.DMD1lastLine = [];
+trialTable.DMD2filename = {};
+trialTable.DMD2firstLine = [];
+trialTable.DMD2lastLine = [];
+trialTable.trialEndTimeFromPC = [];
+trialTable.trialStartTimeInferred = [];
 
 trueTrialIx = 0;
 for eIx = 1:epoch %for each epoch
@@ -127,6 +132,8 @@ for eIx = 1:epoch %for each epoch
         end
     end
 end
+
+%identify which plane of the 
 
 save([dr filesep 'trialTable'], 'trialTable');
 end

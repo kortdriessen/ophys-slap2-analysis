@@ -155,7 +155,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     fTIF.close;
 
-    if std(motionDSc)>1 || std(motionDSr)>1
+    if std(motionDSc)>1.5 || std(motionDSr)>1.5
         registrationFailed = true;
     end
     if registrationFailed

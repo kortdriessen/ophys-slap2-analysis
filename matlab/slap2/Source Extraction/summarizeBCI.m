@@ -49,29 +49,29 @@ fnsave = [savedr filesep 'Summary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %confirm that all files exist for both DMDs
 nTrials = length(trialTable.trueTrialIx);
-keepTrials = true(1, nTrials);
+keepTrials = true(nDMDs, nTrials);
 for trialIx = nTrials:-1:1
     for DMDix = 1:nDMDs
         trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
         tiffFn = [trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif'];
         if isempty(dir([dr filesep tiffFn]))
             disp(['Missing tiff file:' tiffFn])
-            keepTrials(trialIx) = false;
+            keepTrials(DMDix,trialIx) = false;
         end
         alignFn =  [trialStr '_ALIGNMENTDATA.mat'];
         if ~exist([dr filesep alignFn], 'file')
             disp(['Missing alignData file:' alignFn])
-            keepTrials(trialIx) = false;
+            keepTrials(DMDix,trialIx) = false;
         end
         fnRaw{trialIx} = trialTable.(strcat('DMD', int2str(DMDix), 'filename')){trialIx};
         if ~exist([dr filesep fnRaw{trialIx}], 'file')
             disp(['Missing Dat file:' alignFn])
-            keepTrials(trialIx) = false;
+            keepTrials(DMDix, trialIx) = false;
         end
     end
 end
 if ~all(keepTrials)
-    disp(['Files were missing for ' int2str(sum(~keepTrials)) ' trials; likely failed alignments. Proceeding without them.']);
+    disp(['Files were missing for ' int2str(sum(~keepTrials(:))) ' [DMDs x trials]; likely failed alignments. Proceeding without them.']);
 end
 if ~any(keepTrials)
     error('All trials were rejected due to missing alignment files!');
@@ -101,7 +101,7 @@ else
 end
 
 %load some metadata
-firstValidTrial = find(keepTrials,1,'first');
+firstValidTrial = find(keepTrials(DMDix,:),1,'first');
 trialStr = ['E' int2str(trialTable.epoch(firstValidTrial)) 'T' int2str(firstValidTrial) 'DMD1'];
 load([dr filesep trialStr '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
@@ -118,7 +118,7 @@ disp('Loading data and performing localizations...')
 %Perform Localizations
 mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); discardFrames = cell(1,nTrials); %rawIMs = cell(1,nTrials);
 parfor trialIx = 1:nTrials
-    if keepTrials(trialIx)
+    if keepTrials(DMDix,trialIx)
         trialStr = ['E' int2str(trialTable.epoch(trialIx)) 'T' int2str(trialIx) 'DMD' int2str(DMDix)];
         fobj = dir([dr filesep trialStr '_REGISTERED_DOWNSAMPLED-*Hz.tif']);
         fn = fobj(1).name;
@@ -142,7 +142,7 @@ clear aData
 disp('Making template for aligning across trials...')
 maxshift = 5;
 M = squeeze(sum(meanIM, 3));
-template = makeTemplateMultiRoi(M(:,:,keepTrials), maxshift);
+template = makeTemplateMultiRoi(M(:,:,keepTrials(DMDix,:)), maxshift);
 
 %align all mean images to template
 disp('Aligning across trials...')
@@ -153,7 +153,7 @@ peaksCat = struct;
 Mpad = nan([size(template) size(M,3)]);
 Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
 for trialIx = nTrials:-1:1
-    if ~keepTrials(trialIx)
+    if ~keepTrials(DMDix,trialIx)
         continue %skip
     end
     disp(['trial: ' int2str(trialIx)])
