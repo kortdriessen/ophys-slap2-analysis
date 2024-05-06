@@ -1,4 +1,4 @@
-function summarizeBergamo_Peaks(dr, fns)
+function summarizeBergamo_Peaks(dr, fns, activityChannel)
     %TO DO:
     %PARAMETER SENSITIVITY ANALYSIS
 
@@ -24,6 +24,9 @@ params.baselineWindow_Ca_s = 2; %timescale for calculating F0 in calcium channel
 if nargin == 0
     %select a set of aligned downsampled recordings (trials)
     [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
+end
+if nargin<3
+    activityChannel = 1;
 end
 
 if ~iscell(fns)
@@ -68,6 +71,13 @@ for trialIx = length(fns):-1:1
         error(['The file:' fn 'is very short. You should probably not include it?']);
     end
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
+    
+    %Reorder channels so the activity channel is first
+    if activityChannel>1
+        IM = IM(:,:,[activityChannel:end, 1:activityChannel-1],:);
+        disp('Reordering channels for analysis!')
+    end
+
     meanIM(end:size(IM,1),:,:,:) = nan;
     meanIM(:, end:size(IM,2),:,:) = nan;
     meanIM(:,:,:,trialIx) = nan;
@@ -204,6 +214,11 @@ for trialIx = validTrials
 
     %rearrange IM into correct dimensions
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);
+    if activityChannel>1
+        IM = IM(:,:,[activityChannel:end, 1:activityChannel-1],:);
+        disp('Reordering channels for analysis!')
+    end
+
     IM1 = squeeze(IM(:,:,1,:));
     if numChannels==2
         IM2 =  squeeze(IM(:,:,2,:));
@@ -337,6 +352,7 @@ exptSummary.fns = fns;
 exptSummary.dr = dr;
 
 %per-trial images
+exptSummary.originalActivityChannel = activityChannel;
 exptSummary.peaks = peaks;
 exptSummary.perTrialMeanIMs = meanIM;
 exptSummary.perTrialActIms = actIM;
