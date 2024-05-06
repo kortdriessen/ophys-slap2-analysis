@@ -22,6 +22,7 @@ BG = prctile(IMavg(~isnan(IMavg)), 10);
 
 %subtract background, relevant for Bergamo only (not SLAP2)
 IMf = IM-BG;
+IMavg = IMavg-BG;
 
 IMf(nans) = 0;
 
