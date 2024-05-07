@@ -153,11 +153,8 @@ end
 
 %identify outliers in alignment quality
 cc = corrCoeff;
-if nargin>2 && forceCorrThresh>0
-    corrThresh = forceCorrThresh;
-else
-    corrThresh = min(0.96, median(cc)-2*std(cc));
-end
+corrThresh = min(0.96, median(cc)-2*std(cc));
+
 validTrials= find(cc>corrThresh);
 exptSummary.meanIM = mean(meanAligned,4, 'omitnan');
 exptSummary.actIM = mean(actAligned, 4, 'omitnan');
