@@ -1,5 +1,6 @@
 dirs = uipickfiles();
 
+activityChannel = str2double(questdlg('Which color channel is glutamate activity in?', 'Set activityChannel','1','2','1'));
 dataDirs = {};
 for i = 1:length(dirs)
     dataDirs = [dataDirs, findAllScanDirs(dirs{i})];
@@ -23,7 +24,7 @@ parfor idx = 1:length(dataDirs)
         tmp = dir(fullfile(dFolder,dName,'*_DENOISED_REGISTERED_DOWNSAMPLED-2x*'));
         downsampledFile = tmp.name;
         
-        summarizeBergamo_Peaks(fullfile(dFolder,dName),downsampledFile);
+        summarizeBergamo_Peaks(fullfile(dFolder,dName),downsampledFile, activityChannel);
     catch ME
         fprintf("%s: %s\n",dName, ME.message)
     end
