@@ -478,6 +478,7 @@ set(gcf,'ResizeFcn', @figureResized)
         
         w = VideoWriter([dr filesep fn]);
         w.FrameRate = 10;
+        w.FrameRate = 25;
         
         open(w);
         for iter = 1:1

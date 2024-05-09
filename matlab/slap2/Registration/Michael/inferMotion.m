@@ -83,6 +83,8 @@ for lineSweepIdx = 1:numLinesPerCycle
 
     zIdx = hLowLevelDataFile.lineFastZIdxs(lineSweepIdx);
     
+    superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
+
     spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
     allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
 end
@@ -109,8 +111,13 @@ for i = 1:length(allSuperPixelIDs)
     superPixIdx = (sp - zIdx) / 100;
     pixelReplacementMap = allPixelReplacementMaps{zIdx};
 
-    open = double(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
-    openR = floor((open-1) /dmdPixelsPerRow)+1;
+    open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
+
+    if isempty(open)
+        open = superPixIdx+1;
+    end
+
+    openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
     openC = open - (openR-1) * dmdPixelsPerRow;
     openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
 
@@ -158,7 +165,8 @@ zMotRange = zPre + zPost + 1;
 if sum(lookupFile == 0)
 
     likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
-    
+    likelihood_means = likelihood_means .* repmat(reshape(spSampleCt,[1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means,1:3) 1]);
+
     if exist('fname')
         save([fname(1:end-5) '_LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
     else
@@ -208,7 +216,7 @@ for cycleIdx = 1:numCycles
             data(spIdx(spIdx>0)) = data(spIdx(spIdx>0)) + single(lineData(spIdx>0,channel));
         end
     end
-    data = data ./ spSampleCt ./ 100;
+    data = data ./ 100; %./ spSampleCt;
 
     % calculate log likelihoods at all shifts
     [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, likelihood_means,log_means,ySearch,xSearch,zSearch,robust);
@@ -216,15 +224,32 @@ for cycleIdx = 1:numCycles
     [LL, I] = max(logLikelihoodTable(:));
 
     [My, Mx, Mz] = ind2sub(size(logLikelihoodTable),I);
-    dsMotion(cycleIdx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
+
+    if My>1 && My<size(logLikelihoodTable,1) && Mx>1 && Mx<size(logLikelihoodTable,2) && Mz>1 && Mz<size(logLikelihoodTable,3)
+        %perform superresolution upsampling
+        ratioY = min(1e6,(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My-1,Mx,Mz))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My+1,Mx,Mz)));
+        dY = (1-ratioY)/(1+ratioY)/2;
+        
+        ratioX =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx-1,Mz))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx+1,Mz)));
+        dX = (1-ratioX)/(1+ratioX)/2;
+
+        ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
+        dZ = (1-ratioZ)/(1+ratioZ)/2;
+
+        dsMotion(cycleIdx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ];
+    
+        % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
+    else %the optimum is at an edge of search range; no superresolution
+        dsMotion(cycleIdx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
+    end
 
     dsBrightness(cycleIdx) = scalingFactorTable(My, Mx, Mz);
     dataMatrix(:,cycleIdx) = data;
     expectedMatrix(:,cycleIdx) = dsBrightness(cycleIdx) .* likelihood_means(ySearch(My), xSearch(Mx), zSearch(Mz),:);
 
-    ySearch = max(1,dsMotion(cycleIdx,1) - searchRadius):min(xMotRange,dsMotion(cycleIdx,1) + searchRadius);
-    xSearch = max(1,dsMotion(cycleIdx,2) - searchRadius):min(yMotRange,dsMotion(cycleIdx,2) + searchRadius);
-    zSearch = max(1,dsMotion(cycleIdx,3) - searchRadius):min(zMotRange,dsMotion(cycleIdx,3) + searchRadius);
+    ySearch = max(1,round(dsMotion(cycleIdx,1)) - searchRadius):min(xMotRange,round(dsMotion(cycleIdx,1)) + searchRadius);
+    xSearch = max(1,round(dsMotion(cycleIdx,2)) - searchRadius):min(yMotRange,round(dsMotion(cycleIdx,2)) + searchRadius);
+    zSearch = max(1,round(dsMotion(cycleIdx,3)) - searchRadius):min(zMotRange,round(dsMotion(cycleIdx,3)) + searchRadius);
 end
 
 disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
@@ -233,7 +258,7 @@ disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
 frames = 1:totalCycles;
 dsFrames = frames(1:2^ds:(2^ds*numCycles));
 
-motion = interp1(dsFrames,dsMotion,frames);
+motion = interp1(dsFrames,dsMotion,frames,'linear','extrap');
 motion = motion - [yPre+1 xPre+1 zPre+1];
 
 brightness = interp1(dsFrames,dsBrightness,frames,'linear','extrap');
@@ -271,6 +296,7 @@ inferMotionOut.brightness = brightness';
 inferMotionOut.dataMatrix = dataMatrix;
 inferMotionOut.expectedMatrix = expectedMatrix;
 inferMotionOut.sparseMaskInds = sparseMaskInds;
+inferMotionOut.fastZ2RefZ = fastZ2RefZ;
 
 if robust
     save([fname(1:end-5) sprintf('_INFER_MOTION_OUTPUT_ROBUST_DS_%dx.mat',2^ds)],'inferMotionOut','-v7.3');
