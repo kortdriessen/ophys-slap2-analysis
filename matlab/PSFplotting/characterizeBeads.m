@@ -119,6 +119,21 @@ hF2 = resolutionPlots(avImXY(:,:, ceil((end+1)/2))', nPatches, 'XY projections',
 hF3 = resolutionPlots(avImXZ(:,:, ceil((end+1)/2))', nPatches, 'XZ projections', [dXY*upsample dZ*upsample]);
 hF4 = resolutionPlots(avImYZ(:,:, ceil((end+1)/2))', nPatches, 'YZ projections', [dXY*upsample dZ*upsample]);
 
+% display reference stack (red) with selected beads highlighted (blue)
+figure;
+imBW = (im-min(im(:)))/(max(im(:))-min(im(:)));
+highlights = convn(valid, ones(2*ceil(3.5*sigma)+1), 'same');
+highlightedStack = 255*cat(4,imBW,zeros(size(imBW)),highlights);
+imshow3D(permute(highlightedStack,[2 1 3 4]));
+% draw patch grid
+hold on;
+for idx = 1:length(patchIndsY)
+    plot([patchIndsX(1) patchIndsX(end)],[patchIndsY(idx) patchIndsY(idx)],'g')
+end
+for idx = 1:length(patchIndsX)
+    plot([patchIndsX(idx) patchIndsX(idx)],[patchIndsY(1) patchIndsY(end)],'g')
+end
+
 if nargin>3
     disp('Saving figures...')
     savefig(hF1, [savename '_FWHMs.fig'], 'compact');
