@@ -3,7 +3,7 @@ import numpy as np
 
 def reconstruct(A, phi, B, beta, subsampleMatrixInds, sparseHInds, sparseHVals, uniqueMotion, motInds, framesToUse=[]):
     numCycles = phi.shape[0]
-    numSuperPixels = subsampleMatrixInds.shape[0]
+    numSuperPixels = subsampleMatrixInds.shape[1]
 
     if not isinstance(framesToUse, np.ndarray):
         framesToUse = np.arange(numCycles)
@@ -13,7 +13,7 @@ def reconstruct(A, phi, B, beta, subsampleMatrixInds, sparseHInds, sparseHVals, 
 
     dataEst = torch.zeros(numSuperPixels,framesToUse.shape[0])
 
-    refPixs = torch.from_numpy(subsampleMatrixInds[:,0]-1)
+    refPixs = torch.from_numpy(subsampleMatrixInds[0])
 
     d = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor')
     c = torch.div((refPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor')

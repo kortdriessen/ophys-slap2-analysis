@@ -220,6 +220,29 @@ for k in range(maxK):
         epsilon = 1e-8
         return torch.mean(theta - data * torch.log(theta+epsilon))
 
+    def robust_lf(theta, data, b):
+        loss1 = -b * theta[:]
+
+        sqrt_term = torch.sqrt(b**2+4 * data[:])
+        loss2 = -b*(sqrt_term-b)**2/4 - (b**2-4*data[:]-b*sqrt_term)*torch.sqrt(b**2+2*data[:]-b*sqrt_term)/(3*2**0.5) + 2/3*torch.sqrt(theta[:])*(theta[:]-3*data[:])
+
+        use1 = (theta[:]-data[:])/torch.sqrt(theta[:]) < -b
+        use2 = (theta[:]-data[:])/torch.sqrt(theta[:]) >= -b
+
+        return torch.mean(torch.cat((loss1[use1],loss2[use2])))
+
+    def robust_lf2(theta, data, b):
+        epsilon = 1e-8
+        loss1 = -b * theta[:]
+
+        loss2 = theta[:] - data[:]*torch.log(theta[:]+epsilon) \
+                + data[:]*torch.log(data[:]/(1+b)+epsilon) - data[:]/(1+b) - b*data[:]/(1+b)
+
+        use1 = (theta[:]-data[:])/theta[:] < -b
+        use2 = (theta[:]-data[:])/theta[:] >= -b
+
+        return torch.mean(torch.cat((loss1[use1],loss2[use2])))
+
     print(f"Fitting component k={k}... ",end='')
 
     for epoch in range(nEpochs):
@@ -248,7 +271,7 @@ for k in range(maxK):
 
             if epoch % j == 0:
                 predFull = reconstruct.reconstruct_patch(fullACurr,allPhi,B,bleach,subsampleMatrixInds,sparseHInds,sparseHVals,uniqueMotion,motInds,(colCenter,rowCenter),maskSize)
-                trackedLosses_full[epoch // j] = lf(predFull,torch.from_numpy(Y).float()).numpy()
+                trackedLosses_full[epoch // j] = robust_lf2(predFull,torch.from_numpy(Y).float(),1).numpy()
                 print(f"Loss Full = {trackedLosses_full[epoch // j]}")
 
                 if epoch // j > 0 and (abs(trackedLosses_full[epoch // j] - trackedLosses_full[epoch // j - 1]) < 1e-7):
@@ -261,7 +284,7 @@ for k in range(maxK):
         pred = reconstruct.reconstruct_patch(fullACurr,allPhi,B,bleach,subsampleMatrixInds,sparseHInds,sparseHVals,uniqueMotion,motInds,(colCenter,rowCenter),maskSize,framesToUse)
         # pred[pred==0] = torch.from_numpy(Y[:,framesToUse])[pred==0].float()
 
-        loss = lf(pred,torch.from_numpy(Y[:,framesToUse]).float())
+        loss = robust_lf2(pred,torch.from_numpy(Y[:,framesToUse]).float(),1)
 
         loss.backward()
 
@@ -374,7 +397,7 @@ for k in range(maxK):
     plt.legend(('ground truth','LS estimate','initial guess','Poisson estimate'))
 
     # save current plot as a png
-    plt.savefig(dir + f'source{k}.png',dpi=300)
+    plt.savefig(dir + f'robust_source{k}.png',dpi=300)
     plt.close()
 
     # plt.show()
@@ -385,7 +408,7 @@ for k in range(maxK):
 
 print('Found all sources! Saving results... ',end='')
 # np.save('C:/Users/michael.xie/Documents/data/activityMotionSimulations/fullFOV/moreActivity/trueIdxs_profiling.npy',trueIdxs)
-np.savez(dir + '/extractedSources.npz',phi=phiFinal.detach().numpy(),A=Afinal.detach().numpy().reshape((dmdPixelsPerColumn, dmdPixelsPerRow,-1)))
+np.savez(dir + '/robust_extractedSources.npz',phi=phiFinal.detach().numpy(),A=Afinal.detach().numpy().reshape((dmdPixelsPerColumn, dmdPixelsPerRow,-1)))
 # np.save('C:/Users/michael.xie/Documents/data/activityMotionSimulations/fullFOV/moreActivity/phiVar_profiling.npy',phiVarFinal.detach().numpy())
 # np.save('C:/Users/michael.xie/Documents/data/activityMotionSimulations/fullFOV/moreActivity/A_profiling.npy',Afinal.detach().numpy().reshape((dmdPixelsPerColumn, dmdPixelsPerRow,-1)))
 print('FINISHED')
