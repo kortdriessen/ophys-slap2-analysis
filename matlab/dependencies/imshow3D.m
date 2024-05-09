@@ -477,7 +477,7 @@ set(gcf,'ResizeFcn', @figureResized)
         set(hPlayBtn, 'value', false); set(hPlayBtn, 'String', 'Play'); stop(hPlayTimer);
         
         w = VideoWriter([dr filesep fn]);
-        w.FrameRate = 10;
+
         w.FrameRate = 25;
         
         open(w);
