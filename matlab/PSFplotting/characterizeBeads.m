@@ -60,6 +60,36 @@ resZ = nan(nPatches);
 [bx,by,bz] = ndgrid([-ceil(factor*sigma(1)):ceil(factor*sigma(1))], [-ceil(factor*sigma(2)):ceil(factor*sigma(2))], [-ceil(factor*sigma(3)):ceil(factor*sigma(3))]);
 [bxq,byq,bzq] = ndgrid(linspace(-ceil(factor*sigma(1)),ceil(factor*sigma(1)), 2*factor*upsample*ceil(sigma(1))+1), linspace(-ceil(factor*sigma(2)), ceil(factor*sigma(2)),  2*factor*upsample*ceil(sigma(2))+1), linspace(-ceil(factor*sigma(3)),ceil(factor*sigma(3)),  2*factor*upsample*ceil(sigma(3))+1));
 
+beadAvAll = nan(2*factor*upsample*ceil(sigma(1))+1,2*factor*upsample*ceil(sigma(2))+1,2*factor*upsample*ceil(sigma(3))+1);
+nbeads = length(xx);
+bead_ixs = (1:nbeads)';
+if nbeads<3
+    warning('Too few beads in FOV!')
+else
+    beadX = nan(1, length(bead_ixs)); beadY = nan(1, length(bead_ixs));  beadZ = nan(1, length(bead_ixs)); beadB = nan(1, length(bead_ixs));
+    beadData_q = [];
+    for bead_n = length(bead_ixs):-1:1
+        beadData = im(xx(bead_ixs(bead_n)) + [-ceil(factor*sigma(1)):ceil(factor*sigma(1))], yy(bead_ixs(bead_n)) + [-ceil(factor*sigma(2)):ceil(factor*sigma(2))], zz(bead_ixs(bead_n)) + [-ceil(factor*sigma(3)):ceil(factor*sigma(3))]);
+    
+        params = gaussfitn([bx(:) by(:) bz(:)],reshape(beadData, [],1));
+        if all(abs(params{3})<1) %if the center is centered
+            beadX(bead_n) = params{4}(1,1);
+            beadY(bead_n) = params{4}(2,2);
+            beadZ(bead_n) = params{4}(3,3);
+            beadB(bead_n) = params{2};
+        end
+        
+        %upsample
+        beadData_q(:,:,:,bead_n) = interp3(by,bx, bz,beadData, byq+params{3}(2),bxq+params{3}(1),bzq+params{3}(3), 'spline');
+    end
+    
+    %select the smaller beads to ignore big junk
+    selb = (beadX.^2+beadY.^2+beadZ.^2) < prctile((beadX.^2+beadY.^2+beadZ.^2), 40); 
+    if any(selb)
+        beadAvAll = mean(beadData_q(:,:,:,selb),4);
+    end
+end
+
 %characterize beads in a given region
 for patchX = nPatches:-1:1
     for patchY = nPatches:-1:1
@@ -140,6 +170,7 @@ if nargin>3
     savefig(hF2, [savename '_XY.fig'], 'compact');
     savefig(hF3, [savename '_XZ.fig'], 'compact');
     savefig(hF4, [savename '_YZ.fig'], 'compact');
+    save([savename '_AVG_PSF'],'beadAvAll');
 end
 end
 
