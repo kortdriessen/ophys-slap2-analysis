@@ -38,7 +38,7 @@ assert(~isempty(chanInd), 'The analysis channel wasn''t imaged');
 im = double(A.data());
 im = im(:,:,analyzeChannel:nChan:end);
 
-characterizeBeads(im, XYpixelSize, dZ, [dr filesep fn(1:end-4)]);
+slap2.util.characterizeBeads(im, XYpixelSize, dZ, [dr filesep fn(1:end-4)]);
 end
 
 function XYpixelSize = getPixelPitchUm(dmdPixel2SampleTransform)
