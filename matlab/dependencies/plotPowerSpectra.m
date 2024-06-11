@@ -6,7 +6,7 @@ function plotPowerSpectra(VV)
 % and N is the number of time series.
 [T, N] = size(VV); % Get the dimensions of the matrix
 % Frequency vector (assuming sampling rate is 1, adjust as necessary)
-Fs = T/120; % Sampling frequency
+Fs = 91.89; %T/120; % Sampling frequency
 f = (0:T/2-1)*(Fs/T); % Frequency vector
 % Pre-allocate space for power spectra
 powerSpectra = zeros(length(f), N);
@@ -26,7 +26,7 @@ for i = 1:N
     % Store the normalized power spectrum in the matrix
     powerSpectra(:,i) = P1_normalized;
     % Plot the normalized power spectrum
-    plot(f, P1_normalized, 'DisplayName', ['Series ' num2str(i)]);
+    plot(f, P1_normalized, 'b', 'DisplayName', ['Series ' num2str(i)]);
 end
 hold off; % No more plots to add
 title('Normalized Power Spectra of Time Series');
