@@ -8,7 +8,7 @@ function summarizeBCI(dr)
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
 
-% parpool('processes',15); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+parpool('processes',15); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
 disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
 disp(dr)
 nDMDs = 2;

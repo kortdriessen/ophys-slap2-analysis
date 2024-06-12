@@ -1,7 +1,7 @@
 function processBCI(dr)
 
 if ~nargin
-    dr = uigetdir;
+    dr = uigetdir; %neuron folder where scans are, not project folder
 end
 
 %generate the trial table

@@ -520,20 +520,22 @@ maxR = maxR(sortorder);
 maxC = maxC(sortorder);
 
 %compute pairwise distances to cull spurious maxima
-keep = true(1,length(V));
-dMaxima = squareform(pdist([maxR maxC]));
-dMaxima(eye(size(dMaxima), 'logical')) = inf;
-for vIx = 1:length(V)
-    if ~isnan(dMaxima(vIx,vIx))
-        sel = dMaxima(vIx,:)<(upsample);
-        dMaxima(sel,:) = nan;
-        dMaxima(:,sel) = nan;
-        keep(sel) = false;
+if length(maxR)>1
+    keep = true(1,length(V));
+    dMaxima = squareform(pdist([maxR maxC]));
+    dMaxima(eye(size(dMaxima), 'logical')) = inf;
+    for vIx = 1:length(V)
+        if ~isnan(dMaxima(vIx,vIx))
+            sel = dMaxima(vIx,:)<(upsample);
+            dMaxima(sel,:) = nan;
+            dMaxima(:,sel) = nan;
+            keep(sel) = false;
+        end
     end
+    maxR = maxR(keep);
+    maxC = maxC(keep);
+    V = V(keep);
 end
-maxR = maxR(keep);
-maxC = maxC(keep);
-V = V(keep);
 k= length(V);
 sourceR = rGrid(maxR);
 sourceC = cGrid(maxC);
