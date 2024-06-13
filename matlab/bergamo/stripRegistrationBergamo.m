@@ -21,8 +21,10 @@ for f_ix = 1:length(fns)
     fn = fns{f_ix};
     disp(['Aligning: ' [dr filesep fn]])
 
-    A = ScanImageTiffReader([dr filesep fn]);
-    desc=A.descriptions();
+    [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+
+    % A = ScanImageTiffReader([dr filesep fn]);
+    % desc=A.descriptions();
 
 
     eval(desc{1});
@@ -35,7 +37,7 @@ for f_ix = 1:length(fns)
     fnstem = [dr filesep fn(1:end-4) dateAcqAsString filesep fn(1:end-4) dateAcqAsString];
     copyfile([dr filesep fn], [fnstem '.tif']);
 
-    meta = A.metadata;
+    % meta = A.metadata;
     metaLines = strsplit(meta, '\n');
     for lineIx = 1:length(metaLines)
         try
@@ -53,7 +55,7 @@ for f_ix = 1:length(fns)
 
     frametime = median(diff(timestamp(1:numChannels:end)));
 
-    Ad = single(A.data);
+    % Ad = single(A.data);
     Ad = permute(reshape(Ad, size(Ad,1), size(Ad,2), numChannels, []), [2 1 3 4]);
     Ad = Ad(removeLines+1:end,:,:,:);
 
@@ -137,25 +139,62 @@ for f_ix = 1:length(fns)
     [viewR, viewC] = ndgrid((1:(sz(1)+2*maxshiftR))-maxshiftR, (1:(sz(2)+2*maxshiftC))-maxshiftC); %view matrices for interpolation
 
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
+    % 
+    % %save a downsampled aligned recording
+    % fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % Bsum = zeros([size(viewR') numChannels]);
+    % Bcount = zeros([size(viewR') numChannels]);
+    % for DSframe = 1:nDSframes
+    %     readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
+    %     YY = downsampleTime(Ad(:,:,:, readFrames), ds_time);
+    %     for ch = 1:numChannels
+    %         B =  interp2(1:sz(2), 1:sz(1), YY(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan)';
+    %         fTIF.WriteIMG(single(B));
+    % 
+    %         Bcount(:,:,ch) = Bcount(:,:,ch) + ~isnan(B);
+    %         B(isnan(B)) = 0;
+    %         Bsum(:,:,ch) = Bsum(:,:,ch)+double(B);
+    %     end
+    % end
+    % fTIF.close;
 
     %save a downsampled aligned recording
     fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
     Bsum = zeros([size(viewR') numChannels]);
     Bcount = zeros([size(viewR') numChannels]);
+
+    tiffSave = single(zeros([size(viewR, [2 1]) nDSframes*numChannels]));
+
     for DSframe = 1:nDSframes
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
         YY = downsampleTime(Ad(:,:,:, readFrames), ds_time);
         for ch = 1:numChannels
             B =  interp2(1:sz(2), 1:sz(1), YY(:,:,ch),viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan)';
-            fTIF.WriteIMG(single(B));
+            tiffSave(:,:,(DSframe-1)*numChannels+ch) = single(B);
+            % fTIF.WriteIMG(single(B));
 
             Bcount(:,:,ch) = Bcount(:,:,ch) + ~isnan(B);
             B(isnan(B)) = 0;
             Bsum(:,:,ch) = Bsum(:,:,ch)+double(B);
         end
     end
-    fTIF.close;
+
+    networkTiffWriter(tiffSave, fnwrite, pixelscale);
+    clear('tiffSave');
+
+    % %save an average image for each channel
+    % for ch = 1:numChannels
+    %     Bmean = Bsum(:,:,ch)./Bcount(:,:,ch);
+    %     minV = prctile(Bmean(~isnan(Bmean(:))), 10);
+    %     maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
+    %     Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
+    %     fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
+    %     fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    %     fTIF.WriteIMG(single(Bmean));
+    %     fTIF.close;
+    % end
 
     %save an average image for each channel
     for ch = 1:numChannels
@@ -164,21 +203,35 @@ for f_ix = 1:length(fns)
         maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
         Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
         fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
-        fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-        fTIF.WriteIMG(single(Bmean));
-        fTIF.close;
+        networkTiffWriter(single(Bmean), fnwrite, pixelscale);
+        % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+        % fTIF.WriteIMG(single(Bmean));
+        % fTIF.close;
     end
 
-    %save an original-time-resolution recording
+    % %save an original-time-resolution recording
+    % fnwrite = [fnstem '_REGISTERED_RAW.tif'];
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % for frame = 1:length(motionC)
+    %     for ch = 1:numChannels
+    %         B = interp2(1:sz(2), 1:sz(1), Ad(:,:,ch,frame),viewC+motionC(frame), viewR+motionR(frame), 'linear', nan)';
+    %         fTIF.WriteIMG(single(B));
+    %     end
+    % end
+    % fTIF.close;
+
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+    tiffSave = single(zeros([size(viewR, [2 1]) length(motionC)*numChannels]));
     for frame = 1:length(motionC)
         for ch = 1:numChannels
             B = interp2(1:sz(2), 1:sz(1), Ad(:,:,ch,frame),viewC+motionC(frame), viewR+motionR(frame), 'linear', nan)';
-            fTIF.WriteIMG(single(B));
+            tiffSave(:,:,(frame-1)*numChannels+ch) = single(B);
+            % fTIF.WriteIMG(single(B));
         end
     end
-    fTIF.close;
+    networkTiffWriter(single(tiffSave), fnwrite, pixelscale);
+    clear('tiffSave')
 
     %save alignment metadata
     aData.numChannels = numChannels;

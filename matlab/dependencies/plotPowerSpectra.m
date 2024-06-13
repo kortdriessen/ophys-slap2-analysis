@@ -1,4 +1,4 @@
-function plotPowerSpectra(VV)
+function plotPowerSpectra(VV, Fs)
 % function to plot normalized power spectra of several time series
 % courtesy of ChatGPT
 
@@ -6,7 +6,9 @@ function plotPowerSpectra(VV)
 % and N is the number of time series.
 [T, N] = size(VV); % Get the dimensions of the matrix
 % Frequency vector (assuming sampling rate is 1, adjust as necessary)
-Fs = 91.89; %T/120; % Sampling frequency
+if nargin < 2
+    Fs = T/120; % Sampling frequency
+end
 f = (0:T/2-1)*(Fs/T); % Frequency vector
 % Pre-allocate space for power spectra
 powerSpectra = zeros(length(f), N);
@@ -14,6 +16,7 @@ powerSpectra = zeros(length(f), N);
 figure;
 hold on; % This allows all plots to be drawn on the same figure
 % Loop through each time series
+colors = distinguishable_colors(N);
 for i = 1:N
     % Compute the Fourier Transform of the time series
     Y = fft(VV(:,i));
@@ -22,15 +25,16 @@ for i = 1:N
     P1 = P2(1:T/2);
     P1(2:end-1) = 2*P1(2:end-1);
     % Normalize the power spectrum
-    P1_normalized = P1 / max(P1);
+    % P1_normalized = P1 / max(P1);
     % Store the normalized power spectrum in the matrix
-    powerSpectra(:,i) = P1_normalized;
+    % powerSpectra(:,i) = P1_normalized;
+    powerSpectra(:,i) = P1;
     % Plot the normalized power spectrum
-    plot(f, P1_normalized, 'b', 'DisplayName', ['Series ' num2str(i)]);
+    plot(f, P1, 'DisplayName', ['Trace ' num2str(i)], 'Color',colors(i,:));
 end
 hold off; % No more plots to add
-title('Normalized Power Spectra of Time Series');
+title('Power Spectra of Time Series');
 xlabel('Frequency (Hz)');
-ylabel('Normalized Power');
+ylabel('Power');
 legend show; % Display a legend to identify each time
 end
