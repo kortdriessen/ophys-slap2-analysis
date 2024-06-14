@@ -7,8 +7,9 @@ function summarizeBCI(dr)
 %cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
 %cd('C:\temp\SYNAPSES\Test');
 %cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
-
-parpool('processes',15); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+if isempty(gcp('nocreate'))
+    parpool('processes',15); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+end
 disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
 disp(dr)
 nDMDs = 2;
@@ -102,7 +103,7 @@ end
 
 %load some metadata
 firstValidTrial = find(keepTrials(DMDix,:),1,'first');
-trialStr = ['E' int2str(trialTable.epoch(firstValidTrial)) 'T' int2str(firstValidTrial) 'DMD1'];
+trialStr = ['E' int2str(trialTable.epoch(firstValidTrial)) 'T' int2str(firstValidTrial) 'DMD' int2str(DMDix)];
 load([dr filesep trialStr '_ALIGNMENTDATA.mat'], 'aData');
 numChannels = aData.numChannels;
 params.numChannels = numChannels;
@@ -165,26 +166,9 @@ for trialIx = nTrials:-1:1
         meanAligned(:,:,chIx,trialIx) = interp2(meanIM(:,:,chIx,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
     actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
-
-    if ~isfield(peaksCat, 'row')
-        peaksCat.row = peaks(trialIx).row - motOutput(1,trialIx);
-        peaksCat.col = peaks(trialIx).col - motOutput(2,trialIx);
-        peaksCat.val = peaks(trialIx).val;
-        peaksCat.t = peaks(trialIx).t;
-         figure, imagesc(template)
-         hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
-    else
-        peaksCat.row = cat(2, peaks(trialIx).row - motOutput(1,trialIx),peaksCat.row);
-        peaksCat.col = cat(2, peaks(trialIx).col - motOutput(2,trialIx), peaksCat.col);
-        peaksCat.val = cat(1, peaks(trialIx).val, peaksCat.val);
-        peaksCat.t = peaksCat.t + size(discardFrames{trialIx},1);
-        peaksCat.t = cat(1, peaks(trialIx).t,peaksCat.t);
-         hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
-    end
 end
-drawnow
 
-%identify outliers in alignment quality
+%identify outliers in alignment quality to determine valid trials
 ccf = corrCoeff;
 if nargin>1 && forceCorrThresh>0
     corrThresh = forceCorrThresh;
@@ -194,6 +178,28 @@ end
 validTrials= find(ccf>corrThresh);
 exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
 exptSummary.actIM{DMDix} = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
+
+%accumulate peaks, only from valid trials
+nValidFramesDS = 0;
+for vTrialIx = 1:length(validTrials)
+    trialIx = validTrials(vTrialIx);
+    if ~isfield(peaksCat, 'row')
+        peaksCat.row = peaks(trialIx).row - motOutput(1,trialIx);
+        peaksCat.col = peaks(trialIx).col - motOutput(2,trialIx);
+        peaksCat.val = peaks(trialIx).val;
+        peaksCat.t = peaks(trialIx).t;
+         % figure, imagesc(template)
+         % hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
+    else
+        peaksCat.row = cat(2, peaksCat.row, peaks(trialIx).row - motOutput(1,trialIx));
+        peaksCat.col = cat(2, peaksCat.col, peaks(trialIx).col - motOutput(2,trialIx));
+        peaksCat.val = cat(1, peaksCat.val, peaks(trialIx).val);
+        peaksCat.t = peaksCat.t + size(discardFrames{trialIx},1);
+        peaksCat.t = cat(1,peaksCat.t, peaks(trialIx).t+nValidFramesDS);
+         % hold on, scatter( maxshift+ peaks(trialIx).col - motOutput(2,trialIx), maxshift+ peaks(trialIx).row - motOutput(1,trialIx));
+    end
+    nValidFramesDS=  nValidFramesDS + size(discardFrames{trialIx},1);
+end
 
 %cluster localizations
 totalFrames = sum(cellfun(@(x)(sum(~x)), discardFrames));
@@ -231,6 +237,10 @@ parfor trialIx = 1:nTrials
 end
 dFsel = cell2mat(dFsel); %collapse into an array
 
+%error checking
+assert(nValidFramesDS==size(dFsel,2));
+assert(max(P.t)<nValidFramesDS);
+
 %extract sources from downsampled movie dF
 try
     [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
@@ -258,7 +268,9 @@ exptSummary.aData(:,DMDix) = alignData;
 exptSummary.userROIs{DMDix} = roiData;
 exptSummary.peaks{DMDix}= peaks;
 exptSummary.perTrialMeanIMs{DMDix} = meanIM;
+exptSummary.perTrialMeanIMsAligned{DMDix} = meanAligned;
 exptSummary.perTrialActIms{DMDix} = actIM;
+exptSummary.perTrialActIMsAligned{DMDix} = actAligned;
 exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector for each trial
 end
 

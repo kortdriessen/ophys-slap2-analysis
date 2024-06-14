@@ -23,9 +23,14 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndLocalizeTri
     %discard motion frames
     tmp1 = aData.aRankCorrDS(:)-smoothExp(aData.aRankCorrDS(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
     tmp2 = aData.recNegErr(:)-smoothExp(aData.recNegErr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
-    tmp1 = tmp1./std(tmp1(nInitFrames+1:end)); tmp2 = -tmp2./std(tmp2(nInitFrames+1:end)); 
-    tmp = tmp1*(0.25) + tmp2*(0.75);
-    discardFrames = imdilate(tmp<-4, ones(1,5));
+    tmp3 = aData.aError(:) -smoothExp(aData.aError(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac)));
+
+    tmp1 = tmp1./std(tmp1(nInitFrames+1:end)); 
+    tmp2 = -tmp2./std(tmp2(nInitFrames+1:end)); 
+    tmp3 = -tmp3./std(tmp3(nInitFrames+1:end)); 
+    
+    tmp = (tmp1 + tmp2 + tmp3)/3;
+    discardFrames = imclose(imdilate(tmp<-2, ones(5,1)) | (tmp<-0.5 & imdilate(tmp<-2, ones(21,1))), ones(11,1));
     discardFrames(1:nInitFrames) = true;
     rawIMs(:,:,discardFrames) = nan;
     
