@@ -155,7 +155,7 @@ Values = [
     {[32,32,16]}          % size of overlapping region after upsampling (default: [32,32,16])
     {[15,15,5]}           % maximum rigid shift in each direction
     {false}               % use phase correlation (good for high SNR)
-    {'FFT'}               % method for applying shifts ('FFT', 'linear', 'cubic')
+    {'cubic'}               % method for applying shifts ('FFT', 'linear', 'cubic')
     % template updating
     {true}                % flag for online template updating (default: true)
     {100}                 % length of initial batch (default: 100)

@@ -26,7 +26,7 @@ if nargin == 0
     [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
 end
 if nargin<3
-    activityChannel = 1;
+    activityChannel = 2;
 end
 
 if ~iscell(fns)
