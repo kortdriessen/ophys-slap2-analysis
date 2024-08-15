@@ -1,5 +1,8 @@
 function trialTable = buildTrialTable(dr)
-%Addresses a bug in SLAP2 trial numbering as of Feb 2024, where trial
+%This function organizes multi-trial recordings and reference images as a first step in the SLAP2 data processing
+%pipeline
+
+%This function addresses a bug in SLAP2 trial numbering as of Feb 2024, where trial
 %numbers sometimes fail to increment. THis makes some files extra long,
 % and subsequent trial numbers get out of sync
 
@@ -28,7 +31,7 @@ end
 DMDixs = [1 2];
 %find the files within the entire folder structure named REFERENCE
 for DMDix = DMDixs
-    list = dir([dr '/**/*DMD' int2str(DMDix) '-REFERENCE*']);
+    list = dir([dr '/*/*DMD' int2str(DMDix) '-REFERENCE*']);
     %old format, two reference files
     switch length(list)
     case 0
@@ -39,7 +42,25 @@ for DMDix = DMDixs
         refStack{DMDix}.IM = A.data;
     
         %load metadata for the reference stack and BCI ROI
-        %desc = A.descriptions;
+        desc = A.descriptions;
+        zIx = 0; Zs = []; channels = [];
+        for imIx = 1:numel(desc)
+                jj = jsondecode(desc{imIx});
+                if ~any(channels == jj.channel)
+                    channels = [channels jj.channel];
+                end
+                if imIx==1
+                    accumChan = jj.channel;
+                end
+                if jj.channel == accumChan
+                    zIx = zIx +1;
+                    Zs(zIx) = jj.z;
+                end
+        end
+        refStack{DMDix}.channels = channels;
+        refStack{DMDix}.Zs = Zs;
+        refStack{DMDix}.dmdPixel2SampleTransform = jj.dmdPixel2SampleTransform;
+
     case 2
         for cix = 1:2
             DMD1refFn = fullfile(list(cix).folder, list(cix).name);
