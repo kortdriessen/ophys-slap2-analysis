@@ -30,7 +30,7 @@ for i = 1:N
     % powerSpectra(:,i) = P1_normalized;
     powerSpectra(:,i) = P1;
     % Plot the normalized power spectrum
-    plot(f, P1, 'DisplayName', ['Trace ' num2str(i)], 'Color',colors(i,:));
+    plot(f, P1, 'DisplayName', ['Trace ' num2str(i)], 'Color',[colors(i,:), 0.5]);
 end
 hold off; % No more plots to add
 title('Power Spectra of Time Series');
