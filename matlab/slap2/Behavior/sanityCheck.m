@@ -25,20 +25,20 @@ for seshNum = 1:size(epochs,1)
     BCIon = BCIon(find(~isspace(BCIon)));
     
     %MoveOnlys
-    moveOnly_audio = read_harp_bin([moveOnly registers{1}], false);
-    moveOnly_handshake = read_harp_bin([moveOnly registers{2}], false);
-    moveOnly_licks = read_harp_bin([moveOnly registers{3}], false);
-    moveOnly_adc = read_harp_bin([moveOnly registers{4}], false); moveOnly_adc.Values = moveOnly_adc.Values(:,1);
+    moveOnly_audio = read_harp_bin([moveOnly registers{1}]);
+    moveOnly_handshake = read_harp_bin([moveOnly registers{2}]);
+    moveOnly_licks = read_harp_bin([moveOnly registers{3}]);
+    moveOnly_adc = read_harp_bin([moveOnly registers{4}]); moveOnly_adc.Values = moveOnly_adc.Values(:,1);
     moveOnly_motor = readtable([moveOnly registers{5}]);
-    moveOnly_loadCell = read_harp_bin([moveOnly registers{6}], true);  
+    moveOnly_loadCell = read_harp_bin([moveOnly registers{6}]);  
     
     %BCIs
-    BCI_audio = read_harp_bin([BCIon registers{1}], false);
-    BCI_handshake = read_harp_bin([BCIon registers{2}], false);
-    BCI_licks = read_harp_bin([BCIon registers{3}], false);
-    BCI_adc = read_harp_bin([BCIon registers{4}], false); moveOnly_adc.Values = moveOnly_adc.Values(:,1);
+    BCI_audio = read_harp_bin([BCIon registers{1}]);
+    BCI_handshake = read_harp_bin([BCIon registers{2}]);
+    BCI_licks = read_harp_bin([BCIon registers{3}]);
+    BCI_adc = read_harp_bin([BCIon registers{4}]); moveOnly_adc.Values = moveOnly_adc.Values(:,1);
     BCI_motor = readtable([BCIon registers{5}]);
-    BCI_loadCell = read_harp_bin([BCIon registers{6}], true);  
+    BCI_loadCell = read_harp_bin([BCIon registers{6}]);  
     toc
     disp('---------------------------bot (approx 30 seconds')
 end
