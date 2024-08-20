@@ -88,7 +88,7 @@ if data(1) == 3
         ticks = arrayfun(@(i) typecast(ticksSlice(i,:), 'uint16'), 1:size(ticksSlice,1), 'UniformOutput',false);
         ticks = cell2mat(ticks);
         
-        seconds = double(double(ticks)*10e-6) + double(seconds);
+        seconds = double(double(ticks).*32e-6) + double(seconds);
         
         dataValuesSlice = payloadData(:, (secondsPayload + ticksPayload+1 ):end);
         dataValues =  arrayfun(@(i) typecast(dataValuesSlice(i,:), payloadType), 1:size(payloadData,1), 'UniformOutput', false);
