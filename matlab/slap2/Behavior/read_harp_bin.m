@@ -67,6 +67,10 @@ payloadIndicator = (payloadInfo(5:end));
 payloadType = payloadTypes(  bitand(bin2dec([isSigned isFloat '0' hasTimeStamp payloadIndicator]),bitcmp(16, 'uint8'))  );
 elementSize = payloadSizes(payloadType); %retrieving size (in bytes) of payload1 element of the payload
 useTimeStamps = logical(hasTimeStamp);
+
+stride = data(2) + 2;
+payloadLength = uint32(floor(size(data,1) / uint32(stride)));
+payloadShape = [payloadLength floor(payloadSize / elementSize)];
 data = reshape(data, stride, []).';
 payloadSize = stride - 12;
 
@@ -103,7 +107,10 @@ else
     pinsRead = numel(dataValues{1});
     dataValues = reshape(cell2mat(dataValues), 5, []).';
     sequenceOfValues = 1:size(dataValues,1);
-    harpData = table(sequenceOfValues.', dataValues, 'VariableNames', {'Sequence', 'Values'});
+    harpData = table(sequenceOfValues.', dataValues, 'VariableNames', {'Sequence', 'Values'})
 end
+
+
+
 
 end
