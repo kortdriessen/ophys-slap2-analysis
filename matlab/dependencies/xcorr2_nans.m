@@ -29,11 +29,20 @@ ssF = sqrt(sum(F.^2));
 %correlation is sum(A.*B)./(sqrt(ssA)*sqrt(ssB)); ssB is constant though
 shifts =  -dShift:dShift;
 C = nan(length(shifts), length(shifts));
+del = 5 * mad(F,1);
 for drix = 1:length(shifts)
     for dcix = 1:length(shifts)
         T = template(circshift(tValid, -[shifts(drix) shifts(dcix)]));
-        ssT = sum(T.^2);
-        C(drix,dcix) = sum(F .* T)./sqrt(ssT);
+
+        a = abs(F-T);
+        clipVals = (a > del);
+        a(clipVals) = del * (a(clipVals) - del/2);
+        a(~clipVals) = a(~clipVals).^2/2;
+
+        C(drix,dcix) = -sum(a);
+        
+        % ssT = sum(T.^2);
+        % C(drix,dcix) = sum(F .* T)./sqrt(ssT);
     end
 end
 
