@@ -279,6 +279,13 @@ exptSummary.params = params;
 exptSummary.trialTable = trialTable;
 exptSummary.dr = dr;
 
+
+% -- Lucas' Contribution ----
+behavioralData = extract_behavior_from_harp(dr);
+exptSummary.behavior = behavioralData;
+% ---------------------------
+
+
 %save
 save(fnsave, 'exptSummary', "-v7.3");
 disp('Done summarizeMultiROI_Peaks')
