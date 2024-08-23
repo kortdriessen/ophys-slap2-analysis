@@ -9,10 +9,12 @@ if nargin<1 || isempty(ds_time)
 end
 dsFac = 2^ds_time;
 if nargin<2 || isempty(fn)
-    [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
+    fns = uipickfiles('FilterSpec','*.tif');
+    % [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
 else
-    [dr,fns, ext] = fileparts(fn);
-    fns = strcat(fns,ext);
+    % [dr,fns, ext] = fileparts(fn);
+    % fns = strcat(dr,fns,ext);
+    fns = fn;
 end
 if ~iscell(fns)
     fns = {fns};
@@ -20,6 +22,9 @@ end
 
 for f_ix = 1:length(fns)
     fn = fns{f_ix};
+    [dr,fn, ext] = fileparts(fn);
+    fn = strcat(fn,ext);
+    
     disp(['Aligning: ' [dr filesep fn]])
 
     [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
