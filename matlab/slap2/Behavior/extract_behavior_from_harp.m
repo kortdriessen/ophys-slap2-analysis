@@ -17,7 +17,7 @@ function behaviorData = extract_behavior_from_harp(dr)
     
     mousePath = [dr(1:(strfind(dr, 'SLAP2')-1)) 'Behavior\BCI\'];
     mouseBehaviorDr = dir(mousePath);
-    temp = split(testDr, '\'); sessionDate_string = temp{end};
+    temp = split(dr, '\'); sessionDate_string = temp{end-1};
     temp2 = split(sessionDate_string, '_'); dateID = erase(temp2{3}, '-');
     epochIndexing = cell2mat(arrayfun(@(i) contains(mouseBehaviorDr(i).name, dateID), 1:numel(mouseBehaviorDr(:)), 'UniformOutput', false));
     
@@ -37,8 +37,10 @@ function behaviorData = extract_behavior_from_harp(dr)
         '\LoadCells.harp\Register__LoadCellData.bin'
         }; %registers subject to change based on updates
     
-    
-    
+    %HARP PINOUT
+    startPin = 0x1000; stopPin = 0x1; %Subject to change based on bonsai updates
+    goCue = 500; rewardCue = 100;
+    licks = 2;
     
     %MoveOnlys
     moveOnly_audio = read_harp_bin([moveOnly registers{1}]);

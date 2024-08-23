@@ -1,4 +1,4 @@
-% dirs = uipickfiles(); %picking out session files 
+ dirs = uipickfiles(); %picking out session files 
 %% Run code
 bleaching = false; 
 
@@ -38,10 +38,17 @@ for dirNum = 1:length(dirs)
 
     % CREATE MOVIE FOR EACH DMD AND SAVE
     % for DMDix = 1:2
-    meanIMs_1 = squeeze(exptSummary.perTrialMeanIMs{1}(:,:,1, :)); %x,y,color,trial
-    meanIMs_2 = squeeze(exptSummary.perTrialMeanIMs{2}(:,:,1, :)); %x,y,color,trial
-    actIMs_1 = squeeze(exptSummary.perTrialActIms{1}(:,:,1, :)); %x,y,color,trial
-    actIMs_2 = squeeze(exptSummary.perTrialActIms{2}(:,:,1, :)); %x,y,color,trial
+    if isfield(exptSummary, 'perTrialMeanIMsAligned') %new format
+        meanIMs_1 = squeeze(exptSummary.perTrialMeanIMsAligned{1}(:,:,1, :)); %x,y,color,trial
+        meanIMs_2 = squeeze(exptSummary.perTrialMeanIMsAligned{2}(:,:,1, :)); %x,y,color,trial
+        actIMs_1 = squeeze(exptSummary.perTrialActImsAligned{1}(:,:,1, :)); %x,y,color,trial
+        actIMs_2 = squeeze(exptSummary.perTrialActImsAligned{2}(:,:,1, :)); %x,y,color,trial
+    else %old format
+        meanIMs_1 = squeeze(exptSummary.perTrialMeanIMs{1}(:,:,1, :)); %x,y,color,trial
+        meanIMs_2 = squeeze(exptSummary.perTrialMeanIMs{2}(:,:,1, :)); %x,y,color,trial
+        actIMs_1 = squeeze(exptSummary.perTrialActIms{1}(:,:,1, :)); %x,y,color,trial
+        actIMs_2 = squeeze(exptSummary.perTrialActIms{2}(:,:,1, :)); %x,y,color,trial
+    end
 
     %normalize
     meanIMs_1 = normalizeLocal(meanIMs_1, 21, 0.9, false);
