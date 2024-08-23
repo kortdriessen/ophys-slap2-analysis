@@ -205,7 +205,7 @@ VSgBtnhand = uicontrol('Style', 'pushbutton','Position', VSgBtn_Pos,'String','S'
 VCrBtnhand = uicontrol('Style', 'pushbutton','Position', VCrBtn_Pos,'String','C', 'FontSize', BtnSz, 'Callback' , @CoronalView);
 
 hPlayBtn = uicontrol('Style', 'togglebutton','Position', PlayBtn_Pos,'String','Play', 'FontSize', BtnSz, 'Callback' , @Play);
-hPlayTimer = timer('ExecutionMode', 'fixedSpacing', 'Period', 0.1, 'TimerFcn', @timerFunc);
+hPlayTimer = timer('ExecutionMode', 'fixedSpacing', 'Period', 0.001, 'TimerFcn', @timerFunc);
 hPlaySpeed = uicontrol('Style', 'edit','Position', Speed_Pos,'String','3');
 
 hExportButton = uicontrol('Style', 'pushbutton','Position', Export_Pos, 'String', 'Export', 'Callback', @exportButton); %#ok<NASGU>
