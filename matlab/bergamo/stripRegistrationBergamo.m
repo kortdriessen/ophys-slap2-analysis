@@ -1,8 +1,7 @@
 function stripRegistrationBergamo(ds_time, fn)
 maxshift = 50;
-clipShift = 10; %5;%the maximum allowable shift per frame
-alpha = 0.0005; %exponential time constant for template
-% alpha = 0.1;
+clipShift = 10; %the maximum allowable shift per frame
+% alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
 if nargin<1 || isempty(ds_time)
     ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
@@ -76,8 +75,6 @@ for f_ix = 1:length(fns)
     framesToRead = initFrames * dsFac;
     Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
     sz = size(Ad);
-    % chRatio = 1; %max(reshape(Ad(:,:,2,:),1,[])) / max(reshape(Ad(:,:,1,:),1,[]));
-    % Yhp = squeeze(chRatio * Y(:,:,1,:) + 1 * Y(:,:,2,:));
     Yhp = squeeze(sum(Y,3));
     %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
 
@@ -133,13 +130,9 @@ for f_ix = 1:length(fns)
 
     disp('Registering:');
     for DSframe = 1:nDSframes
-        % if DSframe == 9116 || DSframe == 9637
-        %     disp('hi')
-        % end
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time);
-        % M = squeeze(chRatio*M(:,:,1,:) + 1*M(:,:,2,:));
         M = squeeze(sum(M,3)); %merge colors
         %M = M-imgaussfilt(M, 4); %highpass
 
@@ -172,10 +165,6 @@ for f_ix = 1:length(fns)
         % motionDSc(DSframe) = motion(2);
         % aErrorDS(DSframe) = R;
 
-        % if (motion(1)-initR)^2 + (motion(2)-initC)^2 > 25 && DSframe > 400 && R < median(aErrorDS,'omitmissing') - 3*mad(aErrorDS,1);
-        %     pause();
-        % end
-
         if sqrt((motionDSr(DSframe)/sz(1)).^2 + (motionDSc(DSframe)/sz(2)).^2) > 0.25
             Mfull = interp2(1:sz(2), 1:sz(1), M,viewC, viewR, 'linear', nan);
             [motion, R] = xcorr2_nans(Mfull,Ttmp,[initR;initC],50);
@@ -199,10 +188,6 @@ for f_ix = 1:length(fns)
             templateCt = templateCt + ~isnan(A);
             template = template ./ templateCt;
             template(templateCt < 100) = nan;
-            
-            % nantmp = sel & isnan(template);
-            % template(nantmp) = A(nantmp);
-            % template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
 
             initR = round(motionDSr(DSframe));
             initC = round(motionDSc(DSframe));
