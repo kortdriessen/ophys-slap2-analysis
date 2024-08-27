@@ -1,4 +1,4 @@
-function stripRegistrationBergamo(ds_time, fn)
+function stripRegistrationBergamo(ds_time, selCh, fn)
 maxshift = 50;
 clipShift = 10; %the maximum allowable shift per frame
 % alpha = 0.0005; %exponential time constant for template
@@ -7,7 +7,7 @@ if nargin<1 || isempty(ds_time)
     ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
 end
 dsFac = 2^ds_time;
-if nargin<2 || isempty(fn)
+if nargin<3 || isempty(fn)
     fns = uipickfiles('FilterSpec','*.tif');
     % [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
 else
@@ -32,7 +32,7 @@ for f_ix = 1:length(fns)
     % desc=A.descriptions();
 
 
-    eval(desc{1});
+    evalc(desc{1});
     datestr(epoch);
     %YYYYMMDDHHMMSS
     dateAcqAsString = ['_' num2str(epoch(1), '%04i') num2str(epoch(2), '%02i') num2str(epoch(3), '%02i') '_' num2str(epoch(4), '%02i') num2str(epoch(5), '%02i') num2str(round(epoch(6)), '%02i')];
@@ -46,11 +46,20 @@ for f_ix = 1:length(fns)
     metaLines = strsplit(meta, '\n');
     for lineIx = 1:length(metaLines)
         try
-            eval([metaLines{lineIx} ';']);
+            evalc([metaLines{lineIx} ';']);
         catch
         end
     end
     numChannels = length(SI.hChannels.channelSave);
+
+    if nargin<2 || isempty(selCh)
+        selCh = 1:numChannels;
+    else
+        if any(selCh < 1) || any(selCh > numChannels)
+            disp('Invalid channel selection')
+            selCh = 1:numChannels;
+        end
+    end
 
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
     for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
@@ -75,7 +84,7 @@ for f_ix = 1:length(fns)
     framesToRead = initFrames * dsFac;
     Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
     sz = size(Ad);
-    Yhp = squeeze(sum(Y,3));
+    Yhp = squeeze(sum(reshape(Y(:,:,selCh,:),size(Y,1),size(Y,2),[],size(Y,4)),3));
     %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
 
     % find the most correlated ~100 frames within the first initFrames to
@@ -133,7 +142,7 @@ for f_ix = 1:length(fns)
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time);
-        M = squeeze(sum(M,3)); %merge colors
+        M = squeeze(sum(reshape(M(:,:,selCh,:),size(M,1),size(M,2),[],size(M,4)),3)); %merge colors
         %M = M-imgaussfilt(M, 4); %highpass
 
         if ~mod(DSframe, 1000)
@@ -165,7 +174,7 @@ for f_ix = 1:length(fns)
         % motionDSc(DSframe) = motion(2);
         % aErrorDS(DSframe) = R;
 
-        if sqrt((motionDSr(DSframe)/sz(1)).^2 + (motionDSc(DSframe)/sz(2)).^2) > 0.25
+        if sqrt((motionDSr(DSframe)/sz(1)).^2 + (motionDSc(DSframe)/sz(2)).^2) > 0.75^2
             Mfull = interp2(1:sz(2), 1:sz(1), M,viewC, viewR, 'linear', nan);
             [motion, R] = xcorr2_nans(Mfull,Ttmp,[initR;initC],50);
             
@@ -191,6 +200,9 @@ for f_ix = 1:length(fns)
 
             initR = round(motionDSr(DSframe));
             initC = round(motionDSc(DSframe));
+        else
+            motionDSr(DSframe) = initR;
+            motionDSc(DSframe) = initC;
         end
     end
 
