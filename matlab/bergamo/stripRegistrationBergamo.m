@@ -1,17 +1,19 @@
-function stripRegistrationBergamo(ds_time, fn)
-maxshift = 30;
-clipShift = 5;%the maximum allowable shift per frame
-alpha = 0.0005; %exponential time constant for template
+function stripRegistrationBergamo(ds_time, selCh, fn)
+maxshift = 50;
+clipShift = 10; %the maximum allowable shift per frame
+% alpha = 0.0005; %exponential time constant for template
 removeLines = 4;
 if nargin<1 || isempty(ds_time)
     ds_time = 3; % the movie is downsampled using averaging in time by a factor of 2^ds_time
 end
 dsFac = 2^ds_time;
-if nargin<2 || isempty(fn)
-    [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
+if nargin<3 || isempty(fn)
+    fns = uipickfiles('FilterSpec','*.tif');
+    % [fns, dr] = uigetfile('*.tif', 'multiselect', 'on');
 else
-    [dr,fns, ext] = fileparts(fn);
-    fns = strcat(fns,ext);
+    % [dr,fns, ext] = fileparts(fn);
+    % fns = strcat(dr,fns,ext);
+    fns = fn;
 end
 if ~iscell(fns)
     fns = {fns};
@@ -19,6 +21,9 @@ end
 
 for f_ix = 1:length(fns)
     fn = fns{f_ix};
+    [dr,fn, ext] = fileparts(fn);
+    fn = strcat(fn,ext);
+    
     disp(['Aligning: ' [dr filesep fn]])
 
     [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
@@ -27,7 +32,7 @@ for f_ix = 1:length(fns)
     % desc=A.descriptions();
 
 
-    eval(desc{1});
+    evalc(desc{1});
     datestr(epoch);
     %YYYYMMDDHHMMSS
     dateAcqAsString = ['_' num2str(epoch(1), '%04i') num2str(epoch(2), '%02i') num2str(epoch(3), '%02i') '_' num2str(epoch(4), '%02i') num2str(epoch(5), '%02i') num2str(round(epoch(6)), '%02i')];
@@ -41,11 +46,20 @@ for f_ix = 1:length(fns)
     metaLines = strsplit(meta, '\n');
     for lineIx = 1:length(metaLines)
         try
-            eval([metaLines{lineIx} ';']);
+            evalc([metaLines{lineIx} ';']);
         catch
         end
     end
     numChannels = length(SI.hChannels.channelSave);
+
+    if nargin<2 || isempty(selCh)
+        selCh = 1:numChannels;
+    else
+        if any(selCh < 1) || any(selCh > numChannels)
+            disp('Invalid channel selection')
+            selCh = 1:numChannels;
+        end
+    end
 
     pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
     for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
@@ -66,18 +80,51 @@ for f_ix = 1:length(fns)
     %downsample to align
 
     %make an initial template with normcorr
-    initFrames = 400;
+    initFrames = 1000;
     framesToRead = initFrames * dsFac;
     Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
     sz = size(Ad);
-    Yhp = squeeze(sum(Y,3));
+    Yhp = squeeze(sum(reshape(Y(:,:,selCh,:),size(Y,1),size(Y,2),[],size(Y,4)),3));
     %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
+
+    % find the most correlated ~100 frames within the first initFrames to
+    % use as an initial template
+    rho = corr(reshape(Yhp,[],size(Yhp,3)));
+    dist_matrix = 1 - rho;
+    Z = linkage(squareform(dist_matrix),'average');
+    
+    cutoff = 0.01;
+    min_cluster_size = 100;
+    clusters = [];
+    max_cutoff = 2.0;
+    while isempty(clusters) || all(cellfun(@numel, clusters) < min_cluster_size)
+        cutoff = cutoff + 0.01;
+        if cutoff > max_cutoff
+            error('Cound not find a cluster with at least %d samples',min_cluster_size);
+        end
+        T = cluster(Z, 'cutoff', cutoff, 'criterion', 'distance');
+        clusters = arrayfun(@(x) find(T == x), unique(T), 'UniformOutput', false);
+    end
+
+    max_mean_corr = -Inf;
+    for i = 1:length(clusters)
+        cluster_indices = clusters{i};
+        if numel(cluster_indices) >= min_cluster_size
+            mean_corr = mean(mean(rho(cluster_indices,cluster_indices)));
+            if mean_corr > max_mean_corr
+                max_mean_corr = mean_corr;
+                best_cluster = cluster_indices;
+            end
+        end
+    end
+
     options_rigid = NoRMCorreSetParms('d1',size(Y,1),'d2',size(Y,2),'bin_width',initFrames,'max_shift',maxshift,'us_fac',4,'init_batch',initFrames, 'correct_bidir', false);
-    F = normcorre(Yhp,options_rigid);
+    F = normcorre(Yhp,options_rigid,mean(Yhp(:,:,best_cluster),3));
     F = mean(F,3); %fixed image
+    % F = mean(sqrt(abs(F)).*sign(F),3); %fixed image
     template = nan(2*maxshift+sz(1), 2*maxshift+sz(2));
-    template(maxshift+(1:sz(1)), maxshift+(1:sz(2)))=F;
-    T0 = template; T00 = zeros(size(template));
+    T0 = template; T00 = zeros(size(template)); templateCt = zeros(size(template));
+    T0(maxshift+(1:sz(1)), maxshift+(1:sz(2)))=F;
     clear Y Yhp;
 
     %aligned = nan(2*maxshift+szY(1), 2*maxshift+szY(2), nDSframes);
@@ -95,7 +142,7 @@ for f_ix = 1:length(fns)
         readFrames = (DSframe-1)*(dsFac) + (1:(dsFac));
 
         M = downsampleTime(Ad(:,:,:, readFrames), ds_time);
-        M = squeeze(sum(M,3)); %merge colors
+        M = squeeze(sum(reshape(M(:,:,selCh,:),size(M,1),size(M,2),[],size(M,4)),3)); %merge colors
         %M = M-imgaussfilt(M, 4); %highpass
 
         if ~mod(DSframe, 1000)
@@ -103,30 +150,59 @@ for f_ix = 1:length(fns)
         end
 
         Ttmp = mean(cat(3, T0, T00,template),3, 'omitnan');
+        % T = Ttmp(maxshift-initR + (1:sz(1)), maxshift-initC+(1:sz(2)));
         T = Ttmp(maxshift-initR + (1:sz(1)), maxshift-initC+(1:sz(2)));
+
+        % should edit template so that it doesn't just use the cropped area
+        % want to use the additional information in the template around the
+        % init crop area
+
+        % Mfull = interp2(1:sz(2), 1:sz(1), M,viewC, viewR, 'linear', nan);
 
         %output = dftregistration(fft2(M),fft2(single(T)),4);
         output = dftregistration_clipped(fft2(M),fft2(single(T)),4, clipShift);
+        % [motion, R] = xcorr2_nans(Mfull,Ttmp,[initR;initC],clipShift);
+
         %         if abs(output(3))>10 || abs(output(4))>10
         %             %the shift was very large- what's up?
         %         end
         motionDSr(DSframe) = initR+output(3);
         motionDSc(DSframe) = initC+output(4);
         aErrorDS(DSframe) = output(1);
+        
+        % motionDSr(DSframe) = motion(1);
+        % motionDSc(DSframe) = motion(2);
+        % aErrorDS(DSframe) = R;
+
+        if sqrt((motionDSr(DSframe)/sz(1)).^2 + (motionDSc(DSframe)/sz(2)).^2) > 0.75^2
+            Mfull = interp2(1:sz(2), 1:sz(1), M,viewC, viewR, 'linear', nan);
+            [motion, R] = xcorr2_nans(Mfull,Ttmp,[initR;initC],50);
+            
+            motionDSr(DSframe) = motion(1);
+            motionDSc(DSframe) = motion(2);
+            aErrorDS(DSframe) = R;
+        end
 
         if abs(motionDSr(DSframe))<maxshift && abs(motionDSc(DSframe))<maxshift
             A = interp2(1:sz(2), 1:sz(1), M,viewC+motionDSc(DSframe), viewR+motionDSr(DSframe), 'linear', nan);
-            sel = ~isnan(A);
+            % sel = ~isnan(A);
 
-            selCorr = ~(isnan(A) | isnan(template));
-            aRankCorr(DSframe) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
-            recNegErr(DSframe) = mean(min(0, A(selCorr)-template(selCorr)).^2);
-            nantmp = sel & isnan(template);
-            template(nantmp) = A(nantmp);
-            template(sel) = (1-alpha)*template(sel) + alpha*(A(sel));
+            Asmooth = imgaussfilt(A,1);
+
+            selCorr = ~(isnan(Asmooth) | isnan(Ttmp));
+            aRankCorr(DSframe) = corr(Asmooth(selCorr), Ttmp(selCorr), 'type', 'Spearman');
+            recNegErr(DSframe) = mean(min(0, Asmooth(selCorr) .* mean(Ttmp(selCorr)) ./ mean(Asmooth(selCorr)) - Ttmp(selCorr)).^2);
+            
+            template = sum(cat(3,template .* templateCt, A),3,"omitnan");
+            templateCt = templateCt + ~isnan(A);
+            template = template ./ templateCt;
+            template(templateCt < 100) = nan;
 
             initR = round(motionDSr(DSframe));
             initC = round(motionDSc(DSframe));
+        else
+            motionDSr(DSframe) = initR;
+            motionDSc(DSframe) = initC;
         end
     end
 
@@ -181,6 +257,12 @@ for f_ix = 1:length(fns)
         end
     end
 
+    nanRows = mean(mean(isnan(tiffSave),3),2) == 1;
+    nanCols = mean(mean(isnan(tiffSave),3),1) == 1;
+
+    tiffSave(nanRows,:,:) = [];
+    tiffSave(:,nanCols,:) = [];
+
     networkTiffWriter(tiffSave, fnwrite, pixelscale);
     clear('tiffSave');
 
@@ -202,6 +284,8 @@ for f_ix = 1:length(fns)
         minV = prctile(Bmean(~isnan(Bmean(:))), 10);
         maxV = prctile(Bmean(~isnan(Bmean(:))), 99.9);
         Bmean = uint8(255*sqrt(max(0,(Bmean-minV)./(maxV-minV))));
+        Bmean(nanRows,:) = [];
+        Bmean(:,nanCols) = [];
         fnwrite = [fnstem '_REGISTERED_AVG_CH' num2str(ch) '_8bit.tif'];
         networkTiffWriter(single(Bmean), fnwrite, pixelscale);
         % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
@@ -222,14 +306,17 @@ for f_ix = 1:length(fns)
 
     fnwrite = [fnstem '_REGISTERED_RAW.tif'];
     % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
-    tiffSave = single(zeros([size(viewR, [2 1]) length(motionC)*numChannels]));
+    tiffSave = single(zeros([size(viewR, [2 1]) - [sum(nanRows) sum(nanCols)] length(motionC)*numChannels]));
     for frame = 1:length(motionC)
         for ch = 1:numChannels
             B = interp2(1:sz(2), 1:sz(1), Ad(:,:,ch,frame),viewC+motionC(frame), viewR+motionR(frame), 'linear', nan)';
+            B(nanRows,:) = [];
+            B(:,nanCols) = [];
             tiffSave(:,:,(frame-1)*numChannels+ch) = single(B);
             % fTIF.WriteIMG(single(B));
         end
     end
+
     networkTiffWriter(single(tiffSave), fnwrite, pixelscale);
     clear('tiffSave')
 

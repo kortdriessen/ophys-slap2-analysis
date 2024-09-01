@@ -356,7 +356,7 @@ exptSummary.perTrialActIms = actIM;
 exptSummary.perTrialAlignmentOffsets = motOutput; %the alignment vector for each trial
 
 %save
-save([drsave filesep fnsave], 'exptSummary');
+save([drsave filesep fnsave], 'exptSummary','-v7.3');
 
 disp('Done summarizeBergamo_Peaks')
 end

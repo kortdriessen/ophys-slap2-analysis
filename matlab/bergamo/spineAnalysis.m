@@ -246,7 +246,24 @@ classdef spineAnalysis < handle
                 else
                     %file is too big to fit into memory and has too many
                     %pages for Tiff library
-                    error('file is too big to fit into memory, and too many pages for Tiff library... will solve this later...')
+                    disp('file is too big to fit into memory, and too many pages for Tiff library... will solve this later... trying anyway')
+                    t = Tiff([obj.dr filesep fnRaw], 'r');
+                    t.setDirectory(1);
+                    try
+                        for fix = 1:nframes
+                            for cix = 1:obj.numChannels
+                                %pageInd = (fix-1)*obj.numChannels + cix
+                                %fdata = imread([obj.dr filesep fnRaw], pageInd);
+                                fdata = t.read;
+                                for rix = 1:nROIs
+                                    D{rix}(:,:,cix,fix) = fdata(sData.bbox{rix}(1,2):sData.bbox{rix}(2,2), sData.bbox{rix}(1,1):sData.bbox{rix}(2,1));
+                                end
+                                t.nextDirectory;
+                            end
+                        end
+                    catch ME %#ok<NASGU>
+                        disp(['Read ' int2str(fix) ' frames'])
+                    end
                 end
             end
 
