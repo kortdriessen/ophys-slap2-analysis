@@ -1,15 +1,20 @@
 #Imports
 import tifffile as tiff
+import matplotlib.pyplot as plt
 import numpy as np
 import pickle
 import pandas as pd
 from scipy.sparse.linalg import svds
 import scipy.cluster.hierarchy as sch
+import scipy.misc as sm
 
 #initatial parameters
 nFrames = 10000
 kClusters = 20
 savePath = 'C:/temp/'
+metricUsed = 'cosine'
+methodUsed = 'ward'
+criterionUsed = 'maxclust'
 
 #Read Tiff
 with tiff.TiffFile('C:/temp/scan_00003_20240816_115328_REGISTERED_DOWNSAMPLED-2x.tif') as tif:
@@ -20,7 +25,7 @@ with tiff.TiffFile('C:/temp/scan_00003_20240816_115328_REGISTERED_DOWNSAMPLED-2x
 X_data = np.reshape(movie, (l,w*h)).T 
 X_mean = np.nanmean(X_data,axis=1) #row averages
 B = X_data - np.tile(X_mean, (X_data.shape[1],1)).T
-Btruncated = B[:,:nFrames]
+Btruncated = B[:,-nFrames:]
 BnanMat =  np.isnan(Btruncated)
 keepRows= np.nanmean(BnanMat, axis=1)<0.2
 B_tilde = Btruncated[keepRows,:]
@@ -56,17 +61,31 @@ clusterLabels = sch.fcluster(linkageMatrix, kClusters, criterion='maxclust')
 clusterLabels = sch.fclusterdata(
     Vt.T,
     t=kClusters,
-    criterion='maxclust',
-    method='single')#using single because assuming we want outlier detection
+    criterion=criterionUsed,
+    metric = metricUsed,
+    method=methodUsed)#using single because assuming we want outlier detection
 
 #recover frames in data from clusters
 clustersToOrganize = np.unique(clusterLabels)
 imgDict= {}
+X = movie[-nFrames:,:,:]
+clusterNum = 1
 for idx in clustersToOrganize:
-    dataInCluster = Btruncated[:,clusterLabels == idx]
-    avgImg = np.nanmean(dataInCluster, axis=1)
-    imgDict[idx] = np.reshape(avgImg, (w,h))
+    dataInCluster = X[clusterLabels == idx,:,:]
+    framesGrabbed, null1, null2 = dataInCluster.shape
+    tiff.imwrite(f'C:/temp/clusterTiffs/dataCluster_{metricUsed}_{methodUsed}_{criterionUsed}_{clusterNum}.tif', dataInCluster)
+    avgImg = np.nanmean(dataInCluster, axis=0)
+    imgDict[idx] = avgImg #np.reshape(avgImg, (w,h))
+
+    
+    #For Visualization
+    plt.figure()
+    plt.imshow(np.reshape(avgImg, (w,h)))
+    plt.title('Size of cluster: '+ str(framesGrabbed))
+    plt.show()
+    
+    clusterNum += 1
 
 #save dictionary for labeling
-with open('C:/temp/imgDict.pkl','wb') as f:
+with open(f'C:/temp/dataCluster_{metricUsed}_{methodUsed}_{criterionUsed}_{clusterNum}.pkl','wb') as f:
     pickle.dump(imgDict, f)
