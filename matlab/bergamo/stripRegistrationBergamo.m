@@ -82,7 +82,11 @@ for f_ix = 1:length(fns)
     %make an initial template with normcorr
     initFrames = 1000;
     framesToRead = initFrames * dsFac;
-    Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
+    try
+        Y = downsampleTime(Ad(:,:,:,1:framesToRead), ds_time);
+    catch ME
+        error(['Your file was too short:' fn])
+    end
     sz = size(Ad);
     Yhp = squeeze(sum(reshape(Y(:,:,selCh,:),size(Y,1),size(Y,2),[],size(Y,4)),3));
     %Yhp = Yhp-imgaussfilt(Yhp, 4); %highpass in space
