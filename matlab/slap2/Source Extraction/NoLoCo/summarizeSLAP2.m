@@ -1,16 +1,9 @@
-function summarizeSLAP2(dr)
-    %TO DO:
-    %PARAMETER SENSITIVITY ANALYSIS
-
-    %add some global NMF components?
-        %initialize with random values
-%cd('\\allen\aind\scratch\ophys\BCI\inactive_mice\709390_SBCI12\SLAP2\slap2_709390_2024-01-10_12-17-31')
-%cd('C:\temp\SYNAPSES\Test');
-%cd('C:\Users\kaspar.podgorski\OneDrive - Allen Institute\Documents\GitHub\ophys-slap2-analysis\matlab\rasterDataProcessing\Bergamo\simulations\data\SIMULATIONS')
-done = false;
-while ~done
-    params.tau_s = str2double(inputdlg('Time constant of your glutamate indicator (s)?', 'tau', 1, {'0.05'}));
-    done = params.tau_s>0 && params.tau_s<1;
+function summarizeSLAP2(dr, paramsIn)
+%PARAMETER SETTING
+if nargin>2
+    params = setParams('summarizeSLAP2', paramsIn);
+else
+    params = setParams('summarizeSLAP2');
 end
 
 delete(gcp('nocreate'))
@@ -22,32 +15,9 @@ disp(['Parallel workers:' int2str(nWorkers)])
 parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
 disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
 disp(dr)
+
+
 nDMDs = 2;
-
-%general params
-params.analyzeHz = 200; %frame rate used for analysis
-params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
-
-%filtering params
-params.sigma_px = 1.5; %1.33;   % space constant in pixels
-
-%params.tau_s = 0.027; % time constant in seconds for glutamate channel; from Aggarwal et al 2023 Fig 5
-%params.denoiseWindow_samps = 20; %number of samples to average together for denoising; REFACTOR THIS OUT AND USE SECONDS!
-params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
-params.baselineWindow_Glu_s = 4; %timescale for calculating F0 in glutamate channel, seconds
-params.baselineWindow_Ca_s = 4; %timescale for calculating F0 in calcium channel, seconds
-
-%localization params
-% params.eventRateThresh_hz = 0.01; % minimum event rate in Hz
-% params.tilesizeLoc = 64; %Tile size used for computing statistics for localization; Accounts for image statistics varying slowly across FOV.
-% params.threshSNRloc = 12; %6; % Z-score threshold for calling a localization
-% params.threshSKloc = 4; %threshold on skewness-based summary statistic for pixels to consider for localizations
-% params.upsample = 3; %how many times to upsample the imaging resolution for finding local maxima to identify sources; affects maximum source density
-
-%NMF params
-params.sparseFac = 0.05; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
-params.nmfIter = 4; %number of iterations of NMF refinement
-params.dXY = 5; %how large sources can be (radius), pixels
 params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
 
 %load trial table
