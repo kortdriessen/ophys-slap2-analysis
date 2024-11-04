@@ -25,17 +25,18 @@ switch fnName
         params.activityChannel = 2;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
         params.tau_s = 0.027;            tooltips.tau_s = 'decay time constant of glutamate signal';
     case 'summarizeSLAP2'
-        params.tau_s = 0.027;
+        params.tau_s = 0.05;            tooltips.tau_s = 'decay time constant of glutamate signal';
         params.analyzeHz = 200; %frame rate used for analysis
         params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
-        params.sigma_px = 1.5; %1.33;   % space constant in pixels
+        params.sigma_px = 1.5; tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
         params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
         params.baselineWindow_Glu_s = 4; %timescale for calculating F0 in glutamate channel, seconds
         params.baselineWindow_Ca_s = 4; %timescale for calculating F0 in calcium channel, seconds
         params.sparseFac = 0.05; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
         params.nmfIter = 4; %number of iterations of NMF refinement
         params.dXY = 5; %how large sources can be (radius), pixels
-        params.exptType = {'V1 Gratings', 'BCI'};
+        params.exptType = {'"V1 Gratings"', '"BCI"', '"other"'};  tooltips.exptType ='Experiment type';
+        params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
     otherwise
         error('Unknown function name passed to setParams.m')
 end             
@@ -49,12 +50,12 @@ end
 
 %get parameters from user
 prefPath = [fileparts(which(fnName)) filesep fnName '_prefs.mat'];
-if exist(prefPath, 'file')
-    paramsIn = load(prefPath, 'paramsIn');
-    if (length(fieldnames(paramsIn)) == length(fieldnames(params))) && all(strcmp(fieldnames(paramsIn), fieldnames(params)))
-        params = paramsIn;
-    end
-end
+% if exist(prefPath, 'file')
+%     paramsIn = load(prefPath, 'paramsIn');
+%     % if (length(fieldnames(paramsIn)) == length(fieldnames(params))) && all(strcmp(fieldnames(paramsIn), fieldnames(params)))
+%     %     params = paramsIn;
+%     % end
+% end
 paramsIn = optionsGUI(params, tooltips, fnName);
 params = paramsIn;
 save(prefPath, 'paramsIn');

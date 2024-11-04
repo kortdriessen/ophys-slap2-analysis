@@ -10,13 +10,28 @@ baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac
 nans = isnan(IM);
 IMavg = mean(IM,3, 'omitmissing');
 IMgamma = sqrt(max(0,IMavg));
+sz = size(IM);
+valid = mean(nans,3)<0.25; %a pixel must be imaged at least 75% of the time to be included
 
+%fill in remaining data with smoothing
 if nargin<4
     doPlot = false;
 end
 
-IMf= IM;
-clear IM;
+%initialize filtered image
+IMf = IM;
+IMf(repmat(~valid, 1, 1, nTimePoints)) = nan;
+nans = isnan(IMf);
+%clear IM
+
+%fill in missing values
+IMf= reshape(IMf, sz(1)*sz(2), []);
+nanFrac = mean(isnan(IMf),2);
+incomplete = nanFrac>0 & nanFrac<1;
+IMs = nan(size(IMf));
+IMs(incomplete,:) = smoothdata(IMf(incomplete,:), 2, 'movmean', baselineWindow, 'omitnan');
+IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf)));
+IMf = reshape(IMf, sz(1),sz(2), []);
 
 %time match filter
 %IMf(nans) = 0;
@@ -31,9 +46,10 @@ for t = size(IMf,3):-1:1
 end
 IMf(nans) = nan;
 
+
 %log transform
 B = prctile(IMf(:,:,1:100), 10, 'all') -  prctile(IMf(:,:,1:100), 1, 'all'); %estimate the mean brightness of a 'dim' pixel
-IMf = log(max(IMf,0) + B); %convert to log space so linear filtering computes products
+IMf(~nans) = log(max(IMf(~nans),0) + B); %convert to log space so linear filtering computes products
 
 %remove all variance that looks like image movement - TESTED 10/17/24, does
 %not have a significant effect
@@ -42,9 +58,13 @@ IMf = log(max(IMf,0) + B); %convert to log space so linear filtering computes pr
 % IMstruct(mean(isnan(IMf),3)>0.8) = min(IMstruct,[],'all','omitmissing');
 % IMf = decorrelateMotion(IMf, IMstruct, aData, params);
 
+%Highpass filter in time; This must occur before DoG to avoid edge artifacts
+IMf = IMf - smoothdata(IMf, 3, 'movmean', baselineWindow, 'omitnan');  %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
+
 %Difference of Gaussians
-B = median(IMf(:,:,end-50:end), 'all', 'omitnan');%prctile(IMf(:,:,1:100), 10, 'all'); %median(IMf(:,:,end-50:end), 'all', 'omitnan');
-IMf(nans) = B;
+%B = median(IMf(:,:,end-50:end), 'all', 'omitnan');%prctile(IMf(:,:,1:100), 10, 'all'); %median(IMf(:,:,end-50:end), 'all', 'omitnan');
+%IMf(nans) = B;
+IMf(nans) = 0;
 IMf = imgaussfilt(IMf, [sigma sigma]);
 IMf = IMf - imgaussfilt(IMf, 5*[sigma sigma]);
 IMf(nans) = nan;
@@ -53,7 +73,7 @@ IMf(nans) = nan;
 IMf = exp(IMf); 
 
 %Highpass filter in time
-IMf = IMf - smoothdata(IMf, 3, 'movmean', 2*baselineWindow, 'omitnan');  %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
+%IMf = IMf - smoothdata(IMf, 3, 'movmean', baselineWindow, 'omitnan');  %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
 
 %clip outliers
 IMf = IMf-mean(IMf,3, 'omitmissing');
@@ -61,23 +81,22 @@ stdIM = std(IMf,0,3, 'omitmissing');
 IMf = max(min(IMf, 6*stdIM, 'includemissing'), -6*stdIM, 'includemissing');
 
 summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3).*IMgamma; %remove the last few points, these can be outliers
-valid = mean(nans,3)<0.33;
+
 summaryEroded = summary;
 
-summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
-summaryEroded = summaryEroded - imgaussfilt(summaryEroded, 5*[sigma sigma]);
-summaryEroded(~valid) = nan;
+% summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
+% summaryEroded = summaryEroded - imgaussfilt(summaryEroded, 5*[sigma sigma]);
+% summaryEroded(~valid) = nan;
 %summaryEroded(imdilate(isnan(summary), ones(3, 5))) = nan; %this removes odd phenomena at edges due to alignment, could probably be fixed by treating nans appropriately
 
 %find local maxima
-%peaks = ~imdilate(isnan(summaryEroded), ones(3));  %we won't find peaks at very edge of image
 peaks = summaryEroded == ordfilt2(summaryEroded, 9, ones(3)); %> circshift(summaryEroded,1,dim) &  summaryEroded > circshift(summaryEroded,-1,dim);
 
 %[r,c] = find(peaks);
 p = summaryEroded(peaks);
 sortedP = sort(p, 'descend');
 totalPix = sum(~isnan(summaryEroded(:)));
-threshP = 1.5*sortedP(ceil(totalPix/100 * (1-exp(-nTimePoints*params.frametime*params.dsFac/10))));
+threshP = 1.5*sortedP(min(end,ceil(totalPix * params.maxSynapseDensity * (1-exp(-nTimePoints*params.frametime*params.dsFac/10)))));
 pp = summaryEroded; pp(~peaks) = 0; pp(pp<threshP) = 0;
 [rrr,ccc,vvv] = find(pp);
 
