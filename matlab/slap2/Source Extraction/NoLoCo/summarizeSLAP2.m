@@ -7,8 +7,8 @@ else
 end
 
 delete(gcp('nocreate'))
-nWorkers = 5;
-if nWorkers<15
+nWorkers = 8;
+if nWorkers<8
     warning('You are using few parallel workers! adjust this in summarizeBCI.m');
 end
 disp(['Parallel workers:' int2str(nWorkers)])
@@ -150,11 +150,8 @@ end
 
 %identify outliers in alignment quality to determine valid trials
 ccf = corrCoeff;
-if nargin>1 && forceCorrThresh>0
-    corrThresh = forceCorrThresh;
-else
-    corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
-end
+corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
+
 validTrials= find(ccf>corrThresh);
 exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
 actIM = mean(actAligned(:,:,:,validTrials), 4, 'includenan');
@@ -191,7 +188,7 @@ pIM(somaMask) = 0;
 p = actIM(pIM);
 sortedP = sort(p, 'descend');
 totalPix = sum(~isnan(actIM(:)) & ~somaMask(:));
-threshP = 2*sortedP(ceil(totalPix/100)); %maximum synapse density
+threshP = 2*sortedP(min(end, ceil(totalPix*params.maxSynapseDensity))); %maximum synapse density
 pp = actIM; pp(~pIM) = 0; pp(pp<threshP) = 0;
 [sources.R,sources.C,sources.V] = find(pp);
 sz = size(pp);

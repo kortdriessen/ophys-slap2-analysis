@@ -82,10 +82,11 @@ function exptSummary = processTrialAsync_2(dr, fnRaw, startLine, endLine, W0, F0
     exptSummary.ROIs.F(:, discard,:) = nan;
     exptSummary.ROIs.Fsvd(:,discard,:) = nan;
 
-    [IMselFilt, F0sel, W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);
+    [IMselFilt, IMselRaw, F0sel, W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);
     
     %least squares solve the match filtered movie
     H0 = W\IMselFilt;
+
     %W = W1;
 
     
@@ -152,10 +153,11 @@ function exptSummary = processTrialAsync_2(dr, fnRaw, startLine, endLine, W0, F0
     H2 = J{2} - Hsub; %an estimate of the underlying spikes; deconvolving out the double kernel from the match-filtetred data
     H3 = convn(H2, kernel, 'same'); %the denoised trace, composed of the events convolved witht he forward kernel
     H4 = Js{2}-Hsub; %an estimate of raw fluorescence (no denoising), deconvolving out the matched kernel that was applied prior to NMF
-
-    %assess residuals
-    %assessResiduals(W*H3, IMsel, selPx2D)
-    %assess F0
+    
+    %Compute a 'least squares' dF
+    H5 = W \ IMselRaw;
+    F0_H5 = computeF0(H5', ceil(params.denoiseWindow_s*params.analyzeHz), ceil(params.baselineWindow_Glu_s*params.analyzeHz), 1)';
+    H5 = H5-F0_H5;
 
     %compute F0
     setNan = imdilate(nanFramesH, ones(1,2*floor(params.tau_full)+1));
@@ -178,12 +180,14 @@ function exptSummary = processTrialAsync_2(dr, fnRaw, startLine, endLine, W0, F0
     H2(setNan) = nan; %The detected events
     H3(setNan) = nan; %The denoised activity
     H4(setNan) = nan; %raw Fluorescence estimate
+    H5(setNan) = nan; %raw Fluorescence estimate
 
     %exptSummary.dFerr = sum(W,1)'.*errH;
     exptSummary.matchFilt(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
     exptSummary.events(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
     exptSummary.denoised(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
     exptSummary.dFraw(:,:,1) = sum(W,1)'.*H4; %[source#, time, channel]
+    exptSummary.dFls(:,:,1) = sum(W,1)'.*H5; %[source#, time, channel]
     exptSummary.F0(:,:,1) = F0;
     exptSummary.footprints = Wfull;
     exptSummary.discardFrames = discard;
@@ -202,4 +206,5 @@ function exptSummary = processTrialAsync_2(dr, fnRaw, startLine, endLine, W0, F0
     end
 
     exptSummary.dFF = exptSummary.dFraw./exptSummary.F0;
+    exptSummary.dFFls = exptSummary.dFls./exptSummary.F0;    
 end
