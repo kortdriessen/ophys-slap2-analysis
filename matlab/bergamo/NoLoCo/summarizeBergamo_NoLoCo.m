@@ -193,6 +193,21 @@ parfor trialIx = 1:nTrials
     end
 end
 
+% estimate noise
+for trialIx = 1:nTrials
+for nId = 1:size(E{trialIx}.dFFls,1)
+    for chId = 1:size(E{trialIx}.dFFls,3)
+        trace = E{trialIx}.dFFls(nId,:,chId);
+        nanFrac = mean(isnan(trace));
+        if nanFrac<0.9
+            E{trialIx}.noise_dFFls(nId,chId) = estimatenoise(trace(:));
+        else
+            E{trialIx}.noise_dFFls(nId,chId) = nan;
+        end
+    end
+end
+end
+
 %prepare file for saving
 exptSummary.E = E;
 exptSummary.fns = fns;

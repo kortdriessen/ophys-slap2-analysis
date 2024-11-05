@@ -124,7 +124,7 @@ function exptSummary = processTrialAsync_Bergamo(dr, fnRaw, ~, ~, W0, F0selDS, s
     exptSummary.dF(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
     exptSummary.dF2(:,:,1) = sum(W,1)'.*H4;
     exptSummary.dFls(:,:,1) = sum(W,1)'.*H5;
-    exptSummary.F0(:,:,1) = F0;
+    exptSummary.F0(:,:,1) = sum(W,1)'.*F0;
     exptSummary.footprints(:,:,1:size(W,2)) = Wfull;
     
     % %compute channel 2 signals
