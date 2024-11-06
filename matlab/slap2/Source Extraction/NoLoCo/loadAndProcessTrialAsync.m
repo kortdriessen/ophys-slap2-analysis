@@ -21,17 +21,11 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTria
     params.frametime = aData.frametime;
 
     %discard motion frames
-    %tmp1 = aData.aRankCorrDS(:)-smoothExp(aData.aRankCorrDS(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
-    tmp2 = aData.recNegErr(:)-smoothExp(aData.recNegErr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
-    %tmp3 = aData.aError(:) -smoothExp(aData.aError(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac)));
-
-    %tmp1 = tmp1./std(tmp1(nInitFrames+1:end)); 
-    tmp2 = -tmp2./std(tmp2(nInitFrames+1:end)); 
-    %tmp3 = -tmp3./std(tmp3(nInitFrames+1:end)); 
-    
-    tmp = tmp2/2; %decrease denominator to be more stringent on motion correction
-    %tmp = (tmp2 + tmp3)/6; %(tmp1 + tmp2 + tmp3)/6; %decrease denominator to be more stringent on motion correction
-    discardFrames = imclose(imdilate(tmp<-2, ones(5,1)) | (tmp<-1 & imdilate(tmp<-2, ones(21,1))), ones(11,1));
+    tmp = aData.recNegErr(:)- median(aData.recNegErr(:)); %smoothExp(aData.recNegErr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
+    tmp = tmp./(median(aData.recNegErr(:)) - prctile(aData.recNegErr(:),1)); 
+    thresh = params.motionThresh; %decrease thresh to be more stringent on motion correction
+    window = 2*ceil(0.1/params.frametime)+1;% a window in time to censor aronud motion events, ~0.2 seconds;
+    discardFrames = imclose(imdilate(tmp>thresh, ones(window,1)) | (tmp>(thresh/2) & imdilate(tmp>thresh, ones(2*window+1,1))), ones(window,1));
     discardFrames(1:nInitFrames) = true;
     rawIMs(:,:,discardFrames) = nan;
     

@@ -5,6 +5,9 @@ if nargin>1
 else
     params = setParams('summarize_NoLoCo');
 end
+if ~nargin
+    [trialTablefn, dr] = uigetfile('*trialTable*.mat');
+end
 
 delete(gcp('nocreate'))
 if params.nParallelWorkers<8
@@ -12,7 +15,7 @@ if params.nParallelWorkers<8
 end
 disp(['Parallel workers:' int2str(params.nParallelWorkers)])
 parpool('processes',params.nParallelWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
-disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
+disp(['## SUMMARIZING' newline 'Folder:'])
 disp(dr)
 
 savedr = [dr filesep 'ExperimentSummary'];
@@ -22,7 +25,7 @@ end
 fnsave = [savedr filesep 'Summary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %confirm that all files exist
-[trialTable, keepTrials] = verifyFiles(dr, params);
+[trialTable, keepTrials] = verifyFiles(trialTablefn, dr, params);
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
 
 %call up a GUI for the user to define Soma ROI and regions to exclude

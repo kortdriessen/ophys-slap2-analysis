@@ -68,9 +68,15 @@ for trialIx = nTrials:-1:1
     params.alignHz = params.analyzeHz./params.dsFac;
 
     %discard motion frames
-    tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(10/(aData.frametime*aData.dsFac)));
-    filtTmp = smoothExp(tmp, 'movmean',ceil(.2/(aData.frametime*aData.dsFac)));
-    discardFrames{trialIx} = imdilate(filtTmp<-(4*std(filtTmp)), ones(1,5));
+    %tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(10/(aData.frametime*aData.dsFac)));
+    %filtTmp = smoothExp(tmp, 'movmean',ceil(.2/(aData.frametime*aData.dsFac)));
+    %discardFrames{trialIx} = imdilate(filtTmp<-(4*std(filtTmp)), ones(1,5));
+    tmp = aData.recNegErr(:)- median(aData.recNegErr(:)); %smoothExp(aData.recNegErr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
+    tmp = tmp./(median(aData.recNegErr(:)) - prctile(aData.recNegErr(:),1)); 
+    thresh = params.motionThresh;
+    window = 2*ceil(0.1/params.frametime/aData.dsFac)+1;% a window in time to censor aronud motion events, ~0.2 seconds;
+    discardFrames{trialIx} = imclose(imdilate(tmp>thresh, ones(window,1)) | (tmp>(thresh/2) & imdilate(tmp>thresh, ones(2*window+1,1))), ones(window,1));
+
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
     if numChannels==2
@@ -187,7 +193,7 @@ clear rawIMs
 %for each file, process the high res data
 params.tau_full=params.tau_s*params.analyzeHz;
 E = cell(nTrials,1);
-parfor trialIx = 1:nTrials
+for trialIx = 1:nTrials
     if any(validTrials==trialIx)
         E{trialIx} = processTrialAsync_Bergamo(dr, fnRaw{trialIx}, [], [], W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, [], [], motOutput(:,trialIx), [], params);
     end
