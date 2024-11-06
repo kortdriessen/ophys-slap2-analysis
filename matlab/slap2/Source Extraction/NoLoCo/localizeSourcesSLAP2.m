@@ -77,9 +77,10 @@ IMf = max(min(IMf, 6*stdIM, 'includemissing'), -6*stdIM, 'includemissing');
 summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3).*IMgamma; %remove the last few points, these can be outliers
 
 summaryEroded = summary;
-% summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
-% summaryEroded = summaryEroded - imgaussfilt(summaryEroded, 5*[sigma sigma]);
-% summaryEroded(~valid) = nan;
+summaryEroded(~valid) = nan;
+summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
+summaryEroded = summaryEroded - imgaussfilt(summaryEroded, 5*[sigma sigma]);
+summaryEroded(~valid) = nan;
 %summaryEroded(imdilate(isnan(summary), ones(3, 5))) = nan; %this removes odd phenomena at edges due to alignment, could probably be fixed by treating nans appropriately
 
 %find local maxima

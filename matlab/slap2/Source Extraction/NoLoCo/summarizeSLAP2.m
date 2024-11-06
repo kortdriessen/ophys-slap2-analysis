@@ -1,6 +1,6 @@
 function summarizeSLAP2(dr, paramsIn)
 %PARAMETER SETTING
-if nargin>2
+if nargin>1
     params = setParams('summarizeSLAP2', paramsIn);
 else
     params = setParams('summarizeSLAP2');
@@ -16,7 +16,6 @@ parpool('processes',nWorkers); %limit the number of workers to avoid running out
 disp(['## SUMMARIZEBCI ##' newline 'Folder:'])
 disp(dr)
 
-
 nDMDs = 2;
 params.nmfBackgroundComps = 0; % <=4, max number of background components to use for NMF. If 0, we compute F0 instead of fitting background
 
@@ -31,7 +30,6 @@ fnsave = [savedr filesep 'Summary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %confirm that all files exist for both DMDs
 nTrials = length(trialTable.trueTrialIx);
-nTrials = 8;
 keepTrials = true(nDMDs, nTrials);
 for trialIx = nTrials:-1:1
     for DMDix = 1:nDMDs

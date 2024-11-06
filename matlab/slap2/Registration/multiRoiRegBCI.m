@@ -16,7 +16,24 @@ aData.maxshift = 50;
 aData.clipShift = 5;%the maximum allowable shift per frame
 aData.alpha = 0.005; %exponential time constant for template
 
-parfor f_ix = 1:length(trialTable.trueTrialIx)
+
+%set up parallelization
+p = gcp('nocreate'); % If no pool, do not create new one.
+if isempty(p)
+    poolsize = 0;
+else
+    poolsize = p.NumWorkers;
+end
+nWorkers = 24;
+if poolsize~=nWorkers
+    delete(gcp('nocreate'));
+    if nWorkers<15
+        warning('You are using few parallel workers! adjust this in summarizeBCI.m');
+    end
+    disp(['Parallel workers:' int2str(nWorkers)])
+    parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+end
+for f_ix = 1:length(trialTable.trueTrialIx)
     fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD1'];
     alignAsync(dr, trialTable.DMD1filename{f_ix}, fnWrite, trialTable.DMD1firstLine(f_ix), trialTable.DMD1lastLine(f_ix), aData, overwriteExisting);
     fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD2'];
@@ -36,7 +53,16 @@ disp(['Aligning: ' [dr filesep fn]])
         return
     end
 
-    S2data = slap2.Slap2DataFile([dr filesep fn]);
+    retry=0;
+    while retry<10
+        try
+            S2data = slap2.Slap2DataFile([dr filesep fn]);
+            retry = 10;
+        catch
+            retry = retry+1
+            continue
+        end
+    end
     meta = loadMetadata([dr filesep fn]);
     linerateHz = 1/meta.linePeriod_s;
     dt = linerateHz/aData.alignHz;
@@ -51,6 +77,11 @@ disp(['Aligning: ' [dr filesep fn]])
     disp('generating template')
     initFrames = ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
     nInitFrames = length(initFrames);
+
+    if nInitFrames==0
+        disp(['File ' fn ' was very short! Skipping alignment']);
+        return
+    end
     for fix = nInitFrames:-1:1
         for cix = numChannels:-1:1
             Y(:,:,cix,fix) = S2data.getImage(cix, initFrames(fix), ceil(dt), 1);
@@ -90,11 +121,16 @@ disp(['Aligning: ' [dr filesep fn]])
     DSframes = ceil(firstLine:dt:lastLine);
     nDSframes= length(DSframes); %number of downsampled frames
     
+    %for spatial downsampling, used to calculate alignment quality and for quicker visualization
+    dsTimes = 2;
+    dsSz = floor(size(template)./(2^dsTimes));
+    A_ds = nan([dsSz nDSframes]);
+
     motionDSr = nan(1,nDSframes); 
     motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
     aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
-    aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
-    recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
+    %aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
+    %recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
 
     %output TIF
     pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
@@ -136,11 +172,19 @@ disp(['Aligning: ' [dr filesep fn]])
             A = A1;
         end
 
-        sel = ~isnan(A);
-        selCorr = sel & ~isnan(template);
-        aRankCorrDS(DSframeIx) = corr(A(selCorr), template(selCorr), 'type', 'Spearman');
-        recNegErr(DSframeIx) =  mean(min(0, A(selCorr)-template(selCorr)).^2);
+        %downsample in space
+        dsTmp = A;
+        for dsIx = 1:dsTimes
+            dsTmp = dsTmp(1:2:2*floor(end/2), 1:2:2*floor(end/2)) + dsTmp(1:2:2*floor(end/2), 2:2:2*floor(end/2)) + dsTmp(2:2:2*floor(end/2), 1:2:2*floor(end/2)) + dsTmp(2:2:2*floor(end/2), 2:2:2*floor(end/2));
+        end
+        A_ds(:,:,DSframeIx) = dsTmp;
 
+        % Asmooth = imgaussfilt(A, [0.66 0.66]); %smooth to reduce variance effects of subframe interpolation
+        % selCorr = sel & ~isnan(template);
+        % aRankCorrDS(DSframeIx) = corr(Asmooth(selCorr), template(selCorr), 'type', 'Spearman');
+        % recNegErr(DSframeIx) =  mean(min(0, Asmooth(selCorr)-template(selCorr)).^2)./mean(template(selCorr).^2);
+
+        sel = ~isnan(A);
         nantmp = sel & isnan(template);
         template(nantmp) = A(nantmp);
         template(sel) = (1-aData.alpha)*template(sel) + aData.alpha*(A(sel));
@@ -154,6 +198,20 @@ disp(['Aligning: ' [dr filesep fn]])
     end
 
     fTIF.close;
+
+    %
+    recNegErr = nan(1,nDSframes);
+    nChunks = ceil(nDSframes./800);
+    chunkEdges = round(linspace(1, nDSframes+1, nChunks));
+    for chunkIx = 1:length(chunkEdges)-1
+        t_ixs = chunkEdges(chunkIx):chunkEdges(chunkIx+1)-1;
+        template = median(A_ds(:,:,t_ixs), 3, 'omitmissing');
+        nanFrac = mean(isnan(A_ds(:,:,t_ixs)), 3);
+        template(nanFrac>0.2) = nan;
+        template = repmat(template, 1,1,length(t_ixs));
+        template(isnan(A_ds(:,:,t_ixs))) = nan;
+        recNegErr(1,t_ixs) = squeeze(mean((max(0, template-A_ds(:,:,t_ixs))), [1 2], 'omitnan')./mean(max(0,template, 'includenan'), [1 2], 'omitnan'));
+    end
 
     if std(motionDSc)>1.5 || std(motionDSr)>1.5
         registrationFailed = true;
@@ -170,7 +228,7 @@ disp(['Aligning: ' [dr filesep fn]])
     aData.motionDSc = motionDSc;
     aData.motionDSr = motionDSr;
     aData.aError = aErrorDS;
-    aData.aRankCorrDS = aRankCorrDS;
+    %aData.aRankCorrDS = aRankCorrDS;
     aData.recNegErr = recNegErr;
     aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
     aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
