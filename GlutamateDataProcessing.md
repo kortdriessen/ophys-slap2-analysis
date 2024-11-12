@@ -12,7 +12,7 @@ If processing aborts, you can call the top-level function again and it will skip
 
 When you call these functions without parameters, they pop up a GUI with default parameters that you can change. The default parameters for each function are set in the function `setParams.m`. There are tooltips that explain each parameter when you hover over it.
 
-### 1. Defining the trial structure
+### Step 1. Defining the trial structure
 This step asks the user to identify the files that are part of the experiment, and builds a **trial table** that keeps track of files generated during processing. The experiment is assumed to consist of one or more **epochs**, each consisting of one or more **trials**. All recordings in an experiment are assumed to image the same field of view, and must be in the same folder. The recordings will be aligned to each other and share a common set of extracted synapses; if you image different fields of view in a single session, these should be split into separate folders and processed separately. 
 
 For SLAP2 recordings, the corresponding SLAP2 reference stack should exist in the same folder as the activity recording, or in a subfolder. Do not include multiple reference stacks in the folder; this will cause an error.
@@ -21,10 +21,10 @@ When you run this function, a list of files will be shown, and you will be asked
 
 **Bergamo recordings:** If all of your files belong to a single epoch you can automatically generate the trial table by directly calling `stripRegBergamo.m`. This simplifies batch analysis without GUI input.
 
-### 2. Registering Images
+### Step 2. Registering Images
 Image registration aligns the images within each trial to each other and generates a downsampled, aligned copy of each recording as a `.tif` file. It also generates an associated `..._ALIGNMENTDATA.mat` file for each `.tif`, which contains data related to the alignment process and is used by later steps.  
 
-### 3. Extracting signals
+### Step 3. Extracting signals
 We represent signals with a matrix factorization model (_i.e._ as a set of spatial patterns that each vary in brightness over time). This approach is shared with common approaches to analyze somatic calcium imaging data (_e.g._ using CaImAn or Suite2P). Our approach has been tailored specifically for synaptic imaging with the following assumptions:
 * Sources are small and round (with characteristic size `sigma_px`)
 * Sources flash with positive-going transients that rise quickly and have exponential decay time constant `tau_s`.
@@ -36,13 +36,36 @@ We then align all trials in the experiment, averaging together the activity imag
 
 Still using the downsampled recordings, we then form a [pixels x time] matrix from the pixels surrounding the putative synapses across all recordings, and factorize this using constrained nonnegative matrix factorization while enforcing our spatial and temporal priors. During this process, we merge sources that overlap and do not show sufficiently distinct activity (using the Akaike Information Criterion) and discard sources that do not explain sufficient variance in the recordings. 
 
-Finally, we use the resulting footprints of these sources to extract activity from the original, high-framerate trial recordings. We extract different versions of the signal with different temporal structure:  
-* dFraw: Fluctuations in fluorescence with the temporal prior enforced
-* matchFiltered: Fluctuations in fluorescence, with an optimal linear filter for detection applied
-* spikes: Fluctuations in fluorescence, deconvolved, so release events are brief spikes
-* dFls: Fluctuations in Fluorescence with no temporal prior enforced
+Finally, we use the resulting footprints of these sources to extract activity from the original, high-framerate trial recordings. The resulting data are saved in an `experimentSummary` file (the filename has the time of processing appended, so you can easily generate and compare versions for different parameter settings).
 
-We also compute F0 (the time-varying fluorescence baseline for each source) and dF/F0 (_i.e._ fractional fluorescence change, for dFraw and dFls.
+## The experimentSummary file
+The experiment summary file contains a single matlab structure `exptSummary`, with the following fields:
+* E: A cell array (#FOVs x # Trials) of structures containing the traces and other information extracted from each trial
+* meanIM: the average image of the sample across all trials, to which each trial is aligned
+* actIM: the activity image used to identify synatic sites (an average of the aligned per-trial activity images)
+* params: the user-settable parameters used to process the data
 
-## Tips
-**Parallel Processing.** The pipeline uses matlab's parallel computing toolbox to greatly speed up processing. The optimal number of parallel workers to use depends on the computer's CPU and memory capacity and the length of your recordings, is different for the two major steps (Registration and Signal Extraction), and is also different for SLAP2 vs Bergamo analysis because of the amount of data in memory at once. Errors and significant slowdowns can occur if you run out of memory due to too many parallel workers. When you start processing, you may want to monitor memory and CPU usage, adjust the number of workers accordingly, and then restart processing.
+### Information in exptSummary.E{}
+Each element of exptSummary.E{} contains data from a particular field of view on a particular trial. It contains the following fields:
+
+* dF ('delta F') : Baseline-subtracted fluorescence
+* F0: An estimate of the fluorescence baseline
+* dFF ('delta F over F') : Baseline-subtracted fluorescence divided by baseline, i.e. fractional change in fluorescence.
+
+```
+Tip:  
+When performing analyses of glutamate imaging, the most useful variable is dF, which has units proportional to photons. For example, a good estimate of the total measured glutamate input to the cell is the sum of dF across synapses. It is inappropriate to average dFF in the same way, because very dim synapses can have large dFF values and background fluorescence (e.g. from the dendritic shaft) strongly affects fractional changes at some synapses compared to others. This is different than population Calcium imaging, which tends to work with dF/F. Fractional fluorescence change is not particularly useful in the context of glutamate imaging! 
+```
+For SLAP2, there are two simultaneously-imaged fields of view, and the traces in the two trials should have the same or very similar numbers of timepoints. For analysis, the two FOVs can be merged- the data are interpolated onto the same timebase.
+
+dF and dFF are themselves structures, with fields corresponding to different versions of the signal with different temporal priors:  
+* ls: Least Squares solve for the activity of each ROI. No temporal prior or nonnegativity is imposed.
+* matchFilt: Least squares solve, after applying a matched filter in time. This is the optimal linear filter for detecting isolated release events, and can be thresholded to perform template matching.
+* nonneg: Generated from matchFilt by deconvolving out the matched filter after solving, with a mild nonnegativity/lower bound constraint. This has only a weak temporal and weak nonnegativity prior, and is similar to ls.  
+* spikes: Generated from matchFilt by deconvolving out both the matched filter and the expected temporal decay of the indicator, generating sharp spikes at the onsets of events. This removes the effect of indicator kinetics and is useful as an estimate of event times, e.g. to compute sharper crosscorrelation. A weak nonnegativity/lower bound constraint is imposed.
+* denoised: Generated from matchFilt by re-convolving spikes with the indicator response. This imposes a strong temporal prior and a weak nonnegativity/lower bound constraint. 
+
+```
+Tip:
+Parallel Processing. The pipeline uses matlab's parallel computing toolbox to greatly speed up processing. The optimal number of parallel workers to use depends on the computer's CPU and memory capacity and the length of your recordings, is different for the two major steps (Registration and Signal Extraction), and is also different for SLAP2 vs Bergamo analysis because of the amount of data in memory at once. Errors and significant slowdowns can occur if you run out of memory due to too many parallel workers. When you start processing, you may want to monitor memory and CPU usage, adjust the number of workers accordingly, and then restart processing.
+```
