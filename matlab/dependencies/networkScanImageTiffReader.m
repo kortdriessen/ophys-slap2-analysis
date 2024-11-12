@@ -2,8 +2,9 @@ function [data, desc, meta] = networkScanImageTiffReader(fname, localDr)
 
 [dr, name, ext] = fileparts(fname);
 tmpFileName = [name ext];
+isRemote = ~any(strcmpi(dr(1:2), {'C:', 'D:','E:', 'F:'}));
 
-if all(fname(1:2) == 'Z:') || all(fname(1:2) == '\\')
+if isRemote
     if ~exist('localDr', 'var'); localDr = 'C:\temp'; end % 'F:\tmp_tiffIO'; end
 
     dr = localDr;
@@ -30,7 +31,7 @@ data = single(A.data);
 
 clear('A');
 
-if all(fname(1:2) == 'Z:') || all(fname(1:2) == '\\')
+if isRemote
     delete(fullfile(localDr, tmpFileName));
 end
 

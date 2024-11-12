@@ -3,10 +3,10 @@ function [summaryEroded, P] = localizeSourcesSLAP2(IM, aData, params, doPlot)
 %IM:        3D recording, X x Y x Time
 %aData:     alignment metadata
 nTimePoints = size(IM,3);
-tau = params.tau_s./(params.frametime*params.dsFac); %time constant in frames
+tau = params.tau_s.*params.alignHz; %time constant in frames
 params.tau_frames = tau;
 sigma = params.sigma_px; %space constant in pixels
-baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
+baselineWindow = ceil(params.baselineWindow_Glu_s.*params.alignHz);
 nans = isnan(IM);
 IMavg = mean(IM,3, 'omitmissing');
 IMgamma = sqrt(max(0,IMavg));
@@ -89,7 +89,7 @@ peaks = summaryEroded == ordfilt2(summaryEroded, 9, ones(3)); %> circshift(summa
 p = summaryEroded(peaks);
 sortedP = sort(p, 'descend');
 totalPix = sum(~isnan(summaryEroded(:)));
-threshP = 1.5*sortedP(min(end,ceil(totalPix * params.maxSynapseDensity * (1-exp(-nTimePoints*params.frametime*params.dsFac/10)))));
+threshP = 1.5*sortedP(min(end,ceil(totalPix * params.maxSynapseDensity * (1-exp(-nTimePoints./params.alignHz./10)))));
 pp = summaryEroded; pp(~peaks) = 0; pp(pp<threshP) = 0;
 [rrr,ccc,vvv] = find(pp);
 

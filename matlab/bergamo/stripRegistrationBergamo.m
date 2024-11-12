@@ -356,6 +356,7 @@ for f_ix = 1:length(fns)
     %save alignment metadata
     aData.numChannels = numChannels;
     aData.frametime = frametime;
+    aData.alignHz = 1/frametime/dsFac;
     aData.motionC =  motionC;
     aData.motionR = motionR;
     aData.motionDSc = motionDSc;
