@@ -19,6 +19,8 @@ else
     end
 end
 
+copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops 
+
 %confirm that all files exist
 [trialTable, keepTrials] = verifyFiles(trialTablefn, dr, params);
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
