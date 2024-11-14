@@ -5,6 +5,7 @@ if ~nargin
 end
 aParams = setParams('multiRoiRegSLAP2');
 sParams.microscope = "SLAP2";
+sParams.drawUserRois = true;
 sParams = setParams('summarize_NoLoCo', sParams, true);
 
 fullPathToTrialTable = [dr filesep 'trialTable.mat'];

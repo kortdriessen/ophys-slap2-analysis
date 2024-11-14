@@ -89,6 +89,15 @@ peaks = summaryEroded == ordfilt2(summaryEroded, 9, ones(3)); %> circshift(summa
 p = summaryEroded(peaks);
 sortedP = sort(p, 'descend');
 totalPix = sum(~isnan(summaryEroded(:)));
+
+if totalPix<10
+    P.row = [];
+    P.col = [];
+    P.val = [];
+    P.peakIM = zeros(size(summaryEroded));
+    return
+end
+
 threshP = 1.5*sortedP(min(end,ceil(totalPix * params.maxSynapseDensity * (1-exp(-nTimePoints./params.alignHz./10)))));
 pp = summaryEroded; pp(~peaks) = 0; pp(pp<threshP) = 0;
 [rrr,ccc,vvv] = find(pp);

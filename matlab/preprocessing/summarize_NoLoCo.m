@@ -45,7 +45,7 @@ else
     poolsize = p.NumWorkers;
 end
 nWorkers = min(params.nParallelWorkers, size(trialTable.filename,2));
-if poolsize<nWorkers
+if poolsize~=nWorkers
     delete(gcp('nocreate'));
     parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
 end
@@ -151,9 +151,12 @@ for DMDix = nDMDs:-1:1
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;
     corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
-    validTrials= find(ccf>corrThresh);
+    actValidPix = squeeze(mean(~isnan(actAligned(:,:,1,:)), [1 2]));
+    validTrials= find(ccf(:)>corrThresh & actValidPix(:)>mean(actValidPix)/2);
     exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
-    actIM = mean(actAligned(:,:,:,validTrials), 4, 'includenan');
+    actIM = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
+    nanFrac = mean(isnan(actAligned(:,:,:,validTrials), 4));
+    actIM(nanFrac>0.6) = nan;
     exptSummary.actIM{DMDix} = actIM;
 
     %accumulate peaks, only from valid trials
