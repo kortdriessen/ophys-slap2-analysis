@@ -40,10 +40,10 @@ Finally, we use the resulting footprints of these sources to extract activity fr
 
 ## The experimentSummary file
 The experiment summary file contains a single matlab structure `exptSummary`, with the following fields:
-* E: A cell array (#FOVs x # Trials) of structures containing the traces and other information extracted from each trial
-* meanIM: the average image of the sample across all trials, to which each trial is aligned
-* actIM: the activity image used to identify synatic sites (an average of the aligned per-trial activity images)
-* params: the user-settable parameters used to process the data
+* `E`: A cell array (#FOVs x # Trials) of structures containing the traces and other information extracted from each trial
+* `meanIM`: the average image of the sample across all trials, to which each trial is aligned
+* `actIM`: the activity image used to identify synatic sites (an average of the aligned per-trial activity images)
+* `params`: the user-settable parameters used to process the data
 
 ### Information in exptSummary.E{}
 Each element of exptSummary.E{} contains data from a particular field of view on a particular trial. It contains the following fields:
@@ -51,21 +51,36 @@ Each element of exptSummary.E{} contains data from a particular field of view on
 * dF ('delta F') : Baseline-subtracted fluorescence
 * F0: An estimate of the fluorescence baseline
 * dFF ('delta F over F') : Baseline-subtracted fluorescence divided by baseline, i.e. fractional change in fluorescence.
-
+* ROIs : the activity of user-defined ROIs, such as the soma
 ```
 Tip:  
-When performing analyses of glutamate imaging, the most useful variable is dF, which has units proportional to photons. For example, a good estimate of the total measured glutamate input to the cell is the sum of dF across synapses. It is inappropriate to average dFF in the same way, because very dim synapses can have large dFF values and background fluorescence (e.g. from the dendritic shaft) strongly affects fractional changes at some synapses compared to others. This is different than population Calcium imaging, which tends to work with dF/F. Fractional fluorescence change is not particularly useful in the context of glutamate imaging! 
+dF vs dFF
+When performing analyses of glutamate imaging, the more useful variable is dF, which has units proportional to photons. 
+
+For example, a good estimate of the total measured glutamate input to the cell is the sum of dF across synapses. It is inappropriate to sum dFF in the same way, because very dim synapses can have large dFF values and background fluorescence (e.g. from the dendritic shaft) strongly affects fractional changes at some synapses compared to others. This is different than population Calcium imaging, which tends to work with dF/F. 
+
+In glutamate imaging, dFF is most useful for compensating for bleaching over time for a single synapse, for example to see if its activity increases vs decreases over the course of an experiment. However even for this some confounds remain due to brightness-dependent bias in F0 estimation. 
 ```
 For SLAP2, there are two simultaneously-imaged fields of view, and the traces in the two trials should have the same or very similar numbers of timepoints. For analysis, the two FOVs can be merged- the data are interpolated onto the same timebase.
 
 dF and dFF are themselves structures, with fields corresponding to different versions of the signal with different temporal priors:  
-* ls: Least Squares solve for the activity of each ROI. No temporal prior or nonnegativity is imposed.
-* matchFilt: Least squares solve, after applying a matched filter in time. This is the optimal linear filter for detecting isolated release events, and can be thresholded to perform template matching.
-* nonneg: Generated from matchFilt by deconvolving out the matched filter after solving, with a mild nonnegativity/lower bound constraint. This has only a weak temporal and weak nonnegativity prior, and is similar to ls.  
-* spikes: Generated from matchFilt by deconvolving out both the matched filter and the expected temporal decay of the indicator, generating sharp spikes at the onsets of events. This removes the effect of indicator kinetics and is useful as an estimate of event times, e.g. to compute sharper crosscorrelation. A weak nonnegativity/lower bound constraint is imposed.
-* denoised: Generated from matchFilt by re-convolving spikes with the indicator response. This imposes a strong temporal prior and a weak nonnegativity/lower bound constraint. 
+* `ls`: Least Squares solve for the activity of each ROI. No temporal prior or nonnegativity is imposed.
+* `matchFilt`: Least squares solve, after applying a matched filter in time. This is the optimal linear filter for detecting isolated release events, and can be thresholded to perform template matching.
+* `nonneg`: Generated from matchFilt by deconvolving out the matched filter after solving, with a mild nonnegativity/lower bound constraint. This has only a weak temporal and weak nonnegativity prior, and is similar to ls.  
+* `spikes`: Generated from matchFilt by deconvolving out both the matched filter and the expected temporal decay of the indicator, generating sharp spikes at the onsets of events. This removes the effect of indicator kinetics and is useful as an estimate of event times, e.g. to compute sharper crosscorrelation. A weak nonnegativity/lower bound constraint is imposed.
+* `denoised`: Generated from matchFilt by re-convolving spikes with the indicator response. This imposes a strong temporal prior and a weak nonnegativity/lower bound constraint. 
 
 ```
 Tip:
-Parallel Processing. The pipeline uses matlab's parallel computing toolbox to greatly speed up processing. The optimal number of parallel workers to use depends on the computer's CPU and memory capacity and the length of your recordings, is different for the two major steps (Registration and Signal Extraction), and is also different for SLAP2 vs Bergamo analysis because of the amount of data in memory at once. Errors and significant slowdowns can occur if you run out of memory due to too many parallel workers. When you start processing, you may want to monitor memory and CPU usage, adjust the number of workers accordingly, and then restart processing.
+Parallel Processing and Memory usage.
+Processing is done in parallel over trials, and the amount of memory needed is proportional to the number of parallel workers and the size of each trial file. For our workstations (128 Gb RAM), the pipeline works best when each downsampled aligned trial is <4 Gb. This allows the computer to use many parallel workers (~15 for 4Gb files) without running out of memory. In the future we might update the code to process larger recordings in smaller chunks.
+
+When you start processing, you should run the processing once while monitoring memory and CPU usage, then adjust the nWorkers/nParallelWorkers parameters to avoid running out of memory during the alignment and summarizing steps.This will greatly improve performance and avoid errors. 
+```
+
+
+```
+Tip:
+Reprocessing Data.
+To reprocess a dataset from scratch, you must delete the trialTable.mat file in your experiment folder, and select overwriteExisting=true in the parameters for the alignment function (either multiROIRegSLAP2 or stripRegBergamo)
 ```
