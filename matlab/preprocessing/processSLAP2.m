@@ -6,6 +6,7 @@ end
 aParams = setParams('multiRoiRegSLAP2');
 sParams.microscope = "SLAP2";
 sParams.drawUserRois = true;
+sParams.nParallelWorkers = 8;
 sParams = setParams('summarize_NoLoCo', sParams, true);
 
 fullPathToTrialTable = [dr filesep 'trialTable.mat'];

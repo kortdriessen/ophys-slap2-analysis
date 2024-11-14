@@ -28,7 +28,7 @@ switch fnName
         params.activityChannel = 1;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
         params.tau_s = 0.05;             tooltips.tau_s = 'decay time constant of glutamate signal';
         params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
-        params.nParallelWorkers = 15;    tooltips.nWorkers = 'number of parallel workers';
+        params.nParallelWorkers = 8;     tooltips.nWorkers = 'number of parallel workers';
         params.drawUserRois = false;      tooltips.drawUserRois = 'pop up a GUI to annotate user ROIs?';  
         params.motionThresh = 2;         tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';

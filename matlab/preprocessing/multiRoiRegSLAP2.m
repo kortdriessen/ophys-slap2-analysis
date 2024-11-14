@@ -42,7 +42,7 @@ end
 trialTable.fnRegDS = fnRegDS;
 trialTable.fnAdata = fnAdata;
 trialTable.alignParams = params;
-save([dr, fn], "trialTable")
+save([dr filesep fn], "trialTable")
 
 disp('done multiRoiRegistration.')
 end

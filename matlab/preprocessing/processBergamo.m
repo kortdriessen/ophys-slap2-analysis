@@ -4,8 +4,10 @@ if ~nargin
     dr = uigetdir; %neuron folder where scans are, not project folder
 end
 aParams = setParams('stripRegBergamo');
+
 sParams.microscope = "bergamo";
 sParams.drawUserRois = false;
+sParams.nParallelWorkers = 3;
 sParams = setParams('summarize_NoLoCo', sParams, true);
 
 fullPathToTrialTable = [dr filesep 'trialTable.mat'];
