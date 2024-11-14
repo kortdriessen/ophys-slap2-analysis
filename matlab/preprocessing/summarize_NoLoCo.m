@@ -37,19 +37,6 @@ switch params.microscope
         params.analyzeHz = nan;
 end
 
-%set up parallelization
-p = gcp('nocreate'); % If no pool, do not create new one.
-if isempty(p)
-    poolsize = 0;
-else
-    poolsize = p.NumWorkers;
-end
-nWorkers = min(params.nParallelWorkers, size(trialTable.filename,2));
-if poolsize~=nWorkers
-    delete(gcp('nocreate'));
-    parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
-end
-
 disp(['## SUMMARIZING' newline 'Folder:'])
 disp(dr)
 
@@ -94,11 +81,23 @@ if ~strcmpi(params.microscope, 'SLAP2')
     params.analyzeHz = 1/aData.frametime; %analyze conventional recordings at the acquisitoin framerate
 end
 
-%generate a concensus alignment across trials for further analysis
+%PROCESS DATA
 for DMDix = nDMDs:-1:1
-    disp('Loading data and performing localizations...')
+    %set up parallelization
+    p = gcp('nocreate');
+    if isempty(p)
+        poolsize = 0;
+    else
+        poolsize = p.NumWorkers;
+    end
+    nWorkers = min(params.nParallelWorkers, size(trialTable.filename,2));
+    if poolsize~=nWorkers
+        delete(gcp('nocreate'));
+        parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+    end
 
     %Perform Localizations
+    disp('Loading data and performing localizations...')
     mIM = cell(1, nTrials); aIM = cell(1,nTrials); alignData = cell(1, nTrials); peaks = cell(1, nTrials); discardFrames = cell(1,nTrials); %rawIMs = cell(1,nTrials)
     fns = trialTable.fnRegDS(DMDix, :);
     parfor trialIx = 1:nTrials
@@ -155,7 +154,7 @@ for DMDix = nDMDs:-1:1
     validTrials= find(ccf(:)>corrThresh & actValidPix(:)>mean(actValidPix)/2);
     exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
     actIM = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
-    nanFrac = mean(isnan(actAligned(:,:,:,validTrials), 4));
+    nanFrac = mean(isnan(actAligned(:,:,:,validTrials)), 4);
     actIM(nanFrac>0.6) = nan;
     exptSummary.actIM{DMDix} = actIM;
 
@@ -248,6 +247,13 @@ for DMDix = nDMDs:-1:1
     E = cell(nTrials,1);
     fns = trialTable.fnRaw(DMDix,:);
     if strcmpi(params.microscope, 'SLAP2')
+        %this step is not very memory-demanding for SLAP2; increase parallel workers
+        newN = min(min(24,nWorkers*5), size(trialTable.filename,2));
+        if nWorkers~=newN
+            delete(gcp('nocreate'));
+            parpool('processes',newN); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+        end
+
         fls = trialTable.firstLine(DMDix,:);
         els = trialTable.lastLine(DMDix,:);
         parfor trialIx = 1:nTrials

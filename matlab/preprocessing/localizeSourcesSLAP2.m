@@ -19,10 +19,9 @@ if nargin<4
 end
 
 %initialize filtered image
-IMf = IM;
+IMf = IM; clear IM;
 IMf(repmat(~valid, 1, 1, nTimePoints)) = nan;
 nans = isnan(IMf);
-clear IM
 
 %fill in missing values
 IMf= reshape(IMf, sz(1)*sz(2), []);
