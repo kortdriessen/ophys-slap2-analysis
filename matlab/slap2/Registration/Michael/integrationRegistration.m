@@ -1,49 +1,18 @@
-function integrationRegistration(varargin)
+function integrationRegistration(fullPathToTrialTable, paramsIn)
 
-% get data file
-if numel(varargin) < 1 || isempty(varargin{1})
-    [fns, dr] = uigetfile({'*.meta'}, 'Select Data File', 'multiselect', 'on');
-    dataFile = [dr fns];
+if ~nargin
+    [fn, dr] = uigetfile('*trialTable*.mat');
 else
-    dataFile = varargin{1};
+    [dr, fn, ext] = fileparts(fullPathToTrialTable); fn = [fn ext]; 
 end
 
-% load reference stack
-if numel(varargin) < 2 || isempty(varargin{2})
-    [fns_ref, dr_ref] = uigetfile('*.tif', 'Select Reference Stack', 'multiselect', 'on');
-    try
-        ReferenceStack_ = slap2.gui.refstack.ReferenceStack.loadTif([dr_ref fns_ref]);
-        numChannelsRefStack = numel(ReferenceStack_.data);
-        for chIx = numChannelsRefStack:-1:1
-            refStack(:,:,:,chIx) = permute(ReferenceStack_.data{chIx},[2 1 3]);
-        end
-    catch
-        refStack = tiffreadVolume([dr_ref fns_ref]);
-    end
-else
-    refStackFlag = true;
-    refStackDir = varargin{2};
-    refStack = tiffreadVolume(refStackDir);
-end 
-
-% % read in downsampling factor (default to 7x temporal ds)
-% if numel(varargin) < 3
-%     % ds = 7;
-%     ds = 3;
+% %PARAMETER SETTING
+% if nargin>1
+%     params = setParams('integrationRegistration', paramsIn);
 % else
-%     ds = varargin{3};
-% end
-% 
-% % read in whether robust metrics should be used
-% if numel(varargin) < 4
-%     robust = false;
-%     b = 3;
-% else
-%     robust = varargin{4};
-%     b = varargin{5};
+%     params = setParams('integrationRegistration');
 % end
 
-%%
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep 'trialTable.mat'], 'trialTable');
 alignHz = 80; %we will align data at this timescale, Hz
@@ -53,7 +22,7 @@ aData.maxshift = 50;
 aData.clipShift = 5;%the maximum allowable shift per frame
 aData.alpha = 0.005; %exponential time constant for template
 
-%set up parallelization
+%% set up parallelization
 p = gcp('nocreate'); % If no pool, do not create new one.
 if isempty(p)
     poolsize = 0;
@@ -61,155 +30,175 @@ else
     poolsize = p.NumWorkers;
 end
 nWorkers = 24;
-if poolsize~=nWorkers
-    delete(gcp('nocreate'));
-    if nWorkers<15
-        warning('You are using few parallel workers! adjust this in summarizeBCI.m');
-    end
-    disp(['Parallel workers:' int2str(nWorkers)])
-    parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
-end
+% if poolsize~=nWorkers
+%     delete(gcp('nocreate'));
+%     if nWorkers<15
+%         warning('You are using few parallel workers! adjust this in summarizeBCI.m');
+%     end
+%     disp(['Parallel workers:' int2str(nWorkers)])
+%     parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+% end
 
-% make look up table first
+%% make look up table for each DMD
 
-[~,n] = fileparts(trialTable.DMD1filename{1});
-n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
-metaDataFileName = fullfile(dr, [n_base '.meta']);
-mustBeFile(metaDataFileName);
-metaData = load(metaDataFileName, '-mat');
+nDMDs = size(trialTable.filename,1);
 
-numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
+for DMDix = 1:nDMDs
 
-dmdPixelsPerColumn = metaData.dmdPixelsPerColumn;
-dmdPixelsPerRow = metaData.dmdPixelsPerRow;
-numFastZs = length(metaData.AcquisitionContainer.ParsePlan.zs);
+    [~,n] = fileparts(trialTable.filename{DMDix,1});
+    n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
+    metaDataFileName = fullfile(dr, [n_base '.meta']);
+    mustBeFile(metaDataFileName);
+    metaData = load(metaDataFileName, '-mat');
 
-% get list of superpixels and extract data
-
-allSuperPixelIDs = [];
-
-fastZ2RefZ = zeros(numFastZs,1);
-for z = 1:numFastZs
-    [~, ind] = min(abs(ReferenceStack_.zs - metaData.AcquisitionContainer.ParsePlan.zs(z)));
-    fastZ2RefZ(z) = ind;
-end
-
-for lineSweepIdx = 1:numLinesPerCycle
-    superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
-
-    if size(superPixIdxs,1) == 0; continue; end
-
-    zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1) + 1;
-
-    % only take integration mode pixels
-    superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
-
-    spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
-    allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
-end
-
-[allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
-spSampleCt = accumarray(ic, 1);
-
-fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
-
-% make sparse matrix with each superpixel's corresponding mask (roiMasks)
-
-fprintf("Calculating ROI Masks... ");
-tic;
-
-% using sparse matrix
-sparseMaskInds = [];
-allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-
-for i = 1:length(allSuperPixelIDs)
-    tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
-
-    sp = allSuperPixelIDs(i);
-    zIdx = rem(sp,100);
-    superPixIdx = (sp - zIdx) / 100;
-    pixelReplacementMap = allPixelReplacementMaps{zIdx};
-
-    open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
-
-    if isempty(open)
-        open = superPixIdx+1;
+    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG2-REFERENCE*']);
+    ReferenceStack_ = slap2.gui.refstack.ReferenceStack.loadTif(fullfile(list(1).folder, list(1).name));
+    numChannelsRefStack = numel(ReferenceStack_.data);
+    for chIx = numChannelsRefStack:-1:1
+        refStack(:,:,:,chIx) = permute(ReferenceStack_.data{chIx},[2 1 3]);
     end
 
-    openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
-    openC = open - (openR-1) * dmdPixelsPerRow;
-    openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
+    numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
 
-    sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
-end
-clear('tmpMask');
+    dmdPixelsPerColumn = metaData.dmdPixelsPerColumn;
+    dmdPixelsPerRow = metaData.dmdPixelsPerRow;
+    numFastZs = length(metaData.AcquisitionContainer.ParsePlan.zs);
 
-roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
-fprintf('done - took %f sec\n', toc);
+    % get list of superpixels and extract data
 
-% make sure refStack is larger than imaged frame
+    allSuperPixelIDs = [];
 
-bl = single(refStack)/100; %  reference image (X x Y x Z)
-bl(bl < 0) = 0; % remove any negative values, should not happen
-bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
-                  floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
-                  floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
-              mean(bl(:)),...
-              'both');
-
-if size(bl,1) < dmdPixelsPerColumn
-    bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
-end
-
-if size(bl,2) < dmdPixelsPerRow
-    bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
-end
-
-% Calculate lookup table
-
-xPre = 25; xPost = 25;
-yPre = 25; yPost = 25;
-
-zPre = 10;
-zPost = 10;
-
-xMotRange = xPre + xPost + 1;
-yMotRange = yPre + yPost + 1;
-zMotRange = zPre + zPost + 1;
-
-% query user to select a existing lookup table
-[lookupFile, lookupDir] = uigetfile('*.mat', 'Select Lookup Table');
-
-% make lookup table if it doesn't exist
-if sum(lookupFile == 0)
-
-    likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
-    likelihood_means = likelihood_means .* repmat(reshape(spSampleCt,[1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means,1:3) 1]);
-
-    if exist('fname')
-        save([fname(1:end-5) '_LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
-    else
-        save([filepath '\LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
+    fastZ2RefZ = zeros(numFastZs,1);
+    for z = 1:numFastZs
+        [~, ind] = min(abs(ReferenceStack_.zs - metaData.AcquisitionContainer.ParsePlan.zs(z)));
+        fastZ2RefZ(z) = ind;
     end
-else % load user selected lookup table
-    fprintf("Loading lookup table... ")
-    load([lookupDir lookupFile]);
-    fprintf('done\n');
+
+    for lineSweepIdx = 1:numLinesPerCycle
+        superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
+
+        if size(superPixIdxs,1) == 0; continue; end
+
+        zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1) + 1;
+
+        % only take integration mode pixels
+        superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
+
+        spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
+        allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
+    end
+
+    [allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
+    spSampleCt = accumarray(ic, 1);
+
+    fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
+
+    % make sparse matrix with each superpixel's corresponding mask (roiMasks)
+
+    fprintf("Calculating ROI Masks... ");
+    tic;
+
+    % using sparse matrix
+    sparseMaskInds = [];
+    allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+
+    for i = 1:length(allSuperPixelIDs)
+        tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
+
+        sp = allSuperPixelIDs(i);
+        zIdx = rem(sp,100);
+        superPixIdx = (sp - zIdx) / 100;
+        pixelReplacementMap = allPixelReplacementMaps{zIdx};
+
+        open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
+
+        if isempty(open)
+            open = superPixIdx+1;
+        end
+
+        openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
+        openC = open - (openR-1) * dmdPixelsPerRow;
+        openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
+
+        sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
+    end
+    clear('tmpMask');
+
+    roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
+    fprintf('done - took %f sec\n', toc);
+
+    % make sure refStack is larger than imaged frame
+
+    bl = single(refStack)/100; %  reference image (X x Y x Z x C)
+    bl(bl < 0) = 0; % remove any negative values, should not happen
+    bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
+        floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
+        floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
+        mean(bl(:)),...
+        'both');
+
+    if size(bl,1) < dmdPixelsPerColumn
+        bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
+    end
+
+    if size(bl,2) < dmdPixelsPerRow
+        bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
+    end
+
+    % Calculate lookup table
+
+    xPre = 25; xPost = 25;
+    yPre = 25; yPost = 25;
+
+    zPre = 10;
+    zPost = 10;
+
+    xMotRange = xPre + xPost + 1;
+    yMotRange = yPre + yPost + 1;
+    zMotRange = zPre + zPost + 1;
+
+    lookupFile = ['integrationRegLookupTable_DMD' num2str(DMDix) '.mat'];
+
+    % make lookup table if it doesn't exist
+    if ~exist([dr filesep lookupFile])
+        likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
+        likelihood_means = likelihood_means .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means,1:4) 1]);
+
+        % save specific to DMD1 vs DMD2
+        save([dr filesep lookupFile],'likelihood_means','-v7.3');
+    else % load user selected lookup table
+        fprintf("Loading lookup table... ")
+        load([dr lookupFile]);
+        fprintf('done\n');
+    end
 end
 
 %%
-parfor f_ix = 1:length(trialTable.trueTrialIx)
-    fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD1'];
-    alignIntegrationAsync(dr, trialTable.DMD1filename{f_ix}, fnWrite, trialTable.DMD1firstLine(f_ix), trialTable.DMD1lastLine(f_ix), aData, overwriteExisting);
-    fnWrite = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD2'];
-    alignIntegrationAsync(dr, trialTable.DMD2filename{f_ix}, fnWrite, trialTable.DMD2firstLine(f_ix), trialTable.DMD2lastLine(f_ix), aData, overwriteExisting);
+
+[dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
+fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
+fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
+parfor p_ix = 1:numel(fixs)
+    f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
+    [fnRegDS{p_ix}, fnAdata{p_ix}]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+end
+trialTable.fnRegDS = fnRegDS;
+trialTable.fnAdata = fnAdata;
+trialTable.alignParams = params;
+save([dr filesep fn], "trialTable")
+
+disp('done multiRoiRegistration.')
 end
 
-disp('done integrationRegistration.')
-end
 
+function [fnwrite, fnAdata] = alignAsync(dr, trialTable, params, f_ix, DMD_ix)
 
-function alignIntegrationAsync(dr, fn, fnW, firstLine, lastLine, aData, overwriteExisting)
+fn = trialTable.filename{DMD_ix,f_ix};
+fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix)];
+firstLine = trialTable.firstLine(DMD_ix,f_ix);
+lastLine = trialTable.lastLine(DMD_ix, f_ix);
+aData = params;
+
 disp(['Aligning: ' [dr filesep fn]])
 
 fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
@@ -236,91 +225,6 @@ numCycles = floor(totalCycles / 2^ds);
 dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
 dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
 numFastZs = length(hLowLevelDataFile.fastZs);
-
-
-%% make sparse matrix with each superpixel's corresponding mask (roiMasks)
-
-fprintf("Calculating ROI Masks... ");
-tic;
-
-% using sparse matrix
-sparseMaskInds = [];
-allPixelReplacementMaps = hLowLevelDataFile.metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-
-for i = 1:length(allSuperPixelIDs)
-    tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
-
-    sp = allSuperPixelIDs(i);
-    zIdx = rem(sp,100);
-    superPixIdx = (sp - zIdx) / 100;
-    pixelReplacementMap = allPixelReplacementMaps{zIdx};
-
-    open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
-
-    if isempty(open)
-        open = superPixIdx+1;
-    end
-
-    openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
-    openC = open - (openR-1) * dmdPixelsPerRow;
-    openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
-
-    sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
-end
-clear('tmpMask');
-
-roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
-fprintf('done - took %f sec\n', toc);
-
-%% make sure refStack is larger than imaged frame
-
-bl = single(refStack)/100; %  reference image (X x Y x Z)
-bl(bl < 0) = 0; % remove any negative values, should not happen
-bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
-                  floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
-                  floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
-              mean(bl(:)),...
-              'both');
-
-if size(bl,1) < dmdPixelsPerColumn
-    bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
-end
-
-if size(bl,2) < dmdPixelsPerRow
-    bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
-end
-
-%% Calculate lookup table
-
-xPre = 25; xPost = 25;
-yPre = 25; yPost = 25;
-
-zPre = 10;
-zPost = 10;
-
-xMotRange = xPre + xPost + 1;
-yMotRange = yPre + yPost + 1;
-zMotRange = zPre + zPost + 1;
-
-% query user to select a existing lookup table
-[lookupFile, lookupDir] = uigetfile('*.mat', 'Select Lookup Table');
-
-% make lookup table if it doesn't exist
-if sum(lookupFile == 0)
-
-    likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
-    likelihood_means = likelihood_means .* repmat(reshape(spSampleCt,[1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means,1:3) 1]);
-
-    if exist('fname')
-        save([fname(1:end-5) '_LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
-    else
-        save([filepath '\LOOKUPTABLE.mat'],'likelihood_means','-v7.3');
-    end
-else % load user selected lookup table
-    fprintf("Loading lookup table... ")
-    load([lookupDir lookupFile]);
-    fprintf('done\n');
-end
 
 %%  Calculate log likelihoods and infer motion from MAP
 log_means = log(likelihood_means + 1e-8);

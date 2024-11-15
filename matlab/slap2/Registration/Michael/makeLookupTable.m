@@ -1,6 +1,6 @@
 function motionLUT = makeLookupTable(reference, sparseMaskInds, numFastZs, fastZ2RefZ, varargin)
 
-[dmdPixelsPerColumn, dmdPixelsPerRow, numPlanes] = size(reference);
+[dmdPixelsPerColumn, dmdPixelsPerRow, numPlanes, numChannels] = size(reference);
 
 if nargin == 3
     yMotRange = -25:25;
@@ -20,7 +20,7 @@ numZ = length(zMotRange);
 fprintf("Calculating lookup table... ")
 
 tic;
-motionLUT = single(zeros(length(yMotRange), length(xMotRange), length(zMotRange),max(sparseMaskInds(:,2)))); % X x Y x Z x no. of superpixels
+motionLUT = single(zeros(length(yMotRange), length(xMotRange), length(zMotRange),numChannels,max(sparseMaskInds(:,2)))); % X x Y x Z x no. of superpixels
 motionLUT(:) = nan;
 
 refPixs = zeros(max(sparseMaskInds(:,2)),1);
@@ -48,8 +48,10 @@ for y = 1:numY
 
             % select expected value of superpixel at (x,y,z)
             % displacement from the reference image
-            motionLUT(y,x,z,validInds) = reference(sub2ind([dmdPixelsPerColumn dmdPixelsPerRow numPlanes], ...
-                shiftedR(validInds), shiftedC(validInds), shiftedD(validInds)));
+            for chIx = 1:numChannels
+                motionLUT(y,x,z,chIx,validInds) = reference(sub2ind([dmdPixelsPerColumn dmdPixelsPerRow numPlanes numChannels], ...
+                    shiftedR(validInds), shiftedC(validInds), shiftedD(validInds),chIx));
+            end
         end
     end
 end
