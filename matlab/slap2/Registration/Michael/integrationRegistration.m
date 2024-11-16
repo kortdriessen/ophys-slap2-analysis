@@ -225,8 +225,8 @@ searchRadius = 4;
 
 dsMotion = zeros(numCycles,3);
 dsBrightness = zeros(numCycles,1);
-dataMatrix = zeros(length(allSuperPixelIDs),numCycles);
-expectedMatrix = zeros(length(allSuperPixelIDs),numCycles);
+dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),numCycles);
+expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),numCycles);
 
 fprintf("Inferring motion... ")
 tic
@@ -241,7 +241,7 @@ zSearch = 1:zMotRange;
 
 for cycleIdx = 1:numCycles
     % load data
-    data = zeros(length(allSuperPixelIDs),1);
+    data = zeros(length(lookupTable.allSuperPixelIDs),1);
     for c = 1:2^ds
         allLineData = hLowLevelDataFile.getLineData(1:numLinesPerCycle, ((cycleIdx-1)*2^ds+c)*ones(numLinesPerCycle,1));
         for lineSweepIdx = 1:numLinesPerCycle
@@ -254,9 +254,9 @@ for cycleIdx = 1:numCycles
             zIdx = hLowLevelDataFile.lineFastZIdxs(lineSweepIdx);
     
             spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
-            [~,spIdx] = ismember(spID,allSuperPixelIDs);
+            [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs);
     
-            data(spIdx(spIdx>0)) = data(spIdx(spIdx>0)) + single(lineData(spIdx>0,channel));
+            data(spIdx(spIdx>0)) = data(spIdx(spIdx>0)) + single(lineData(spIdx>0,:));
         end
     end
     data = data ./ 100; %./ spSampleCt;
