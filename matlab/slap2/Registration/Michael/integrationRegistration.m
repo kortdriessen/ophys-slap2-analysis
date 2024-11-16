@@ -6,21 +6,15 @@ else
     [dr, fn, ext] = fileparts(fullPathToTrialTable); fn = [fn ext]; 
 end
 
-% %PARAMETER SETTING
-% if nargin>1
-%     params = setParams('integrationRegistration', paramsIn);
-% else
-%     params = setParams('integrationRegistration');
-% end
+%PARAMETER SETTING
+if nargin>1
+    params = setParams('integrationRegistration', paramsIn);
+else
+    params = setParams('integrationRegistration');
+end
 
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep 'trialTable.mat'], 'trialTable');
-alignHz = 80; %we will align data at this timescale, Hz
-
-aData.alignHz = alignHz;
-aData.maxshift = 50;
-aData.clipShift = 5;%the maximum allowable shift per frame
-aData.alpha = 0.005; %exponential time constant for template
 
 %% set up parallelization
 p = gcp('nocreate'); % If no pool, do not create new one.
@@ -42,135 +36,135 @@ nWorkers = 24;
 %% make look up table for each DMD
 
 nDMDs = size(trialTable.filename,1);
+lookupFile = 'integrationRegLookupTable.mat';
 
-for DMDix = 1:nDMDs
-
-    [~,n] = fileparts(trialTable.filename{DMDix,1});
-    n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
-    metaDataFileName = fullfile(dr, [n_base '.meta']);
-    mustBeFile(metaDataFileName);
-    metaData = load(metaDataFileName, '-mat');
-
-    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG2-REFERENCE*']);
-    ReferenceStack_ = slap2.gui.refstack.ReferenceStack.loadTif(fullfile(list(1).folder, list(1).name));
-    numChannelsRefStack = numel(ReferenceStack_.data);
-    for chIx = numChannelsRefStack:-1:1
-        refStack(:,:,:,chIx) = permute(ReferenceStack_.data{chIx},[2 1 3]);
-    end
-
-    numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
-
-    dmdPixelsPerColumn = metaData.dmdPixelsPerColumn;
-    dmdPixelsPerRow = metaData.dmdPixelsPerRow;
-    numFastZs = length(metaData.AcquisitionContainer.ParsePlan.zs);
-
-    % get list of superpixels and extract data
-
-    allSuperPixelIDs = [];
-
-    fastZ2RefZ = zeros(numFastZs,1);
-    for z = 1:numFastZs
-        [~, ind] = min(abs(ReferenceStack_.zs - metaData.AcquisitionContainer.ParsePlan.zs(z)));
-        fastZ2RefZ(z) = ind;
-    end
-
-    for lineSweepIdx = 1:numLinesPerCycle
-        superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
-
-        if size(superPixIdxs,1) == 0; continue; end
-
-        zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1) + 1;
-
-        % only take integration mode pixels
-        superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
-
-        spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
-        allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
-    end
-
-    [allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
-    spSampleCt = accumarray(ic, 1);
-
-    fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
-
-    % make sparse matrix with each superpixel's corresponding mask (roiMasks)
-
-    fprintf("Calculating ROI Masks... ");
-    tic;
-
-    % using sparse matrix
-    sparseMaskInds = [];
-    allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
-
-    for i = 1:length(allSuperPixelIDs)
-        tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
-
-        sp = allSuperPixelIDs(i);
-        zIdx = rem(sp,100);
-        superPixIdx = (sp - zIdx) / 100;
-        pixelReplacementMap = allPixelReplacementMaps{zIdx};
-
-        open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
-
-        if isempty(open)
-            open = superPixIdx+1;
+% make lookup table if it doesn't exist
+if ~exist([dr filesep lookupFile])
+    for DMDix = nDMDs:-1:1
+        [~,n] = fileparts(trialTable.filename{DMDix,1});
+        n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
+        metaDataFileName = fullfile(dr, [n_base '.meta']);
+        mustBeFile(metaDataFileName);
+        metaData = load(metaDataFileName, '-mat');
+    
+        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG2-REFERENCE*']);
+        ReferenceStack_ = slap2.gui.refstack.ReferenceStack.loadTif(fullfile(list(1).folder, list(1).name));
+        numChannelsRefStack = numel(ReferenceStack_.data);
+        for chIx = numChannelsRefStack:-1:1
+            refStack(:,:,:,chIx) = permute(ReferenceStack_.data{chIx},[2 1 3]);
         end
-
-        openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
-        openC = open - (openR-1) * dmdPixelsPerRow;
-        openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
-
-        sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
+    
+        numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
+    
+        dmdPixelsPerColumn = metaData.dmdPixelsPerColumn;
+        dmdPixelsPerRow = metaData.dmdPixelsPerRow;
+        numFastZs = length(metaData.AcquisitionContainer.ParsePlan.zs);
+    
+        % get list of superpixels and extract data
+    
+        allSuperPixelIDs = [];
+    
+        fastZ2RefZ = zeros(numFastZs,1);
+        for z = 1:numFastZs
+            [~, ind] = min(abs(ReferenceStack_.zs - metaData.AcquisitionContainer.ParsePlan.zs(z)));
+            fastZ2RefZ(z) = ind;
+        end
+    
+        for lineSweepIdx = 1:numLinesPerCycle
+            superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
+    
+            if size(superPixIdxs,1) == 0; continue; end
+    
+            zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1) + 1;
+    
+            % only take integration mode pixels
+            superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
+    
+            spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
+            allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
+        end
+    
+        [allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
+        spSampleCt = accumarray(ic, 1);
+    
+        fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
+    
+        % make sparse matrix with each superpixel's corresponding mask (roiMasks)
+    
+        fprintf("Calculating ROI Masks... ");
+        tic;
+    
+        % using sparse matrix
+        sparseMaskInds = [];
+        allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+    
+        for i = 1:length(allSuperPixelIDs)
+            tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
+    
+            sp = allSuperPixelIDs(i);
+            zIdx = rem(sp,100);
+            superPixIdx = (sp - zIdx) / 100;
+            pixelReplacementMap = allPixelReplacementMaps{zIdx};
+    
+            open = uint32(pixelReplacementMap(pixelReplacementMap(:,2) == superPixIdx,1))+1;
+    
+            if isempty(open)
+                open = superPixIdx+1;
+            end
+    
+            openR = idivide(open-1, dmdPixelsPerRow, 'floor')+1;
+            openC = open - (openR-1) * dmdPixelsPerRow;
+            openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
+    
+            sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
+        end
+        clear('tmpMask');
+    
+        roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
+        fprintf('done - took %f sec\n', toc);
+    
+        % make sure refStack is larger than imaged frame
+    
+        bl = single(refStack)/100; %  reference image (X x Y x Z x C)
+        bl(bl < 0) = 0; % remove any negative values, should not happen
+        bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
+            floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
+            floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
+            mean(bl(:)),...
+            'both');
+    
+        if size(bl,1) < dmdPixelsPerColumn
+            bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
+        end
+    
+        if size(bl,2) < dmdPixelsPerRow
+            bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
+        end
+    
+        % Calculate lookup table
+    
+        xPre = params.maxshiftXY; xPost = params.maxshiftXY;
+        yPre = params.maxshiftXY; yPost = params.maxshiftXY;
+        zPre = params.maxshiftZ; zPost = params.maxshiftZ;
+        
+        likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
+        likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means{DMDix},1:4) 1]);
     end
-    clear('tmpMask');
+    lookupTable.likelihood_means = likelihood_means;
+    lookupTable.allSuperPixelIDs = allSuperPixelIDs;
+    lookupTable.xPre = xPre;
+    lookupTable.xPost = xPost;
+    lookupTable.yPre = yPre;
+    lookupTable.yPost = yPost;
+    lookupTable.zPre = zPre;
+    lookupTable.zPost = zPost;
 
-    roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
-    fprintf('done - took %f sec\n', toc);
+    save([dr filesep lookupFile],'lookupTable','-v7.3');
 
-    % make sure refStack is larger than imaged frame
-
-    bl = single(refStack)/100; %  reference image (X x Y x Z x C)
-    bl(bl < 0) = 0; % remove any negative values, should not happen
-    bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
-        floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
-        floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
-        mean(bl(:)),...
-        'both');
-
-    if size(bl,1) < dmdPixelsPerColumn
-        bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
-    end
-
-    if size(bl,2) < dmdPixelsPerRow
-        bl = padarray(bl,[0,1,0],mean(bl(:)),'pre');
-    end
-
-    % Calculate lookup table
-
-    xPre = 25; xPost = 25;
-    yPre = 25; yPost = 25;
-
-    zPre = 10;
-    zPost = 10;
-
-    xMotRange = xPre + xPost + 1;
-    yMotRange = yPre + yPost + 1;
-    zMotRange = zPre + zPost + 1;
-
-    lookupFile = ['integrationRegLookupTable_DMD' num2str(DMDix) '.mat'];
-
-    % make lookup table if it doesn't exist
-    if ~exist([dr filesep lookupFile])
-        likelihood_means = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
-        likelihood_means = likelihood_means .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means,1:4) 1]);
-
-        % save specific to DMD1 vs DMD2
-        save([dr filesep lookupFile],'likelihood_means','-v7.3');
-    else % load user selected lookup table
-        fprintf("Loading lookup table... ")
-        load([dr lookupFile]);
-        fprintf('done\n');
-    end
+else % load user selected lookup table
+    fprintf("Loading lookup table... ")
+    load([dr lookupFile], 'lookupTable');
+    fprintf('done\n');
 end
 
 %%
@@ -178,9 +172,10 @@ end
 [dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
 fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
 fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
-parfor p_ix = 1:numel(fixs)
+% parfor p_ix = 1:numel(fixs)
+for p_ix = 1:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
-    [fnRegDS{p_ix}, fnAdata{p_ix}]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+    [fnRegDS{p_ix}, fnAdata{p_ix}]= alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix);
 end
 trialTable.fnRegDS = fnRegDS;
 trialTable.fnAdata = fnAdata;
@@ -191,7 +186,7 @@ disp('done multiRoiRegistration.')
 end
 
 
-function [fnwrite, fnAdata] = alignAsync(dr, trialTable, params, f_ix, DMD_ix)
+function [fnwrite, fnAdata] = alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix)
 
 fn = trialTable.filename{DMD_ix,f_ix};
 fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix)];
@@ -204,7 +199,7 @@ disp(['Aligning: ' [dr filesep fn]])
 fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
 fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
 
-if ~overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
+if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
     disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
     return
 end
@@ -214,20 +209,16 @@ hLowLevelDataFile = hSlap2DataFile.hDataFile;
 
 %% load SLAP2 data and metadata
 
-hDataViewer = slap2.Slap2DataViewer(dataFile);
-hLowLevelDataFile = hDataViewer.hDataFile.hDataFile;
-fname = hLowLevelDataFile.filename;
-
 numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
 totalCycles = hLowLevelDataFile.numCycles;
-numCycles = floor(totalCycles / 2^ds);
+% numCycles = floor(totalCycles / 2^ds);
 
 dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
 dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
 numFastZs = length(hLowLevelDataFile.fastZs);
 
 %%  Calculate log likelihoods and infer motion from MAP
-log_means = log(likelihood_means + 1e-8);
+log_means = log(lookupTable.likelihood_means{DMD_ix} + 1e-8);
 
 % how much change is allowed in each dimension at each step
 searchRadius = 4;
@@ -239,6 +230,10 @@ expectedMatrix = zeros(length(allSuperPixelIDs),numCycles);
 
 fprintf("Inferring motion... ")
 tic
+    
+xMotRange = lookupTable.xPre + lookupTable.xPost + 1;
+yMotRange = lookupTable.yPre + lookupTable.yPost + 1;
+zMotRange = lookupTable.zPre + lookupTable.zPost + 1;
 
 ySearch = 1:yMotRange;
 xSearch = 1:xMotRange;
@@ -267,7 +262,7 @@ for cycleIdx = 1:numCycles
     data = data ./ 100; %./ spSampleCt;
 
     % calculate log likelihoods at all shifts
-    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, likelihood_means,log_means,ySearch,xSearch,zSearch,robust);
+    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix},log_means,ySearch,xSearch,zSearch,robust);
 
     [LL, I] = max(logLikelihoodTable(:));
 
@@ -293,7 +288,7 @@ for cycleIdx = 1:numCycles
 
     dsBrightness(cycleIdx) = scalingFactorTable(My, Mx, Mz);
     dataMatrix(:,cycleIdx) = data;
-    expectedMatrix(:,cycleIdx) = dsBrightness(cycleIdx) .* likelihood_means(ySearch(My), xSearch(Mx), zSearch(Mz),:);
+    expectedMatrix(:,cycleIdx) = dsBrightness(cycleIdx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
 
     ySearch = max(1,round(dsMotion(cycleIdx,1)) - searchRadius):min(xMotRange,round(dsMotion(cycleIdx,1)) + searchRadius);
     xSearch = max(1,round(dsMotion(cycleIdx,2)) - searchRadius):min(yMotRange,round(dsMotion(cycleIdx,2)) + searchRadius);
