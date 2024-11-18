@@ -189,7 +189,7 @@ end
 function [fnwrite, fnAdata] = alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix)
 
 fn = trialTable.filename{DMD_ix,f_ix};
-fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix)];
+fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix) '_INTEGRATION'];
 firstLine = trialTable.firstLine(DMD_ix,f_ix);
 lastLine = trialTable.lastLine(DMD_ix, f_ix);
 aData = params;
@@ -207,11 +207,17 @@ end
 hSlap2DataFile = slap2.Slap2DataFile([dr filesep fn]);
 hLowLevelDataFile = hSlap2DataFile.hDataFile;
 
+
+linerateHz = 1/hLowLevelDataFile.metaData.linePeriod_s;
+dt = linerateHz/aData.alignHz;
+numChannels = hSlap2DataFile.numChannels;
+
+DSframes = ceil(firstLine:dt:lastLine);
+
 %% load SLAP2 data and metadata
 
 numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
 totalCycles = hLowLevelDataFile.numCycles;
-% numCycles = floor(totalCycles / 2^ds);
 
 dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
 dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
@@ -221,7 +227,7 @@ numFastZs = length(hLowLevelDataFile.fastZs);
 log_means = log(lookupTable.likelihood_means{DMD_ix} + 1e-8);
 
 % how much change is allowed in each dimension at each step
-searchRadius = 4;
+searchRadius = aData.clipShift;
 
 dsMotion = zeros(numCycles,3);
 dsBrightness = zeros(numCycles,1);
