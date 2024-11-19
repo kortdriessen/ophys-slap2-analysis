@@ -1,6 +1,6 @@
 function [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, likelihood_means, log_means, ySearch, xSearch, zSearch, channels, robust)
 
-validSPs = any(isnan(data),2);
+validSPs = ~any(isnan(data),2);
 sub_likelihood_means = likelihood_means(ySearch,xSearch,zSearch,channels,:);
 sub_log_means = log_means(ySearch,xSearch,zSearch,channels,:);
 
@@ -22,10 +22,10 @@ scaled_likelihood_means = scalingFactorTable .* sub_likelihood_means;
 scaled_log_means = log(scalingFactorTable) + sub_log_means;
 
 if robust
-    logLikelihoodTable = sum(max(-b, min(b,(reshape(data(validSPs,:)',[1,1,1,length(channels),sum(validSPs)]) - scaled_likelihood_means) ./ sqrt(scaled_likelihood_means))).^2,4,"omitnan");
+    logLikelihoodTable = sum(max(-b, min(b,(reshape(data(validSPs,:)',[1,1,1,length(channels),sum(validSPs)]) - scaled_likelihood_means) ./ sqrt(scaled_likelihood_means))).^2,[4 5],"omitnan");
     logLikelihoodTable = -abs(logLikelihoodTable(:));
 else
-    logLikelihoodTable = sum(reshape(data',[1,1,1,size(data')]) .* scaled_log_means - scaled_likelihood_means,4,"omitnan");
+    logLikelihoodTable = sum(reshape(data',[1,1,1,size(data')]) .* scaled_log_means - scaled_likelihood_means,[4 5],"omitnan");
 end
 
 % prevent Inf from being the max log likelihood

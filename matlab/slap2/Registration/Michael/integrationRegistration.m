@@ -203,7 +203,7 @@ totalCycles = hLowLevelDataFile.numCycles;
 numChannels = hSlap2DataFile.numChannels;
 channels = hLowLevelDataFile.metaData.channelsSave;
 
-assert(length(channels) ~= numChannels, 'Saved channels does not match numChannels!');
+assert(length(channels) == numChannels, 'Saved channels does not match numChannels!');
 
 linerateHz = 1/hLowLevelDataFile.metaData.linePeriod_s;
 dt = linerateHz/aData.alignHz;
@@ -240,8 +240,8 @@ motionDS = nan(nDSframes,3);
 brightnessDS = nan(nDSframes,1);
 loglikelihoodDS = nan(nDSframes,1);
 
-dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
-expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
+% dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
+% expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
 
 fprintf("Inferring motion... ")
 tic
@@ -256,9 +256,13 @@ zSearch = 1:zMotRange;
 
 for DSframeIx = 1:nDSframes
     if DSframeIx == nDSframes
-        timeWindow = DSframes(DSframes):lastLine;
+        timeWindow = DSframes(DSframeIx):lastLine;
     else
         timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
+    end
+
+    if ~mod(DSframeIx, 1000)
+        disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
     end
 
     lineIndices  = mod(timeWindow-1,numLinesPerCycle)+1;
@@ -285,15 +289,19 @@ for DSframeIx = 1:nDSframes
     data = data ./ 100; %./ spSampleCt;
     data(spCt == 0,:) = nan;
 
-    % calculate log likelihoods at all shifts
-    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix},log_means,ySearch,xSearch,zSearch,channels,robust);
+    if mean(spCt == 0) > 0.5; return; end
 
-    [LL, I] = max(logLikelihoodTable(:));
+    % calculate log likelihoods at all shifts
+    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix} ...
+                                                                                .* repmat(reshape(spCt,[1 1 1 1 length(lookupTable.allSuperPixelIDs)]),[size(lookupTable.likelihood_means{DMD_ix},1:4) 1]), ...
+                                                                        log_means,ySearch,xSearch,zSearch,channels,params.robust);
+
+    [loglikelihoodDS(DSframeIx), I] = max(logLikelihoodTable(:));
 
     [My, Mx, Mz] = ind2sub(size(logLikelihoodTable),I);
 
     if My>1 && My<size(logLikelihoodTable,1) && Mx>1 && Mx<size(logLikelihoodTable,2) && Mz>1 && Mz<size(logLikelihoodTable,3)
-        %perform superresolution upsampling
+        %perform superresolution upsampling, assuming quadratic loglikelihood
         ratioY = min(1e6,(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My-1,Mx,Mz))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My+1,Mx,Mz)));
         dY = (1-ratioY)/(1+ratioY)/2;
         
@@ -311,8 +319,8 @@ for DSframeIx = 1:nDSframes
     end
 
     brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
-    dataMatrix(:,DSframeIx) = data;
-    expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
+    % dataMatrix(:,DSframeIx) = data;
+    % expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
 
     ySearch = max(1,round(motionDS(DSframeIx,1)) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)) + searchRadius);
     xSearch = max(1,round(motionDS(DSframeIx,2)) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)) + searchRadius);
