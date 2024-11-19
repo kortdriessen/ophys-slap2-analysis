@@ -162,9 +162,9 @@ if ~exist([dr filesep lookupFile])
     save([dr filesep lookupFile],'lookupTable','-v7.3');
 
 else % load user selected lookup table
-    fprintf("Loading lookup table... ")
+    fprintf("Loading lookup table... "); tic;
     load([dr lookupFile], 'lookupTable');
-    fprintf('done\n');
+    fprintf('done, took %f sec\n',toc);
 end
 
 %%
@@ -173,7 +173,7 @@ end
 fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
 fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
 % parfor p_ix = 1:numel(fixs)
-for p_ix = 1:numel(fixs)
+for p_ix = 3:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
     [fnRegDS{p_ix}, fnAdata{p_ix}]= alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix);
 end
@@ -261,7 +261,7 @@ for DSframeIx = 1:nDSframes
         timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
     end
 
-    if ~mod(DSframeIx, 1000)
+    if ~mod(DSframeIx, 10)
         disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
     end
 
@@ -327,7 +327,7 @@ for DSframeIx = 1:nDSframes
     zSearch = max(1,round(motionDS(DSframeIx,3)) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)) + searchRadius);
 end
 
-disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
+disp(['done - took ' num2str(toc) ' sec'])
 
 %% Upsample if downsampled
 frames = 1:totalCycles;
