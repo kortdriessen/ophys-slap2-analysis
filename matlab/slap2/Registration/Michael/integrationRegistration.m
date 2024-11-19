@@ -147,8 +147,8 @@ if ~exist([dr filesep lookupFile])
         yPre = params.maxshiftXY; yPost = params.maxshiftXY;
         zPre = params.maxshiftZ; zPost = params.maxshiftZ;
         
-        likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost);
-        likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means{DMDix},1:4) 1]);
+        likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
+        % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means{DMDix},1:4) 1]);
     end
     lookupTable.likelihood_means = likelihood_means;
     lookupTable.allSuperPixelIDs = allSuperPixelIDs;
@@ -196,6 +196,24 @@ aData = params;
 
 disp(['Aligning: ' [dr filesep fn]])
 
+hSlap2DataFile = slap2.Slap2DataFile([dr filesep fn]);
+hLowLevelDataFile = hSlap2DataFile.hDataFile;
+numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
+totalCycles = hLowLevelDataFile.numCycles;
+numChannels = hSlap2DataFile.numChannels;
+channels = hLowLevelDataFile.metaData.channelsSave;
+
+assert(length(channels) ~= numChannels, 'Saved channels does not match numChannels!');
+
+linerateHz = 1/hLowLevelDataFile.metaData.linePeriod_s;
+dt = linerateHz/aData.alignHz;
+
+if dt < numLinesPerCycle
+    aData.alignHz = floor(linerateHz / numLinesPerCycle);
+    dt = linerateHz/aData.alignHz;
+    disp(['Requested DS freq too fast, adjusting to ' aData.alignHz ' Hz']);
+end
+
 fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
 fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
 
@@ -204,21 +222,10 @@ if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
     return
 end
 
-hSlap2DataFile = slap2.Slap2DataFile([dr filesep fn]);
-hLowLevelDataFile = hSlap2DataFile.hDataFile;
-
-
-linerateHz = 1/hLowLevelDataFile.metaData.linePeriod_s;
-dt = linerateHz/aData.alignHz;
-numChannels = hSlap2DataFile.numChannels;
-
 DSframes = ceil(firstLine:dt:lastLine);
+nDSframes= length(DSframes); %number of downsampled frames
 
-%% load SLAP2 data and metadata
-
-numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
-totalCycles = hLowLevelDataFile.numCycles;
-
+%% load metadata
 dmdPixelsPerColumn = hLowLevelDataFile.metaData.dmdPixelsPerColumn;
 dmdPixelsPerRow = hLowLevelDataFile.metaData.dmdPixelsPerRow;
 numFastZs = length(hLowLevelDataFile.fastZs);
@@ -229,10 +236,12 @@ log_means = log(lookupTable.likelihood_means{DMD_ix} + 1e-8);
 % how much change is allowed in each dimension at each step
 searchRadius = aData.clipShift;
 
-dsMotion = zeros(numCycles,3);
-dsBrightness = zeros(numCycles,1);
-dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),numCycles);
-expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),numCycles);
+motionDS = nan(nDSframes,3);
+brightnessDS = nan(nDSframes,1);
+loglikelihoodDS = nan(nDSframes,1);
+
+dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
+expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
 
 fprintf("Inferring motion... ")
 tic
@@ -245,30 +254,39 @@ ySearch = 1:yMotRange;
 xSearch = 1:xMotRange;
 zSearch = 1:zMotRange;
 
-for cycleIdx = 1:numCycles
+for DSframeIx = 1:nDSframes
+    if DSframeIx == nDSframes
+        timeWindow = DSframes(DSframes):lastLine;
+    else
+        timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
+    end
+
+    lineIndices  = mod(timeWindow-1,numLinesPerCycle)+1;
+    cycleIndices = floor((timeWindow-1) / numLinesPerCycle)+1;
+
     % load data
-    data = zeros(length(lookupTable.allSuperPixelIDs),1);
-    for c = 1:2^ds
-        allLineData = hLowLevelDataFile.getLineData(1:numLinesPerCycle, ((cycleIdx-1)*2^ds+c)*ones(numLinesPerCycle,1));
-        for lineSweepIdx = 1:numLinesPerCycle
-    
-            superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineSweepIdx};
-    
-            if size(superPixIdxs,1) == 0; continue; end
-    
-            lineData = allLineData{lineSweepIdx};
-            zIdx = hLowLevelDataFile.lineFastZIdxs(lineSweepIdx);
-    
-            spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
-            [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs);
-    
-            data(spIdx(spIdx>0)) = data(spIdx(spIdx>0)) + single(lineData(spIdx>0,:));
-        end
+    data = zeros(length(lookupTable.allSuperPixelIDs),numChannels);
+    spCt = zeros(length(lookupTable.allSuperPixelIDs),1);
+    allLineData = hLowLevelDataFile.getLineData(lineIndices, cycleIndices);
+    for t = 1:length(allLineData)
+        superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineIndices(t)};
+
+        if size(superPixIdxs,1) == 0; continue; end
+
+        lineData = allLineData{t};
+        zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t));
+
+        spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
+        [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs);
+
+        data(spIdx(spIdx>0),:) = data(spIdx(spIdx>0),:) + single(lineData(spIdx>0,:));
+        spCt(spIdx(spIdx>0)) = spCt(spIdx(spIdx>0)) + 1;
     end
     data = data ./ 100; %./ spSampleCt;
+    data(spCt == 0,:) = nan;
 
     % calculate log likelihoods at all shifts
-    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix},log_means,ySearch,xSearch,zSearch,robust);
+    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix},log_means,ySearch,xSearch,zSearch,channels,robust);
 
     [LL, I] = max(logLikelihoodTable(:));
 
@@ -285,20 +303,20 @@ for cycleIdx = 1:numCycles
         ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
         dZ = (1-ratioZ)/(1+ratioZ)/2;
 
-        dsMotion(cycleIdx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ];
+        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ];
     
         % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
     else %the optimum is at an edge of search range; no superresolution
-        dsMotion(cycleIdx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
+        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
     end
 
-    dsBrightness(cycleIdx) = scalingFactorTable(My, Mx, Mz);
-    dataMatrix(:,cycleIdx) = data;
-    expectedMatrix(:,cycleIdx) = dsBrightness(cycleIdx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
+    brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
+    dataMatrix(:,DSframeIx) = data;
+    expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
 
-    ySearch = max(1,round(dsMotion(cycleIdx,1)) - searchRadius):min(xMotRange,round(dsMotion(cycleIdx,1)) + searchRadius);
-    xSearch = max(1,round(dsMotion(cycleIdx,2)) - searchRadius):min(yMotRange,round(dsMotion(cycleIdx,2)) + searchRadius);
-    zSearch = max(1,round(dsMotion(cycleIdx,3)) - searchRadius):min(zMotRange,round(dsMotion(cycleIdx,3)) + searchRadius);
+    ySearch = max(1,round(motionDS(DSframeIx,1)) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)) + searchRadius);
+    xSearch = max(1,round(motionDS(DSframeIx,2)) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)) + searchRadius);
+    zSearch = max(1,round(motionDS(DSframeIx,3)) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)) + searchRadius);
 end
 
 disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
@@ -307,10 +325,10 @@ disp(['done - took ' num2str(toc/numCycles) ' sec per frame'])
 frames = 1:totalCycles;
 dsFrames = frames(1:2^ds:(2^ds*numCycles));
 
-motion = interp1(dsFrames,dsMotion,frames,'linear','extrap');
+motion = interp1(dsFrames,motionDS,frames,'linear','extrap');
 motion = motion - [yPre+1 xPre+1 zPre+1];
 
-brightness = interp1(dsFrames,dsBrightness,frames,'linear','extrap');
+brightness = interp1(dsFrames,brightnessDS,frames,'linear','extrap');
 
 %% Plot results
 
