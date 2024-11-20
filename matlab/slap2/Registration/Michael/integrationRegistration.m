@@ -62,7 +62,7 @@ if ~exist([dr filesep lookupFile])
     
         % get list of superpixels and extract data
     
-        allSuperPixelIDs = [];
+        allSuperPixelIDs{DMDix} = [];
     
         fastZ2RefZ = zeros(numFastZs,1);
         for z = 1:numFastZs
@@ -81,13 +81,13 @@ if ~exist([dr filesep lookupFile])
             superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
     
             spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
-            allSuperPixelIDs = [allSuperPixelIDs; spIDs]; % make list of unique superpixels across all Zs
+            allSuperPixelIDs{DMDix} = [allSuperPixelIDs{DMDix}; spIDs]; % make list of unique superpixels across all Zs
         end
     
-        [allSuperPixelIDs, ~, ic] = unique(allSuperPixelIDs);
+        [allSuperPixelIDs{DMDix}, ~, ic] = unique(allSuperPixelIDs{DMDix});
         spSampleCt = accumarray(ic, 1);
     
-        fprintf("%d superpixels detected\n", length(allSuperPixelIDs));
+        fprintf("%d superpixels detected\n", length(allSuperPixelIDs{DMDix}));
     
         % make sparse matrix with each superpixel's corresponding mask (roiMasks)
     
@@ -95,13 +95,13 @@ if ~exist([dr filesep lookupFile])
         tic;
     
         % using sparse matrix
-        sparseMaskInds = [];
+        sparseMaskInds{DMDix} = [];
         allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
     
-        for i = 1:length(allSuperPixelIDs)
+        for i = 1:length(allSuperPixelIDs{DMDix})
             tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
     
-            sp = allSuperPixelIDs(i);
+            sp = allSuperPixelIDs{DMDix}(i);
             zIdx = rem(sp,100);
             superPixIdx = (sp - zIdx) / 100;
             pixelReplacementMap = allPixelReplacementMaps{zIdx};
@@ -116,11 +116,11 @@ if ~exist([dr filesep lookupFile])
             openC = open - (openR-1) * dmdPixelsPerRow;
             openPixs = uint32(openR + (openC-1) * dmdPixelsPerColumn + double(zIdx-1) * dmdPixelsPerColumn * dmdPixelsPerRow);
     
-            sparseMaskInds = [sparseMaskInds; openPixs, ones(size(openPixs))*i];
+            sparseMaskInds{DMDix} = [sparseMaskInds{DMDix}; openPixs, ones(size(openPixs))*i];
         end
         clear('tmpMask');
     
-        roiMasks = sparse(sparseMaskInds(:,1),sparseMaskInds(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs));
+        roiMasks = sparse(sparseMaskInds{DMDix}(:,1),sparseMaskInds{DMDix}(:,2),1,dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs,length(allSuperPixelIDs{DMDix}));
         fprintf('done - took %f sec\n', toc);
     
         % make sure refStack is larger than imaged frame
@@ -147,11 +147,12 @@ if ~exist([dr filesep lookupFile])
         yPre = params.maxshiftXY; yPost = params.maxshiftXY;
         zPre = params.maxshiftZ; zPost = params.maxshiftZ;
         
-        likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
-        % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs)]),[size(likelihood_means{DMDix},1:4) 1]);
+        likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
+        % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs{DMDix})]),[size(likelihood_means{DMDix},1:4) 1]);
     end
     lookupTable.likelihood_means = likelihood_means;
     lookupTable.allSuperPixelIDs = allSuperPixelIDs;
+    lookupTable.sparseMaskInds = sparseMaskInds;
     lookupTable.xPre = xPre;
     lookupTable.xPost = xPost;
     lookupTable.yPre = yPre;
@@ -240,11 +241,11 @@ motionDS = nan(nDSframes,3);
 brightnessDS = nan(nDSframes,1);
 loglikelihoodDS = nan(nDSframes,1);
 
-% dataMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
-% expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs),nDSframes);
+% dataMatrix = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),nDSframes);
+% expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),nDSframes);
 
-fprintf("Inferring motion... ")
-tic
+pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
+fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
     
 xMotRange = lookupTable.xPre + lookupTable.xPost + 1;
 yMotRange = lookupTable.yPre + lookupTable.yPost + 1;
@@ -254,6 +255,22 @@ ySearch = 1:yMotRange;
 xSearch = 1:xMotRange;
 zSearch = 1:zMotRange;
 
+% Get unique superpixel IDs and their group memberships
+[~, ~, groupIndices] = unique(lookupTable.sparseMaskInds{DMD_ix}(:, 2));
+
+% Group the pixel indices by superpixel
+splitPixels = accumarray(groupIndices, lookupTable.sparseMaskInds{DMD_ix}(:, 1), [], @(x) {x});
+
+% Compute the median pixel index for each superpixel
+medianIndices = cellfun(@(x) x(round(length(x)/2)), splitPixels);
+
+% Convert linear indices to row and column coordinates
+[spRows, spCols] = ind2sub([dmdPixelsPerColumn, dmdPixelsPerRow], medianIndices);
+
+registrationFailed = false;
+fprintf("Inferring motion... ")
+tic
+% try
 for DSframeIx = 1:nDSframes
     if DSframeIx == nDSframes
         timeWindow = DSframes(DSframeIx):lastLine;
@@ -269,8 +286,8 @@ for DSframeIx = 1:nDSframes
     cycleIndices = floor((timeWindow-1) / numLinesPerCycle)+1;
 
     % load data
-    data = zeros(length(lookupTable.allSuperPixelIDs),numChannels);
-    spCt = zeros(length(lookupTable.allSuperPixelIDs),1);
+    data = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),numChannels);
+    spCt = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),1);
     allLineData = hLowLevelDataFile.getLineData(lineIndices, cycleIndices);
     for t = 1:length(allLineData)
         superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineIndices(t)};
@@ -281,7 +298,7 @@ for DSframeIx = 1:nDSframes
         zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t));
 
         spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
-        [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs);
+        [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs{DMD_ix});
 
         data(spIdx(spIdx>0),:) = data(spIdx(spIdx>0),:) + single(lineData(spIdx>0,:));
         spCt(spIdx(spIdx>0)) = spCt(spIdx(spIdx>0)) + 1;
@@ -289,11 +306,11 @@ for DSframeIx = 1:nDSframes
     data = data ./ 100; %./ spSampleCt;
     data(spCt == 0,:) = nan;
 
-    if mean(spCt == 0) > 0.5; break; end
+    if mean(spCt == 0) > 0.5; continue; end
 
     % calculate log likelihoods at all shifts
     [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix} ...
-                                                                                .* repmat(reshape(spCt,[1 1 1 1 length(lookupTable.allSuperPixelIDs)]),[size(lookupTable.likelihood_means{DMD_ix},1:4) 1]), ...
+                                                                                .* repmat(reshape(spCt,[1 1 1 1 length(lookupTable.allSuperPixelIDs{DMD_ix})]),[size(lookupTable.likelihood_means{DMD_ix},1:4) 1]), ...
                                                                         log_means,ySearch,xSearch,zSearch,channels,params.robust);
 
     [loglikelihoodDS(DSframeIx), I] = max(logLikelihoodTable(:));
@@ -311,71 +328,74 @@ for DSframeIx = 1:nDSframes
         ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
         dZ = (1-ratioZ)/(1+ratioZ)/2;
 
-        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [yPre+1 xPre+1 zPre+1];
+        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre+1];
     
         % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
     else %the optimum is at an edge of search range; no superresolution
-        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1 lookupTable.xPre+1 lookupTable.zPre+1];
+        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre+1];
     end
 
     brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
     % dataMatrix(:,DSframeIx) = data;
     % expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
+    
+    A1 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+    for cIdx = unique(spCols)'
+        spIdxs = find(spCols == cIdx);
+        % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
+        % rowSpacings = diff(queriedRows);
+        A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
+    end
+    fTIF.WriteIMG(single(A1));
+    if numChannels==2
+        A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+        for cIdx = unique(spCols)'
+            spIdxs = find(spCols == cIdx);
+            % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
+            % rowSpacings = diff(queriedRows);
+            A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+        end
+        fTIF.WriteIMG(single(A2));
+    end
+    
+    ySearch = max(1,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) + searchRadius);
+    xSearch = max(1,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) + searchRadius);
+    zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) + searchRadius);
+end
+% catch ME
+%     disp(ME);
+%     registrationFailed = true;
+% end
 
-    ySearch = max(1,round(motionDS(DSframeIx,1)) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)) + searchRadius);
-    xSearch = max(1,round(motionDS(DSframeIx,2)) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)) + searchRadius);
-    zSearch = max(1,round(motionDS(DSframeIx,3)) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)) + searchRadius);
+fTIF.close;
+
+
+if registrationFailed
+    disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
+    return
 end
 
 disp(['done - took ' num2str(toc) ' sec'])
 
 %% Upsample if downsampled
-dsFrames = (DSframes + [DSframes(2:end) lastLine])/2;
-
-motion = interp1(dsFrames,motionDS,firstLine:lastLine,'linear','extrap');
-
-brightness = interp1(dsFrames,brightnessDS,frames,'linear','extrap');
-
-%% Plot results
-
-figure(401); clf;
-ax1 = subplot(3,1,1);
-plot(motion(:,1)); hold on;
-title('y motion')
-legend('inferred','true','Location','best')
-
-ax2 = subplot(3,1,2);
-plot(motion(:,2)); hold on;
-title('x motion')
-legend('inferred','true','Location','best')
-
-ax3 = subplot(3,1,3);
-plot(motion(:,3)); hold on;
-title('z motion')
-legend('inferred','true','Location','best')
-
-linkaxes([ax1,ax2])
-linkaxes([ax1,ax2,ax3],'x')
-
-[filepath, ~, ~] = fileparts(dataFile);
-filepath = convertStringsToChars(filepath);
-
-saveas(gcf,[filepath '\inferredMotion.fig']);
+% motion = interp1(dsFrames,motionDS,firstLine:lastLine,'linear','extrap');
+% 
+% brightness = interp1(dsFrames,brightnessDS,frames,'linear','extrap');
 
 %% Save out data
 
-inferMotionOut.motion = motion;
-inferMotionOut.brightness = brightness';
-inferMotionOut.dataMatrix = dataMatrix;
-inferMotionOut.expectedMatrix = expectedMatrix;
-inferMotionOut.sparseMaskInds = sparseMaskInds;
-inferMotionOut.fastZ2RefZ = fastZ2RefZ;
+aData.numChannels = numChannels;
+aData.frametime = 1/aData.alignHz;
+aData.DSframes = (DSframes + [DSframes(2:end) lastLine])/2;
+aData.motionDSc = motionDS(:,2);
+aData.motionDSr = motionDS(:,1);
+aData.motionDSz = motionDS(:,3);
+aData.logLikelihood = loglikelihoodDS;
 
-if robust
-    save([fname(1:end-5) sprintf('_INFER_MOTION_OUTPUT_ROBUST_DS_%dx.mat',2^ds)],'inferMotionOut','-v7.3');
-else
-    save([fname(1:end-5) sprintf('_INFER_MOTION_OUTPUT_DS_%dx.mat',2^ds)],'inferMotionOut','-v7.3');
-end
+disp('Getting online motion correction offsets')
+[aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(hLowLevelDataFile, DSframes);
+
+save(fnAdata, 'aData');
 end
 
 function meta = loadMetadata(datFilename)
