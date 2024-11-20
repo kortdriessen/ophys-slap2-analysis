@@ -289,7 +289,7 @@ for DSframeIx = 1:nDSframes
     data = data ./ 100; %./ spSampleCt;
     data(spCt == 0,:) = nan;
 
-    if mean(spCt == 0) > 0.5; return; end
+    if mean(spCt == 0) > 0.5; break; end
 
     % calculate log likelihoods at all shifts
     [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix} ...
@@ -311,11 +311,11 @@ for DSframeIx = 1:nDSframes
         ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
         dZ = (1-ratioZ)/(1+ratioZ)/2;
 
-        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ];
+        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [yPre+1 xPre+1 zPre+1];
     
         % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
     else %the optimum is at an edge of search range; no superresolution
-        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)];
+        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1 lookupTable.xPre+1 lookupTable.zPre+1];
     end
 
     brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
@@ -330,11 +330,9 @@ end
 disp(['done - took ' num2str(toc) ' sec'])
 
 %% Upsample if downsampled
-frames = 1:totalCycles;
-dsFrames = frames(1:2^ds:(2^ds*numCycles));
+dsFrames = (DSframes + [DSframes(2:end) lastLine])/2;
 
-motion = interp1(dsFrames,motionDS,frames,'linear','extrap');
-motion = motion - [yPre+1 xPre+1 zPre+1];
+motion = interp1(dsFrames,motionDS,firstLine:lastLine,'linear','extrap');
 
 brightness = interp1(dsFrames,brightnessDS,frames,'linear','extrap');
 
