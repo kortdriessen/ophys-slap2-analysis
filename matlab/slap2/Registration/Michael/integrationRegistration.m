@@ -24,14 +24,14 @@ else
     poolsize = p.NumWorkers;
 end
 nWorkers = 24;
-% if poolsize~=nWorkers
-%     delete(gcp('nocreate'));
-%     if nWorkers<15
-%         warning('You are using few parallel workers! adjust this in summarizeBCI.m');
-%     end
-%     disp(['Parallel workers:' int2str(nWorkers)])
-%     parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
-% end
+if poolsize~=nWorkers
+    delete(gcp('nocreate'));
+    if nWorkers<15
+        warning('You are using few parallel workers! adjust this in summarizeBCI.m');
+    end
+    disp(['Parallel workers:' int2str(nWorkers)])
+    parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+end
 
 %% make look up table for each DMD
 
@@ -173,8 +173,7 @@ end
 [dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
 fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
 fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
-% parfor p_ix = 1:numel(fixs)
-for p_ix = 3:numel(fixs)
+parfor p_ix = 1:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
     [fnRegDS{p_ix}, fnAdata{p_ix}]= alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix);
 end
@@ -278,7 +277,7 @@ for DSframeIx = 1:nDSframes
         timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
     end
 
-    if ~mod(DSframeIx, 10)
+    if ~mod(DSframeIx, 1000)
         disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
     end
 
