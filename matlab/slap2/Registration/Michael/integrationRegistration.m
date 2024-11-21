@@ -404,7 +404,8 @@ aData.DSframes = (DSframes + [DSframes(2:end) lastLine])/2;
 aData.motionDSc = motionDS(:,2);
 aData.motionDSr = motionDS(:,1);
 aData.motionDSz = motionDS(:,3);
-aData.logLikelihood = loglikelihoodDS;
+aData.brightnessDS = brightnessDS;
+aData.logLikelihoodDS = loglikelihoodDS;
 
 disp('Getting online motion correction offsets')
 [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(hLowLevelDataFile, DSframes);
