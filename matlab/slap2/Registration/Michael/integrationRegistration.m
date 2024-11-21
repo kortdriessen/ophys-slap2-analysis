@@ -23,7 +23,7 @@ if isempty(p)
 else
     poolsize = p.NumWorkers;
 end
-nWorkers = min(params.nWorkers, numel(trialTable.filename));;
+nWorkers = min(params.nWorkers, numel(trialTable.filename));
 if poolsize~=nWorkers
     delete(gcp('nocreate'));
     if nWorkers<15
@@ -267,9 +267,9 @@ medianIndices = cellfun(@(x) x(round(length(x)/2)), splitPixels);
 [spRows, spCols] = ind2sub([dmdPixelsPerColumn, dmdPixelsPerRow], medianIndices);
 
 registrationFailed = false;
-fprintf("Inferring motion... ")
+fprintf("Inferring motion...\n")
 tic
-% try
+try
 for DSframeIx = 1:nDSframes
     if DSframeIx == nDSframes
         timeWindow = DSframes(DSframeIx):lastLine;
@@ -370,10 +370,10 @@ for DSframeIx = 1:nDSframes
     xSearch = max(1,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) + searchRadius);
     zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) + searchRadius);
 end
-% catch ME
-%     disp(ME);
-%     registrationFailed = true;
-% end
+catch ME
+    disp(ME);
+    registrationFailed = true;
+end
 
 fTIF.close;
 
@@ -383,7 +383,7 @@ if registrationFailed
     return
 end
 
-disp(['done - took ' num2str(toc) ' sec'])
+disp(['aligning done - took ' num2str(toc) ' sec'])
 
 %% Upsample if downsampled
 % motion = interp1(dsFrames,motionDS,firstLine:lastLine,'linear','extrap');
