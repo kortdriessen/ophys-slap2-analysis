@@ -221,6 +221,12 @@ if dt < numLinesPerCycle
 end
 
 fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
+if params.efficientTiffSave
+    fnwriteTmp = [params.tempFileDir filesep int2str(round(rand(1)*10000)) '.tif'];
+else
+    fnwriteTmp = fnwrite;
+end
+
 fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
 
 if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
@@ -250,7 +256,7 @@ loglikelihoodDS = nan(nDSframes,1);
 % expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),nDSframes);
 
 pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
-fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+fTIF = Fast_BigTiff_Write(fnwriteTmp,pixelscale,0);
     
 xMotRange = lookupTable.xPre + lookupTable.xPost + 1;
 yMotRange = lookupTable.yPre + lookupTable.yPost + 1;
@@ -411,6 +417,12 @@ disp('Getting online motion correction offsets')
 [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(hLowLevelDataFile, DSframes);
 
 save(fnAdata, 'aData');
+
+if params.efficientTiffSave
+    copyfile(fnwriteTmp,fnwrite);
+    delete(fnwriteTmp);
+end
+
 end
 
 function meta = loadMetadata(datFilename)
