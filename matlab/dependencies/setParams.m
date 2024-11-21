@@ -60,7 +60,7 @@ switch fnName
         params.maxshiftZ = 10; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.clipShift = 5; tooltips.clipShift = 'Maximum allowable shift per frame';
         params.robust = false; tooltips.robust = 'Use robust likelihood';
-        params.alpha = 0.005; tooltips.alpha = 'exponential decay of template per frame';%exponential time constant for template
+        % params.alpha = 0.005; tooltips.alpha = 'exponential decay of template per frame';%exponential time constant for template
         params.nWorkers = 16; tooltips.nWorkers = 'number of parallel workers';
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
     case 'stripRegBergamo'

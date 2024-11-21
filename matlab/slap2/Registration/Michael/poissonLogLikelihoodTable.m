@@ -24,8 +24,11 @@ scaled_log_means = log(scalingFactorTable) + sub_log_means;
 if robust
     logLikelihoodTable = sum(max(-b, min(b,(reshape(data(validSPs,:)',[1,1,1,length(channels),sum(validSPs)]) - scaled_likelihood_means) ./ sqrt(scaled_likelihood_means))).^2,[4 5],"omitnan");
     logLikelihoodTable = -abs(logLikelihoodTable(:));
+    logLikelihoodTable(mean(isnan(scaled_likelihood_means),[4 5]) == 1) = nan;
+
 else
     logLikelihoodTable = sum(reshape(data',[1,1,1,size(data')]) .* scaled_log_means - scaled_likelihood_means,[4 5],"omitnan");
+    logLikelihoodTable(mean(isnan(scaled_likelihood_means),[4 5]) == 1) = nan;
 end
 
 % prevent Inf from being the max log likelihood
