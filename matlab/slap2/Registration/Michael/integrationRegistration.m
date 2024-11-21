@@ -23,7 +23,7 @@ if isempty(p)
 else
     poolsize = p.NumWorkers;
 end
-nWorkers = 24;
+nWorkers = min(params.nWorkers, numel(trialTable.filename));;
 if poolsize~=nWorkers
     delete(gcp('nocreate'));
     if nWorkers<15
@@ -343,7 +343,12 @@ for DSframeIx = 1:nDSframes
         spIdxs = find(spCols == cIdx);
         % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
         % rowSpacings = diff(queriedRows);
-        A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
+        
+        if numel(spIdxs) > 1
+            A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
+        else
+            continue;
+        end
     end
     fTIF.WriteIMG(single(A1));
     if numChannels==2
@@ -352,7 +357,11 @@ for DSframeIx = 1:nDSframes
             spIdxs = find(spCols == cIdx);
             % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
             % rowSpacings = diff(queriedRows);
-            A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+            if numel(spIdxs) > 1
+                A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+            else
+                continue;
+            end
         end
         fTIF.WriteIMG(single(A2));
     end
