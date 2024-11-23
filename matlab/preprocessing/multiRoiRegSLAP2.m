@@ -125,7 +125,15 @@ disp(['Aligning: ' [dr filesep fn]])
         template(:,:,fix) = interp2(1:sz(2), 1:sz(1), Y(:,:,frameInds(fix)),viewC-motion(2,frameInds(fix), maxind), viewR-motion(1,frameInds(fix), maxind), 'linear', nan);
     end
     template = mean(template, 3); 
-    T0 = template;
+    
+    fullTemplate = nan(size(trialTable.refStack{1}.IM,[2 1]));
+    fullTemplate((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift)) = template;
+
+    templateShifts = xcorr2_nans(fullTemplate,mean(trialTable.refStack{1}.IM(:,:,[21 22]),3)',[0;0],aData.maxshift);
+    T0 = imtranslate(mean(trialTable.refStack{1}.IM(:,:,[21 22]),3)',templateShifts(2:-1:1));
+    T0 = T0((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift));
+
+    % T0 = template;
     clear Y Yhp;
 
     initR = 0; initC = 0;
@@ -165,8 +173,10 @@ disp(['Aligning: ' [dr filesep fn]])
             disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
         end
 
-        Ttmp = mean(cat(3, T0,template),3, 'omitnan');
-        T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
+        % Ttmp = mean(cat(3, T0,template),3, 'omitnan');
+        % T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
+
+        T = T0(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
         
         [motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
         motionDSr(DSframeIx) = initR+motOutput(1);
@@ -226,9 +236,9 @@ disp(['Aligning: ' [dr filesep fn]])
         recNegErr(1,t_ixs) = sqrt(squeeze(mean((max(0, (template-A_ds(:,:,t_ixs))./template_gamma).^2), [1 2], 'omitnan')./mean(max(0,(template./template_gamma).^2, 'includenan'), [1 2], 'omitnan')));
     end
 
-    if std(motionDSc)>1.5 || std(motionDSr)>1.5
-        registrationFailed = true;
-    end
+    % if std(motionDSc)>1.5 || std(motionDSr)>1.5
+    %     registrationFailed = true;
+    % end
     if registrationFailed
         disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
         return
