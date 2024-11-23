@@ -126,11 +126,11 @@ disp(['Aligning: ' [dr filesep fn]])
     end
     template = mean(template, 3); 
     
-    fullTemplate = nan(size(trialTable.refStack{1}.IM,[2 1]));
+    fullTemplate = nan(size(trialTable.refStack{DMD_ix}.IM,[2 1]));
     fullTemplate((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift)) = template;
 
-    templateShifts = xcorr2_nans(fullTemplate,mean(trialTable.refStack{1}.IM(:,:,[21 22]),3)',[0;0],aData.maxshift);
-    T0 = imtranslate(mean(trialTable.refStack{1}.IM(:,:,[21 22]),3)',templateShifts(2:-1:1));
+    templateShifts = xcorr2_nans(fullTemplate,mean(trialTable.refStack{DMD_ix}.IM(:,:,[21 22]),3)',[0;0],aData.maxshift);
+    T0 = imtranslate(mean(trialTable.refStack{DMD_ix}.IM(:,:,[21 22]),3)',templateShifts(2:-1:1));
     T0 = T0((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift));
 
     % T0 = template;
