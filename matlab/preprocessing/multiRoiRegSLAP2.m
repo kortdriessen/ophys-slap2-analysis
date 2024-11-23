@@ -85,7 +85,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     %%%%%Make an initial template
     %crosscorrelate each initial frame to each other
-    disp('generating template')
+    disp('generating template, which is from ref stack')
     initFrames = ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
     nInitFrames = length(initFrames);
 
