@@ -402,7 +402,7 @@ disp(['aligning done - took ' num2str(toc) ' sec'])
 
 aData.numChannels = numChannels;
 aData.frametime = 1/aData.alignHz;
-aData.DSframes = (DSframes + [DSframes(2:end) lastLine])/2;
+aData.DSframes = DSframes;
 aData.motionDSc = motionDS(:,2);
 aData.motionDSr = motionDS(:,1);
 aData.motionDSz = motionDS(:,3);
