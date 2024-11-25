@@ -152,6 +152,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     motionDSr = nan(1,nDSframes); 
     motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
+    motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
     aErrorDS = ones(1,nDSframes); %alignment error output by dftregistration
     %aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
     %recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
@@ -178,21 +179,16 @@ disp(['Aligning: ' [dr filesep fn]])
             disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
         end
         
-        for z_ix = 1:size(refStack,3)
-            % Ttmp = mean(cat(3, T0,template),3, 'omitnan');
-            % T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
-    
-            T = T0(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)),z_ix);
-            
-            [motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
-            
-            if 1-corrCoeff^2 < aErrorDS(DSframeIx)
-                motionDSr(DSframeIx) = initR+motOutput(1);
-                motionDSc(DSframeIx) = initC+motOutput(2);
-                motionDSz(DSframeIx) = z_ix;
-                aErrorDS(DSframeIx) = 1-corrCoeff^2;
-            end
-        end
+        % Ttmp = mean(cat(3, T0,template),3, 'omitnan');
+        % T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
+
+        T = T0(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)),:);
+        [motOutput, corrCoeff] = xcorr2_nans3d(M, T, [0 ; 0], aData.clipShift);
+        
+        motionDSr(DSframeIx) = initR+motOutput(1);
+        motionDSc(DSframeIx) = initC+motOutput(2);
+        motionDSz(DSframeIx) = motOutput(3);
+        aErrorDS(DSframeIx) = 1-corrCoeff^2;
 
         A1 = interp2(1:sz(2), 1:sz(1), M1,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
         fTIF.WriteIMG(single(A1));
