@@ -283,11 +283,7 @@ fprintf("Inferring motion...\n")
 tic
 try
 for DSframeIx = 1:nDSframes
-    if DSframeIx == nDSframes
-        timeWindow = DSframes(DSframeIx):lastLine;
-    else
-        timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
-    end
+    timeWindow = max(1,DSframes(DSframeIx)-dt):min(DSframes(DSframeIx)+dt,lastLine);
 
     if ~mod(DSframeIx, 1000)
         disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
