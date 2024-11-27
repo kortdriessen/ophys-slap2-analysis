@@ -3,6 +3,8 @@ function [motion, R] = xcorr2_nans3d(frame, template3d, shiftsCenter, dShift)
 %perform a somewhat-efficient local normalized crosscorrelation for images with
 %nans
 
+%Adapted to use 3D template, Michael Xie 2024
+
 %template: the template
 %frame: the frame to be aligned; this has more NaNs
 

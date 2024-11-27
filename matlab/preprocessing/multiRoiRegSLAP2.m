@@ -159,7 +159,7 @@ disp(['Aligning: ' [dr filesep fn]])
     if params.refStackTemplate
         motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
     end
-    aErrorDS = ones(1,nDSframes); %alignment error output by dftregistration
+    aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
     %aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
     %recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
 
