@@ -283,11 +283,7 @@ fprintf("Inferring motion...\n")
 tic
 try
 for DSframeIx = 1:nDSframes
-    if DSframeIx == nDSframes
-        timeWindow = DSframes(DSframeIx):lastLine;
-    else
-        timeWindow = DSframes(DSframeIx):(DSframes(DSframeIx+1)-1);
-    end
+    timeWindow = max(1,floor(DSframes(DSframeIx)-2*dt)):min(ceil(DSframes(DSframeIx)+2*dt),lastLine);
 
     if ~mod(DSframeIx, 1000)
         disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
@@ -406,7 +402,7 @@ disp(['aligning done - took ' num2str(toc) ' sec'])
 
 aData.numChannels = numChannels;
 aData.frametime = 1/aData.alignHz;
-aData.DSframes = (DSframes + [DSframes(2:end) lastLine])/2;
+aData.DSframes = DSframes;
 aData.motionDSc = motionDS(:,2);
 aData.motionDSr = motionDS(:,1);
 aData.motionDSz = motionDS(:,3);
