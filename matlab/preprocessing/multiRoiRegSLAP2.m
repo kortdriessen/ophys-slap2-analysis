@@ -85,7 +85,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     %%%%%Make an initial template
     %crosscorrelate each initial frame to each other
-    disp('generating template, which is from ref stack')
+    disp('generating template')
     initFrames = ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
     nInitFrames = length(initFrames);
 
@@ -138,6 +138,7 @@ disp(['Aligning: ' [dr filesep fn]])
         templateShifts = xcorr2_nans(fullTemplate,refStack(:,:,floor(end/2)+1)',[0;0],aData.maxshift);
         T0 = imtranslate(permute(refStack,[2 1 3]),[templateShifts(2:-1:1),0]);
         T0 = T0((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift),:);
+        disp('template generated from reference stack')
     else
         T0 = template;
     end
