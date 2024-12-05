@@ -25,6 +25,8 @@ from slap2_utils.utils.trace import Trace, TracePixel
 
 sys.path.append('C:\\Users\\michael.xie\\Documents\\ophys-slap2-analysis\\python')
 import reconstruct
+
+sys.path.append('C:\\Users\\michael.xie\\Documents\\ophys-slap2-analysis\\python\\slap2analysis')
 import deconvlucy
 
 # load SLAP2 data folder
@@ -114,7 +116,8 @@ params = {}
 params['discardInitial_s'] = 0.1
 params['numChannels'] = aData['numChannels'][0,0]
 params['alignHz'] = aData['alignHz'][0,0]
-params['analyzeHz'] = 1/aData['frametime'][0,0]  # analyze conventional recordings at acquisition framerate
+params['analyzeHz'] = 1/aData['frametime'][0,0]
+params['activityChannel'] = 1
 
 # Get the lookup file path
 lookupFile = trialTable['lookupFile'][0]
@@ -141,13 +144,13 @@ with h5py.File(lookupFile, 'r') as f:
     
     # allSuperPixelIDs
     allSuperPixelIDs_refs = lt['allSuperPixelIDs'][:].flat
-    allSuperPixelIDs = {'DMD1': refs[allSuperPixelIDs_refs[0]][:].T,
-                        'DMD2': refs[allSuperPixelIDs_refs[1]][:].T}
+    allSuperPixelIDs = {'DMD1': refs[allSuperPixelIDs_refs[0]][:].T.astype(np.int32),
+                        'DMD2': refs[allSuperPixelIDs_refs[1]][:].T.astype(np.int32)}
     
     # sparseMaskInds
     sparseMaskInds_refs = lt['sparseMaskInds'][:].flat
-    sparseMaskInds = {'DMD1': refs[sparseMaskInds_refs[0]][:].T,
-                      'DMD2': refs[sparseMaskInds_refs[1]][:].T}
+    sparseMaskInds = {'DMD1': refs[sparseMaskInds_refs[0]][:].T.astype(np.int32),
+                      'DMD2': refs[sparseMaskInds_refs[1]][:].T.astype(np.int32)}
 
 del sparseMaskInds_refs, allSuperPixelIDs_refs
 
@@ -248,9 +251,9 @@ del psf_combined
 for DMDix in range(nDMDs-1, -1, -1):
     print(f'Processing DMD{DMDix+1}')
 
-    dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[1]
-    dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[2]
-    numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[0]
+    dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
+    dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
+    numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[1]
     numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
 
     nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
@@ -301,7 +304,7 @@ for DMDix in range(nDMDs-1, -1, -1):
             aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
 
             numCycles = aData['motionDSr'].shape[0]
-            uniqueMotion, motInds = np.unique(np.round(np.concatenate((aData['motionDSr'],aData['motionDSc'],aData['motionDSz']),axis=1)),axis=0,return_inverse=True)
+            uniqueMotion, motInds = np.unique(np.round(np.concatenate((aData['motionDSr'],aData['motionDSc'],aData['motionDSz']+11),axis=1)),axis=0,return_inverse=True)
 
             Afinal = torch.empty((nPixels,0))
             phiFinal = torch.empty((numCycles,0))
@@ -313,3 +316,68 @@ for DMDix in range(nDMDs-1, -1, -1):
             endTime = time.time()
 
             print(f"Elapsed Time: {endTime - startTime} sec")
+
+            plt.imshow(baseline)
+            plt.colorbar()
+            plt.show()
+
+            hDataFile = DataFile(os.path.join(dr, source_fn))
+
+            dt = 1/params['alignHz']/hDataFile.metaData.linePeriod_s
+
+            source_fn = trialTable['filename'][DMDix,trialIx][0]
+            firstLine = trialTable['firstLine'][DMDix,trialIx]
+            lastLine = trialTable['lastLine'][DMDix,trialIx]
+
+            DSframes = aData['DSframes'][0]
+            nDSframes= len(DSframes)
+
+            data = np.zeros((numSuperPixels,nDSframes))
+            dataCt = np.zeros((numSuperPixels,nDSframes))
+            
+            # Pre-compute time windows for all frames
+            timeWindows = [np.arange(max(1,np.floor(DSframes[i]-2*dt)), 
+                                   min(np.ceil(DSframes[i]+2*dt),hDataFile.numCycles*hDataFile.header['linesPerCycle'])+1) 
+                          for i in range(nDSframes)]
+            
+            # Pre-compute line and cycle indices for all time windows
+            lineIndices_all = [(tw - 1) % hDataFile.header['linesPerCycle'] + 1 for tw in timeWindows]
+            cycleIndices_all = [np.floor((tw - 1) / hDataFile.header['linesPerCycle']) + 1 for tw in timeWindows]
+            
+            # Initialize timing variables
+            start_time = time.time()
+            
+            for DSframeIx in range(nDSframes):
+                if DSframeIx % 10 == 0:
+                    avg_time = (time.time() - start_time) / DSframeIx if DSframeIx > 0 else 0
+                    print(f"{DSframeIx} of {nDSframes}, Average time per frame: {avg_time:.3f} sec")
+                    
+                lineIndices = lineIndices_all[DSframeIx]
+                cycleIndices = cycleIndices_all[DSframeIx]
+                
+                allLineData = hDataFile.getLineData(lineIndices, cycleIndices, params['activityChannel'])
+                
+                # Vectorize line processing
+                valid_lines = np.where([hDataFile.lineDataNumElements[int(li)-1] != 0 for li in lineIndices])[0]
+                
+                for lineIdx in valid_lines:
+                    positions = hDataFile.lineSuperPixelIDs[int(lineIndices[lineIdx])-1][0]
+                    zIdx = hDataFile.lineFastZIdxs[int(lineIndices[lineIdx])-1]
+                    
+                    # Compute lookup values and matches in one go
+                    lookup_values = positions * 100 + zIdx
+                    matching_mask = np.isin(allSuperPixelIDs[f'DMD{DMDix+1}'], lookup_values)
+                    matching_indices = np.where(matching_mask)[0]
+                    
+                    if len(matching_indices) > 0:
+                        # Create a mapping from lookup values to their indices
+                        value_to_pos = dict(zip(lookup_values.astype(np.uint32), range(len(lookup_values))))
+                        # Get the positions in lineData for each matching index
+                        matched_positions = [value_to_pos[int(allSuperPixelIDs[f'DMD{DMDix+1}'][idx])] for idx in matching_indices]
+                        
+                        data[matching_indices, DSframeIx] += allLineData[lineIdx][matched_positions,0]
+                        dataCt[matching_indices, DSframeIx] += 1
+            
+            # Vectorized division
+            mask = dataCt > 0
+            data[mask] /= dataCt[mask]
