@@ -1,10 +1,21 @@
 
-params.doRegistration = false;
-params.doDenoise = false;
+doRegistration = true;
+if doRegistration
+    aParams.denoise20Hz = true;
+    aParams.overwriteExisting = false;
+    aParams.ds_time = 1;
+    aParams.nWorkers = 1; %disable the parallel pool within stripRegBergamo
+    aParams = setParams('stripRegBergamo', aParams, true);
+end
 
-sParams = setParams('summarizeBergamo_NoLoCo');
+sParams.microscope = "bergamo";
+sParams.drawUserRois = false;
+sParams.nParallelWorkers = 1;
+sParams.nanThresh = 0.5;
+sParams.activityChannel = 2;
+sParams = setParams('summarize_NoLoCo', sParams, true);
+
 dirs = uipickfiles();
-
 dataDirs = {};
 for i = 1:length(dirs)
     dataDirs = [dataDirs, findScanDirsRecursive(dirs{i})];
@@ -13,45 +24,25 @@ end
 %initialize parallel pool with n workers
 %parpool(10);
 
-parfor idx = 1:length(dataDirs)
-    [dFolder, dName] = fileparts(dataDirs{idx});
-    disp(['Running directory ' dName])
-    try
-        % if params.doRegistration
-        %     stripRegistrationBergamo_saveinplace([],fullfile(dFolder,dName,[dName '.tif']));
-        %     %stripRegistrationBergamo([],[],fullfile(dFolder,dName,[dName '.tif']));
-        % end
-        % 
-        % if params.doDenoise
-        %     % tmp = dir(fullfile(dFolder,dName,[dName '_REGISTERED_RAW*']));
-        %     % registeredRawFile = tmp.name;
-        %     % denoise20Hz(fullfile(dFolder,dName),registeredRawFile);
-        %             % tmp = dir(fullfile(dFolder,dName,[dName '_REGISTERED_RAW*']));
-        %     % registeredRawFile = tmp.name;
-        %  % denoise20Hz(fullfile(dFolder,dName),registeredRawFile);
-        % 
-        %          % if ~exist(fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']),'file')
-        % %     copyfile(fullfile(dFolder,dName,[dName '_ALIGNMENTDATA.mat']),fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']));
-        % % end
-        % end
-        % 
-        %copy locally if no file found
-        % if ~exist(fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat']),'file')
-        %     disp('FLAG 1')
-        %     copyfile(fullfile(dFolder,dName,[dName '_ALIGNMENTDATA.mat']),fullfile(dFolder,dName,[dName '_DENOISED_ALIGNMENTDATA.mat'])); %inputs are alignment and denoised alignment mat files
-        % end
+if doRegistration
+    parfor idx = 1:length(dataDirs)
+        [dFolder, dName] = fileparts(dataDirs{idx});
+        disp(['batch processing directory ' dName])
+        try
+            %built a trial table
+            tmp = dir([dataDirs{idx} filesep '*.tif'])
+            %ignore registered or figure files
 
-        %run processing
-        tmp = dir([dataDirs{idx} filesep '*_DENOISED_REGISTERED_DOWNSAMPLED-2x*.tif']);
-        if isempty(tmp)
-            tmp = dir([dataDirs{idx} filesep '*_REGISTERED_DOWNSAMPLED-2x*.tif']);
-        end
-        downsampledFile = tmp(1).name;
-        summarizeBergamo_NoLoCo(downsampledFile,dataDirs{idx}, sParams);
+            fns = {tmp.name};
+            fns = fns(~contains(fns, 'REGISTERED') & ~contains(fns, 'FIGURE'));
+            stripRegBergamo(dataDirs{idx}, fns, aParams)
+            summarize_NoLoCo(dataDirs{idx}, sParams);
     catch ME
         fprintf("%s: %s\n",dName, ME.message)
+        end
     end
 end
+
 
 %%
 function scanDirs = findAllScanDirs(dirName)
@@ -107,7 +98,7 @@ for idx = 1:length(subDirs)
     scanDirs = [scanDirs, findScanDirsRecursive(subDirPath)];
 end
 
-dd = dir([dirName filesep '*_REGISTERED_DOWNSAMPLED-2x*.tif']);
+dd = dir([dirName filesep 'scan*.tif']);
 containsTifs = ~isempty(dd);
 if containsTifs
      scanDirs = [scanDirs dirName];

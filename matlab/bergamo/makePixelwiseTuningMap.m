@@ -72,6 +72,7 @@ for fix = 1:numel(fns)
     [nRow, nCol, ~] = size(Ad);
 
     Ad = reshape(Ad, size(Ad,1), size(Ad,2), aData.numChannels, []);
+    disp([num2str(size(Ad,4)) ' frames read']);
     IM = reshape(Ad(:,:,end,:),[],size(Ad,4));
     disp([num2str(size(Ad,4)) ' frames read']);
     clear Ad;

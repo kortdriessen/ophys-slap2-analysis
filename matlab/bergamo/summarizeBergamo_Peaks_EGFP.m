@@ -26,7 +26,7 @@ if nargin == 0
     [fns, dr] = uigetfile('*REGISTERED*.tif', 'multiselect', 'on');
 end
 if nargin<3
-    activityChannel = 2;
+    activityChannel = 1;
 end
 
 if ~iscell(fns)
@@ -93,15 +93,9 @@ for trialIx = length(fns):-1:1
     %discard motion frames
     % tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorr,2, 'movmedian', ceil(2/aData.frametime));
     % discardFrames{trialIx} = imdilate(tmp<-(4*std(tmp)), ones(1,5));
-    tmp = aData.recNegErr(:)- median(aData.recNegErr(:)); %smoothExp(aData.recNegErr(:),'movmedian', ceil(2/(aData.frametime*aData.dsFac))); %-smoothdata(aData.aRankCorrDS,2, 'movmedian', ceil(2/aData.frametime));
-    tmp = tmp./(median(aData.recNegErr(:)) - prctile(aData.recNegErr(:),1)); 
-    thresh = 3; %decrease thresh to be more stringent on motion correction
-    window = 2*ceil(0.1/params.frametime)+1;% a window in time to censor aronud motion events, ~0.2 seconds;
-    discardFrames{trialIx} = imclose(imdilate(tmp>thresh, ones(window,1)) | (tmp>(thresh/2) & imdilate(tmp>thresh, ones(2*window+1,1))), ones(window,1));
-
-    % tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(10/(aData.frametime*aData.dsFac)));
-    % filtTmp = smoothExp(tmp, 'movmean',ceil(.2/(aData.frametime*aData.dsFac)));
-    % discardFrames{trialIx} = imdilate(filtTmp<-(4*std(filtTmp)), ones(1,5));
+    tmp = aData.aRankCorr(:)-smoothExp(aData.aRankCorr(:),'movmedian', ceil(10/(aData.frametime*aData.dsFac)));
+    filtTmp = smoothExp(tmp, 'movmean',ceil(.2/(aData.frametime*aData.dsFac)));
+    discardFrames{trialIx} = imdilate(filtTmp<-(4*std(filtTmp)), ones(1,5));
     rawIMs{trialIx} = squeeze(IM(:,:,1,:));
     rawIMs{trialIx}(:,:,discardFrames{trialIx}) = nan;
     
@@ -166,204 +160,204 @@ validTrials= find(cc>corrThresh);
 exptSummary.meanIM = mean(meanAligned,4, 'omitnan');
 exptSummary.actIM = mean(actAligned, 4, 'omitnan');
 
-%cluster localizations
-totalFrames = sum(cellfun(@(x)(size(x,3)), rawIMs));
-params.minEvents = totalFrames*params.frametime*params.dsFac*params.eventRateThresh_hz;
-[~, P, sources.R, sources.C, params] = clusterLocalizations(peaksCat, params);
-k = length(sources.R); %number of sources
-sz = params.sz;
-
-%Generate IMsel; the data only in the selected region, aligned across movies
-selPix = false(sz(1:2));
-for sourceIx = k:-1:1
-    rr = max(1, round(sources.R(sourceIx)-params.dXY)):min(sz(1),  round(sources.R(sourceIx))+params.dXY);
-    cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
-    selPix(rr,cc,sourceIx) = true;
-end
-nSelPix = sum(any(selPix,3), 'all'); %number of selected pixels
-dFsel = nan(nSelPix, totalFrames); %extize
-if numChannels == 2
-    dF2sel = nan(nSelPix, totalFrames); %extize
-end
-baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
-frameInd = 0;
-for trialIx = validTrials
-    szTmp = size(rawIMs{trialIx});
-    IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-    F0selDS{trialIx} = svdF0(IMrawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)'; %#ok<AGROW>
-    dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
-    if numChannels == 2
-        IM2rawSel = interpArray(rawIM2s{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
-        F02selDS{trialIx} = svdF0(IM2rawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)';
-        dF2sel(:,frameInd+(1:szTmp(3))) = IM2rawSel - F02selDS{trialIx};
-    end
-    frameInd = frameInd+szTmp(3);
-end
-clear rawIMs
-
-%extract sources from the downsampled movies
-[W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
-
-%for each file, load high res data and refine
-params.tau_full=params.tau_frames*params.dsFac;
-exptSummary.params = params;
-for trialIx = validTrials
-    fn = fnRaw{trialIx};
-    
-    %load the high time resolution tiff
-    [IM, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
-    IM = double(IM);
-    % A = ScanImageTiffReader([dr filesep fn]);
-    % IM = double(A.data);
-
-    %rearrange IM into correct dimensions
-    IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);
-    if activityChannel>1
-        IM = IM(:,:,[activityChannel:end, 1:activityChannel-1],:);
-        disp('Reordering channels for analysis!')
-    end
-
-    IM1 = squeeze(IM(:,:,1,:));
-    if numChannels==2
-        IM2 =  squeeze(IM(:,:,2,:));
-        clear IM;
-        IM2sel = interpArray(IM2, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
-        clear IM2;
-        IM2sel = IM2sel - min(0, min(mean(IM2sel,2, 'omitnan')));%ensure that the baseline is not overestimated
-        discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
-        IM2sel(:,discard) = nan;     %throw away movement frames as above
-    else %1 channel
-        clear IM;
-    end 
-
-    IMsel = interpArray(IM1, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
-    %IMsel = IMsel - min(0, min(mean(IMsel,2, 'omitnan'))); %ensure that the baseline is not overestimated
-    
-    discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
-    IMsel(:,discard) = nan;     %throw away movement frames as above
-
-    [IMsel, IMselRaw, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS{trialIx}, params);
-
-    %NMF
-    H0 = ones(size(W1,2), size(IMsel,2));
-    for iter = 1:3 %perform nonnegative matrix division to initialize H0 with W0 constant
-        H0 = H0.*(max(0,W1'*IMsel))./((W1'*W1)*(H0 + mean(H0(:)/100))); %confirm this is right; per Lee and Seung NIPS 2000 'Algorithms for nonnegative matrix factorization'
-    end
-    opts = statset('MaxIter', 10,  'Display', 'final');
-    [W,H] = nnmf2(IMsel, size(W1,2),'algorithm', 'mult', 'w0', W1, 'h0', H0, 'options', opts); %!!nnmf2 has been modified to keep the ordering of the provided factors
-    Wfull = nan([sz(1)*sz(2) size(W,2)]);
-    Wfull(any(selPix,3),:) = W;
-    Wfull = reshape(Wfull, sz(1),sz(2), []);
-    
-    %Frames where more than 25% of pixels in a source are nan
-    nanFramesH = false(size(H));
-    for sourceIx = 1:size(H,1)
-        support = W(:,sourceIx)>0;
-        nanFramesH(sourceIx,:) = mean(selNans(support,:)) > 0.25;
-    end
-
-    %deconvolve out matched filter we applied earlier
-    kernel = [zeros(1,ceil(8*params.tau_full)) exp(-(0:ceil(8*params.tau_full))/params.tau_full)];
-    kernel = kernel./sum(kernel);
-    doubleKernel = conv(kernel, fliplr(kernel), 'same');
-    doubleKernel = doubleKernel./sum(doubleKernel);
-
-    flipKernel = fliplr(kernel);
-    
-    %perform deconvolution, filling in NaNs with reconstructed values every
-    %few iterations:
-    J = deconvlucy({H},doubleKernel, 20);
-    for iter = 1:5
-            recon = convn(J{2}, doubleKernel, 'same');
-            J{1}(nanFramesH) = recon(nanFramesH);
-            J = deconvlucy(J,doubleKernel, 25);
-    end
-    H2 = J{2};
-    H3 = convn(H2, kernel, 'same');
-
-
-    J = deconvlucy({H},flipKernel, 20);
-    for iter = 1:5
-            recon = convn(J{2}, flipKernel, 'same');
-            J{1}(nanFramesH) = recon(nanFramesH);
-            J = deconvlucy(J,flipKernel, 25);
-    end
-    H4 = J{2};
-
-    H5 = W \ IMselRaw;
-
-    errH = (H - convn(H2, doubleKernel, 'same')).^2;
-    errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
-
-    %compute F0
-    F0mean = repmat(mean(F0sel,2, 'omitnan'),1,size(F0sel,2));
-    F0sel(~isfinite(F0sel)) = max(0, F0mean(~isfinite(F0sel)));
-    F0= (W./max(W,[],1))' *F0sel;
-    F0(nanFramesH) = nan;
-    
-    %ensure F0 is positive
-    Fmin = min(F0(:));
-    desMin = prctile(F0(:),1) - Fmin;
-    if Fmin<desMin
-        F0 = F0 + desMin - Fmin;
-    end
-
-    %NaN out invalid data
-    H(nanFramesH) = nan; %The match filtered signal
-    H2(nanFramesH) = nan; %The detected events
-    H3(nanFramesH) = nan; %The denoised activity
-    H4(nanFramesH) = nan;
-    H5(nanFramesH) = nan;
-
-    exptSummary.dFerr{trialIx} = sum(W,1)'.*errH;
-    exptSummary.matchFilt{trialIx}(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
-    exptSummary.events{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
-    exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
-    exptSummary.dF2{trialIx}(:,:,1) = sum(W,1)'.*H4;
-    exptSummary.dFls{trialIx}(:,:,1) = sum(W,1)'.*H5;
-    exptSummary.F0{trialIx}(:,:,1) = F0;
-    exptSummary.footprints(:,:,1:size(W0,2),trialIx) = Wfull;
-    
-    %compute channel 2 signals
-    if numChannels==2
-        IM2sel(isnan(IM2sel)) = 0;
-        F_2 = (W./max(W,[],1))' * IM2sel;
-        F_2(nanFramesH) = nan;
-
-        F0_2 = nan(size(IM2sel));
-        for rix = 1:size(F0selDS{trialIx}, 1)
-            F0_2(rix,:) = interp(F02selDS{trialIx}(rix,:), params.dsFac)./params.dsFac;
-        end
-
-        F02mean = repmat(mean(F0_2,2, 'omitnan'),1,size(F0_2,2));
-        F0_2(~isfinite(F0_2)) = max(0, F02mean(~isfinite(F0_2)));
-        F0_2 = (W./max(W,[],1))' *F0_2;
-        F0_2(nanFramesH) = nan;
-
-        exptSummary.dF{trialIx}(:,:,2) = F_2 - F0_2;
-        exptSummary.dF2{trialIx}(:,:,2) = F_2 - F0_2;
-        exptSummary.dFls{trialIx}(:,:,2) = F_2 - F0_2;
-        exptSummary.F0{trialIx}(:,:,2) = F0_2;
-    end
-
-    exptSummary.dFF{trialIx} = exptSummary.dF{trialIx}./exptSummary.F0{trialIx};
-    exptSummary.dFF2{trialIx} = exptSummary.dF2{trialIx}./exptSummary.F0{trialIx};
-    exptSummary.dFFls{trialIx} = exptSummary.dFls{trialIx}./exptSummary.F0{trialIx};
-end
-
-%prepare file for saving
-exptSummary.fns = fns;
-exptSummary.dr = dr;
-
-%per-trial images
-exptSummary.originalActivityChannel = activityChannel;
-exptSummary.peaks = peaks;
+% %cluster localizations
+% totalFrames = sum(cellfun(@(x)(size(x,3)), rawIMs));
+% params.minEvents = totalFrames*params.frametime*params.dsFac*params.eventRateThresh_hz;
+% [~, P, sources.R, sources.C, params] = clusterLocalizations(peaksCat, params);
+% k = length(sources.R); %number of sources
+% sz = params.sz;
+% 
+% %Generate IMsel; the data only in the selected region, aligned across movies
+% selPix = false(sz(1:2));
+% for sourceIx = k:-1:1
+%     rr = max(1, round(sources.R(sourceIx)-params.dXY)):min(sz(1),  round(sources.R(sourceIx))+params.dXY);
+%     cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
+%     selPix(rr,cc,sourceIx) = true;
+% end
+% nSelPix = sum(any(selPix,3), 'all'); %number of selected pixels
+% dFsel = nan(nSelPix, totalFrames); %extize
+% if numChannels == 2
+%     dF2sel = nan(nSelPix, totalFrames); %extize
+% end
+% baselineWindow = ceil(params.baselineWindow_Glu_s/(params.frametime*params.dsFac));
+% frameInd = 0;
+% for trialIx = validTrials
+%     szTmp = size(rawIMs{trialIx});
+%     IMrawSel = interpArray(rawIMs{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
+%     F0selDS{trialIx} = svdF0(IMrawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)'; %#ok<AGROW>
+%     dFsel(:,frameInd+(1:szTmp(3))) = IMrawSel - F0selDS{trialIx};
+%     if numChannels == 2
+%         IM2rawSel = interpArray(rawIM2s{trialIx}, any(selPix,3), motOutput(:,trialIx)); %interpolates the movie at the shifted coordinates
+%         F02selDS{trialIx} = svdF0(IM2rawSel', 5, baselineWindow, 1, params.denoiseWindow_samps)';
+%         dF2sel(:,frameInd+(1:szTmp(3))) = IM2rawSel - F02selDS{trialIx};
+%     end
+%     frameInd = frameInd+szTmp(3);
+% end
+% clear rawIMs
+% 
+% %extract sources from the downsampled movies
+% [W0,~] = extractSourcesLoRes(dFsel, P, sources, selPix, params);
+% 
+% %for each file, load high res data and refine
+% params.tau_full=params.tau_frames*params.dsFac;
+% exptSummary.params = params;
+% for trialIx = validTrials
+%     fn = fnRaw{trialIx};
+% 
+%     %load the high time resolution tiff
+%     [IM, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+%     IM = double(IM);
+%     % A = ScanImageTiffReader([dr filesep fn]);
+%     % IM = double(A.data);
+% 
+%     %rearrange IM into correct dimensions
+%     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []);
+%     if activityChannel>1
+%         IM = IM(:,:,[activityChannel:end, 1:activityChannel-1],:);
+%         disp('Reordering channels for analysis!')
+%     end
+% 
+%     IM1 = squeeze(IM(:,:,1,:));
+%     if numChannels==2
+%         IM2 =  squeeze(IM(:,:,2,:));
+%         clear IM;
+%         IM2sel = interpArray(IM2, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
+%         clear IM2;
+%         IM2sel = IM2sel - min(0, min(mean(IM2sel,2, 'omitnan')));%ensure that the baseline is not overestimated
+%         discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
+%         IM2sel(:,discard) = nan;     %throw away movement frames as above
+%     else %1 channel
+%         clear IM;
+%     end 
+% 
+%     IMsel = interpArray(IM1, any(selPix,3), motOutput(:,trialIx)); %interpolate the movie at the shifted coordinates
+%     %IMsel = IMsel - min(0, min(mean(IMsel,2, 'omitnan'))); %ensure that the baseline is not overestimated
+% 
+%     discard = reshape(repmat(discardFrames{trialIx}(:), 1,params.dsFac)', 1,[]); %upsample the discard frames
+%     IMsel(:,discard) = nan;     %throw away movement frames as above
+% 
+%     [IMsel, IMselRaw, F0sel, W1, selNans] = prepareNMFproblem(IMsel, W0, F0selDS{trialIx}, params);
+% 
+%     %NMF
+%     H0 = ones(size(W1,2), size(IMsel,2));
+%     for iter = 1:3 %perform nonnegative matrix division to initialize H0 with W0 constant
+%         H0 = H0.*(max(0,W1'*IMsel))./((W1'*W1)*(H0 + mean(H0(:)/100))); %confirm this is right; per Lee and Seung NIPS 2000 'Algorithms for nonnegative matrix factorization'
+%     end
+%     opts = statset('MaxIter', 10,  'Display', 'final');
+%     [W,H] = nnmf2(IMsel, size(W1,2),'algorithm', 'mult', 'w0', W1, 'h0', H0, 'options', opts); %!!nnmf2 has been modified to keep the ordering of the provided factors
+%     Wfull = nan([sz(1)*sz(2) size(W,2)]);
+%     Wfull(any(selPix,3),:) = W;
+%     Wfull = reshape(Wfull, sz(1),sz(2), []);
+% 
+%     %Frames where more than 25% of pixels in a source are nan
+%     nanFramesH = false(size(H));
+%     for sourceIx = 1:size(H,1)
+%         support = W(:,sourceIx)>0;
+%         nanFramesH(sourceIx,:) = mean(selNans(support,:)) > 0.25;
+%     end
+% 
+%     %deconvolve out matched filter we applied earlier
+%     kernel = [zeros(1,ceil(8*params.tau_full)) exp(-(0:ceil(8*params.tau_full))/params.tau_full)];
+%     kernel = kernel./sum(kernel);
+%     doubleKernel = conv(kernel, fliplr(kernel), 'same');
+%     doubleKernel = doubleKernel./sum(doubleKernel);
+% 
+%     flipKernel = fliplr(kernel);
+% 
+%     %perform deconvolution, filling in NaNs with reconstructed values every
+%     %few iterations:
+%     J = deconvlucy({H},doubleKernel, 20);
+%     for iter = 1:5
+%             recon = convn(J{2}, doubleKernel, 'same');
+%             J{1}(nanFramesH) = recon(nanFramesH);
+%             J = deconvlucy(J,doubleKernel, 25);
+%     end
+%     H2 = J{2};
+%     H3 = convn(H2, kernel, 'same');
+% 
+% 
+%     J = deconvlucy({H},flipKernel, 20);
+%     for iter = 1:5
+%             recon = convn(J{2}, flipKernel, 'same');
+%             J{1}(nanFramesH) = recon(nanFramesH);
+%             J = deconvlucy(J,flipKernel, 25);
+%     end
+%     H4 = J{2};
+% 
+%     H5 = W \ IMselRaw;
+% 
+%     errH = (H - convn(H2, doubleKernel, 'same')).^2;
+%     errH = sqrt(convn(errH, doubleKernel, 'same')); % uncertainty at each point
+% 
+%     %compute F0
+%     F0mean = repmat(mean(F0sel,2, 'omitnan'),1,size(F0sel,2));
+%     F0sel(~isfinite(F0sel)) = max(0, F0mean(~isfinite(F0sel)));
+%     F0= (W./max(W,[],1))' *F0sel;
+%     F0(nanFramesH) = nan;
+% 
+%     %ensure F0 is positive
+%     Fmin = min(F0(:));
+%     desMin = prctile(F0(:),1) - Fmin;
+%     if Fmin<desMin
+%         F0 = F0 + desMin - Fmin;
+%     end
+% 
+%     %NaN out invalid data
+%     H(nanFramesH) = nan; %The match filtered signal
+%     H2(nanFramesH) = nan; %The detected events
+%     H3(nanFramesH) = nan; %The denoised activity
+%     H4(nanFramesH) = nan;
+%     H5(nanFramesH) = nan;
+% 
+%     exptSummary.dFerr{trialIx} = sum(W,1)'.*errH;
+%     exptSummary.matchFilt{trialIx}(:,:,1) = sum(W,1)'.*H; %[source#, time, channel]
+%     exptSummary.events{trialIx}(:,:,1) = sum(W,1)'.*H2; %[source#, time, channel]
+%     exptSummary.dF{trialIx}(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
+%     exptSummary.dF2{trialIx}(:,:,1) = sum(W,1)'.*H4;
+%     exptSummary.dFls{trialIx}(:,:,1) = sum(W,1)'.*H5;
+%     exptSummary.F0{trialIx}(:,:,1) = F0;
+%     exptSummary.footprints(:,:,1:size(W0,2),trialIx) = Wfull;
+% 
+%     %compute channel 2 signals
+%     if numChannels==2
+%         IM2sel(isnan(IM2sel)) = 0;
+%         F_2 = (W./max(W,[],1))' * IM2sel;
+%         F_2(nanFramesH) = nan;
+% 
+%         F0_2 = nan(size(IM2sel));
+%         for rix = 1:size(F0selDS{trialIx}, 1)
+%             F0_2(rix,:) = interp(F02selDS{trialIx}(rix,:), params.dsFac)./params.dsFac;
+%         end
+% 
+%         F02mean = repmat(mean(F0_2,2, 'omitnan'),1,size(F0_2,2));
+%         F0_2(~isfinite(F0_2)) = max(0, F02mean(~isfinite(F0_2)));
+%         F0_2 = (W./max(W,[],1))' *F0_2;
+%         F0_2(nanFramesH) = nan;
+% 
+%         exptSummary.dF{trialIx}(:,:,2) = F_2 - F0_2;
+%         exptSummary.dF2{trialIx}(:,:,2) = F_2 - F0_2;
+%         exptSummary.dFls{trialIx}(:,:,2) = F_2 - F0_2;
+%         exptSummary.F0{trialIx}(:,:,2) = F0_2;
+%     end
+% 
+%     exptSummary.dFF{trialIx} = exptSummary.dF{trialIx}./exptSummary.F0{trialIx};
+%     exptSummary.dFF2{trialIx} = exptSummary.dF2{trialIx}./exptSummary.F0{trialIx};
+%     exptSummary.dFFls{trialIx} = exptSummary.dFls{trialIx}./exptSummary.F0{trialIx};
+% end
+% 
+% %prepare file for saving
+% exptSummary.fns = fns;
+% exptSummary.dr = dr;
+% 
+% %per-trial images
+% exptSummary.originalActivityChannel = activityChannel;
+% exptSummary.peaks = peaks;
 exptSummary.perTrialMeanIMs = meanIM;
-exptSummary.perTrialActIms = actIM;
-exptSummary.perTrialAlignmentOffsets = motOutput; %the alignment vector for each trial
+% exptSummary.perTrialActIms = actIM;
+% exptSummary.perTrialAlignmentOffsets = motOutput; %the alignment vector for each trial
 
 %save
-save([drsave filesep fnsave], 'exptSummary','-v7.3');
+save([drsave filesep fnsave], 'exptSummary');
 
 disp('Done summarizeBergamo_Peaks')
 end
@@ -377,7 +371,7 @@ if ~params.nmfBackgroundComps
     %baselineWindow = ceil(params.baselineWindow_Glu_s/params.frametime);
     %F0 = computeF0(IMsel', params.denoiseWindow_samps*params.dsFac+1, baselineWindow, 1)';
     IMsel = IMsel - F0;
-    selNans = isnan(IMsel);
+    selNans = isnan(IMsel); 
     IMsel(selNans) = 0;
     IMselRaw = IMsel;
     IMsel = matchedExpFilter(IMsel, params.tau_full);

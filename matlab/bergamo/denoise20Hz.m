@@ -1,15 +1,20 @@
-function denoise20Hz(dr, fns)
-
+function [fnRaw, fnRegDS] = denoise20Hz(dr, fns, ds_time)
+if nargin<3
+    ds_time =1;  
+end
+dsFac = 2.^ds_time;
 % [fns, dr] = uigetfile('*REGISTERED_RAW*.tif', 'multiselect', 'on');
 
 [IM, ~, ~] = networkScanImageTiffReader(fullfile(dr, fns));
 
 ind =strfind(fns, '_REGISTERED');
+fnRawStem = fullfile(dr,fns(1:ind));
 fnstem = fullfile(dr,[fns(1:ind) 'DENOISED']);
 pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
 
-load(fullfile([fnstem '_ALIGNMENTDATA.mat']), 'aData');
+load(fullfile([fnRawStem 'ALIGNMENTDATA.mat']), 'aData');
 numChannels = aData.numChannels;
+save(fullfile([fnstem '_ALIGNMENTDATA.mat']), 'aData'); %simply copy alignment data over to denoised file
 
 IM = permute(reshape(IM, size(IM,1), size(IM,2), numChannels, []), [2 1 3 4]);
 
@@ -68,8 +73,8 @@ for frame = 1:frames
 end
 networkTiffWriter(reshape(single(tiffSave),cols,rows,[]), fnwrite, pixelscale);
 clear('tiffSave')
+[~, fnRaw, ext] = fileparts(fnwrite); fnRaw = [fnRaw ext]; 
 
-dsFac = 2;
  %save a downsampled aligned recording
 fnwrite = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
 
@@ -86,6 +91,7 @@ end
 
 networkTiffWriter(reshape(single(tiffSave),cols, rows, []), fnwrite, pixelscale);
 clear('tiffSave');
+[~, fnRegDS, ext] = fileparts(fnwrite); fnRegDS = [fnRegDS ext]; 
 
 
 % figure; clf; hold on; for i = 1:size(VV,2)

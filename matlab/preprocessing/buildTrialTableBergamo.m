@@ -25,7 +25,7 @@ elseif ~iscell(fns) && fns==true %generate an autoTrialTable with all files
     %a single epoch
     epoch  = 1;
     files = dir([dr filesep '*.tif']);
-    files = files(~contains({files.name}, 'REGISTERED'));
+    files = files(~contains({files.name}, 'REGISTERED') & ~contains({files.name}, 'FIGURE'));
     epochfiles{1} = {files.name};
 else %files were passed to generate an autoTrialTable
     epoch  = 1;

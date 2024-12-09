@@ -46,7 +46,8 @@ IMf(nans) = nan;
 
 
 %log transform
-B = prctile(IMf(:,:,1:100), 10, 'all') -  prctile(IMf(:,:,1:100), 1, 'all'); %estimate the mean brightness of a 'dim' pixel
+firstValidFrames = find(any(~isnan(IMf), [1 2]),100, 'first');
+B = prctile(IMf(:,:,firstValidFrames), 10, 'all') -  prctile(IMf(:,:,firstValidFrames), 1, 'all'); %estimate the mean brightness of a 'dim' pixel
 IMf(~nans) = log(max(IMf(~nans),0) + B); %convert to log space so linear filtering computes products
 
 %remove all variance that looks like image movement - TESTED 10/17/24, does
