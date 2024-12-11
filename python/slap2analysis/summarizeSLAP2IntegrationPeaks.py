@@ -10,7 +10,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import scipy.io as spio
-from scipy import sparse, signal
+from scipy import sparse, signal, stats
 from scipy.optimize import curve_fit
 import h5py
 import napari
@@ -216,10 +216,74 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
     allPeakLocs = np.where(allPeaks.flatten())[0]
     peakVals = residual_filt[np.unravel_index(allPeakLocs,(numSuperPixels,numCycles))]
 
-    low = np.percentile(peakVals,1)
-    high = np.percentile(peakVals,50)
+    kde = stats.gaussian_kde(peakVals)
+    x_range = np.linspace(peakVals.min(), peakVals.max(), 1000)
 
-    finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
+    mode_idx = np.argmax(kde(x_range))
+    bottom_half = peakVals[peakVals < x_range[mode_idx]]
+    # bottom_half_kde = stats.gaussian_kde(bottom_half)
+    bottom_half_x_range = np.linspace(bottom_half.min(), bottom_half.max(), 500)
+
+    def truncated_normal(x, mu, sigma, K):
+        return K * stats.truncnorm.pdf(x, -np.inf, 0, loc=mu, scale=sigma)
+
+    popt, _ = curve_fit(lambda x, mu, sigma, K: truncated_normal(x, mu, sigma, K), bottom_half_x_range, kde(bottom_half_x_range), p0=[x_range[mode_idx], np.std(bottom_half), 1])
+    
+    fit_mu = popt[0]
+    fit_sigma = popt[1]
+    fit_K = popt[2]
+
+    # plt.hist(peakVals,bins=100)
+    # plt.plot(x_range,truncated_normal(x_range,fit_mu,fit_sigma,fit_K,-np.inf,np.inf),'r-')
+
+    noise_dist = stats.norm.pdf(x_range,fit_mu,fit_sigma)*fit_K*2
+
+    signal_dist = kde(x_range) - noise_dist
+    signal_dist[x_range < fit_mu] = 0
+    signal_dist[signal_dist < 0] = 0
+
+    # plt.plot(x_range,kde(x_range),'k-')
+    # plt.plot(x_range,noise_dist,'r-')
+    # plt.plot(x_range,signal_dist,'b-')
+
+    total_kde_integral = np.trapz(kde(x_range), x_range)
+    # total_noise_dist = np.trapz(noise_dist, x_range)
+    # total_signal_dist = np.trapz(signal_dist, x_range)
+
+    # plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
+    # plt.plot(x_range,noise_dist / total_kde_integral,'r-')
+    # plt.plot(x_range,signal_dist / total_kde_integral,'b-')
+
+    intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / kde(x_range))
+    peakVal_thresh = x_range[intersection_idx]
+    intersection_y = noise_dist[intersection_idx]
+
+    # # Plot intersection point
+    # plt.plot(peakVal_thresh, intersection_y, 'go', label='Noise/Signal Intersection')
+
+    # plt.xlabel('Peak Values')
+    # plt.ylabel('Probability Density')
+    # plt.title('PDF of Peak Values')
+    # plt.legend()
+    # plt.grid(True)
+    # plt.show()
+
+    plt.figure()
+    plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
+    plt.plot(x_range,noise_dist / total_kde_integral,'r-')
+    plt.plot(x_range,signal_dist / total_kde_integral,'b-')
+    plt.plot(peakVal_thresh, intersection_y, 'go')
+    plt.xlabel('Peak Values')
+    plt.ylabel('Probability Density')
+    plt.title('PDF of Peak Values')
+    plt.savefig(os.path.join(params['savedr'], f'peak_value_distributions_DMD{DMDix+1}_T{trialIx+1}.png'))
+    plt.close()
+
+    # low = np.percentile(peakVals,1)
+    # high = np.percentile(peakVals,50)
+
+    # finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
+    finalPeakLocs = allPeakLocs[peakVals > peakVal_thresh]
 
     finalPeaks = np.zeros((numSuperPixels,numCycles))
     finalPeaks[np.unravel_index(finalPeakLocs,(numSuperPixels,numCycles))] = 1
@@ -401,6 +465,7 @@ def main():
     params['alignHz'] = aData['alignHz'][0,0]
     params['analyzeHz'] = 1/aData['frametime'][0,0]
     params['activityChannel'] = 1
+    params['savedr'] = savedr
 
     # Get the lookup file path
     lookupFile = trialTable['lookupFile'][0]
@@ -609,6 +674,12 @@ def main():
             peaksPix.extend(trial_peaks)
             originalPeaks.extend(trial_original_peaks)
             finalPeakVals.extend(trial_peak_vals)
+
+        # Save peaks to file
+        peaks_array = np.array(peaksPix)
+        output_filename = os.path.join(params['savedr'], f'peaks_DMD{DMDix+1}.npy')
+        np.save(output_filename, peaks_array)
+        print(f"Saved peaks to {output_filename}")
 
         # peaks histogram
         peaksHist = np.zeros((dmdPixelsPerColumn//4,dmdPixelsPerRow*1))
