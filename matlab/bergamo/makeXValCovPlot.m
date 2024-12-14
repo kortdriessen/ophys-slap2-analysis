@@ -91,6 +91,8 @@ for fileIx = 1:length(fns)
     clear Ad;
     
     frameClkTrue = frameClkTrue(1:min(length(frameClkTrue),size(IM,2)));
+    clkErrs = find(diff(frameClkTrue)<0)+1;
+    frameClkTrue(clkErrs) = (frameClkTrue(clkErrs-1)+frameClkTrue(clkErrs+1))/2;
 
     validPix = find(mean(isnan(IM),2) < 0.2);
 
