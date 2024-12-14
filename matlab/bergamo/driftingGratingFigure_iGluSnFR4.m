@@ -1,0 +1,82 @@
+files8880 = {'Z:\scratch\ophys\Michael\visual stim characterization\754588\2024-09-12\scans\scan_00001_20240912_143208\scan_00001_20240912_143208_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\754588\2024-09-12\scans\scan_00003_20240912_150010\scan_00003_20240912_150010_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\754588\2024-09-12\scans\scan_00006_20240912_155432\scan_00006_20240912_155432_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\754588\2024-09-12\scans\scan_00007_20240912_160302\scan_00007_20240912_160302_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750099\08-16-24\scans\scan_00001_20240816_113139\scan_00001_20240816_113139_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750099\08-16-24\scans\scan_00003_20240816_115328\scan_00003_20240816_115328_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750099\08-16-24\scans\scan_00005_20240816_125104\scan_00005_20240816_125104_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750099\08-16-24\scans\scan_00006_20240816_130139\scan_00006_20240816_130139_REGISTERED_RAW.tif'};
+
+files9601 = {'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00001_20240816_142643\scan_00001_20240816_142643_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00004_20240816_153225\scan_00004_20240816_153225_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00005_20240816_154521\scan_00005_20240816_154521_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00006_20240816_155419\scan_00006_20240816_155419_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00001_20240801_110557\scan_00001_20240801_110557_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00003_20240801_113412\scan_00003_20240801_113412_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00004_20240801_114829\scan_00004_20240801_114829_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00006_20240801_121111\scan_00006_20240801_121111_REGISTERED_RAW.tif'};
+
+files8360 = {'Z:\scratch\ophys\Michael\visual stim characterization\747775\08-16-24\scans\scan_00001_20240816_164019\scan_00001_20240816_164019_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\747775\08-16-24\scans\scan_00002_20240816_165246\scan_00002_20240816_165246_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\747775\08-16-24\scans\scan_00004_20240816_171100\scan_00004_20240816_171100_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\747775\08-16-24\scans\scan_00006_20240816_173309\scan_00006_20240816_173309_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\753085\2024-08-29\scans\scan_00002_20240829_122649\scan_00002_20240829_122649_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\753085\2024-08-29\scans\scan_00004_20240829_124950\scan_00004_20240829_124950_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\753085\2024-08-29\scans\scan_00008_20240829_140301\scan_00008_20240829_140301_REGISTERED_RAW.tif',
+    'Z:\scratch\ophys\Michael\visual stim characterization\753085\2024-08-29\scans\scan_00009_20240829_141207\scan_00009_20240829_141207_REGISTERED_RAW.tif'};
+
+results8880 = makeXValCovPlot(files8880);
+
+[unique_distances, ~, idx] = unique(round(log2(results8880.distance)*50)/50);
+mean_vals = accumarray(idx, results8880.xval_cov, [], @mean);
+std_vals = accumarray(idx, results8880.xval_cov, [], @std);
+count_vals = accumarray(idx, results8880.xval_cov, [], @numel);
+sem_vals = std_vals ./ sqrt(count_vals);
+upper_bound = mean_vals + sem_vals;
+lower_bound = mean_vals - sem_vals;
+
+figure(123)
+hold on;
+fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
+'b', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+plot(2.^unique_distances, mean_vals, 'b', 'LineWidth', 2);
+xlabel('Distance');
+ylabel('Covariance');
+box on;
+hold off;
+
+results9601 = makeXValCovPlot(files9601);
+
+[unique_distances, ~, idx] = unique(round(log2(results9601.distance)*50)/50);
+mean_vals = accumarray(idx, results9601.xval_cov, [], @mean);
+std_vals = accumarray(idx, results9601.xval_cov, [], @std);
+count_vals = accumarray(idx, results9601.xval_cov, [], @numel);
+sem_vals = std_vals ./ sqrt(count_vals);
+upper_bound = mean_vals + sem_vals;
+lower_bound = mean_vals - sem_vals;
+
+figure(123)
+hold on;
+fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
+'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+plot(2.^unique_distances, mean_vals, 'r', 'LineWidth', 2);
+box on;
+hold off;
+
+results8360 = makeXValCovPlot(files8360);
+
+[unique_distances, ~, idx] = unique(round(log2(results8360.distance)*50)/50);
+mean_vals = accumarray(idx, results8360.xval_cov, [], @mean);
+std_vals = accumarray(idx, results8360.xval_cov, [], @std);
+count_vals = accumarray(idx, results8360.xval_cov, [], @numel);
+sem_vals = std_vals ./ sqrt(count_vals);
+upper_bound = mean_vals + sem_vals;
+lower_bound = mean_vals - sem_vals;
+
+figure(123)
+hold on;
+fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
+'m', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
+plot(2.^unique_distances, mean_vals, 'm', 'LineWidth', 2);
+box on;
+hold off;
