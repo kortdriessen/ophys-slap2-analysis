@@ -26,211 +26,115 @@ files9601 = {'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00006_20240801_121111\scan_00006_20240801_121111_REGISTERED_RAW.tif'};
 
 results8880 = makeXValCovPlot(files8880);
+bg_results8880 = makeXValCovPlot(files8880,1);
 
 results8360 = makeXValCovPlot(files8360);
+bg_results8360 = makeXValCovPlot(files8360,1);
 
 results9601 = makeXValCovPlot(files9601);
+bg_results9601 = makeXValCovPlot(files9601,1);
 
 
 %%
-[unique_distances, ~, idx] = unique(round(log2(results8880.distance)*50)/50);
+colors = distinguishable_colors(6);
 
-mean_vals = accumarray(idx, results8880.xval_cov, [], @mean);
-norm_mean_vals = mean_vals ./ max(mean_vals);
+figure(123); clf;
+figure(124); clf;
+plotResults(results8880, 'v8880', colors(1,:), 123, 124);
+plotResults(results8360, 'v8360', colors(2,:), 123, 124);
+plotResults(results9601, 'v9601', colors(3,:), 123, 124);
 
-std_vals = accumarray(idx, results8880.xval_cov, [], @std);
-norm_std_vals = accumarray(idx, results8880.xval_cov ./ max(mean_vals), [], @std);
-
-count_vals = accumarray(idx, results8880.xval_cov, [], @numel);
-
-sem_vals = std_vals ./ sqrt(count_vals);
-norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
-
-upper_bound = mean_vals + sem_vals;
-lower_bound = mean_vals - sem_vals;
-norm_upper_bound = norm_mean_vals + norm_sem_vals;
-norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-figure(123)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-'b', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, mean_vals, 'b', 'LineWidth', 2);
-xlabel('Distance');
-ylabel('Covariance');
-box on;
-hold off;
-
-figure(124)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [norm_upper_bound; flipud(norm_lower_bound)], ...
-'b', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, norm_mean_vals, 'b', 'LineWidth', 2);
-xlabel('Distance');
-ylabel('Normalized Covariance');
-box on;
-hold off;
-
-[unique_distances, ~, idx] = unique(round(log2(results8360.distance)*50)/50);
-mean_vals = accumarray(idx, results8360.xval_cov, [], @mean);
-norm_mean_vals = mean_vals ./ max(mean_vals);
-
-std_vals = accumarray(idx, results8360.xval_cov, [], @std);
-norm_std_vals = accumarray(idx, results8360.xval_cov ./ max(mean_vals), [], @std);
-
-count_vals = accumarray(idx, results8360.xval_cov, [], @numel);
-
-sem_vals = std_vals ./ sqrt(count_vals);
-norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
-
-upper_bound = mean_vals + sem_vals;
-lower_bound = mean_vals - sem_vals;
-norm_upper_bound = norm_mean_vals + norm_sem_vals;
-norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-figure(123)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-'m', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, mean_vals, 'm', 'LineWidth', 2);
-box on;
-hold off;
-
-figure(124)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [norm_upper_bound; flipud(norm_lower_bound)], ...
-'m', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, norm_mean_vals, 'm', 'LineWidth', 2);
-box on;
-hold off;
-
-[unique_distances, ~, idx] = unique(round(log2(results9601.distance)*50)/50);
-mean_vals = accumarray(idx, results9601.xval_cov, [], @mean);
-norm_mean_vals = mean_vals ./ max(mean_vals);
-
-std_vals = accumarray(idx, results9601.xval_cov, [], @std);
-norm_std_vals = accumarray(idx, results9601.xval_cov ./ max(mean_vals), [], @std);
-
-count_vals = accumarray(idx, results9601.xval_cov, [], @numel);
-
-sem_vals = std_vals ./ sqrt(count_vals);
-norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
-
-upper_bound = mean_vals + sem_vals;
-lower_bound = mean_vals - sem_vals;
-norm_upper_bound = norm_mean_vals + norm_sem_vals;
-norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-figure(123)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, mean_vals, 'r', 'LineWidth', 2);
-box on;
-hold off;
-
-legend('','v8880','','v8360','','v9601')
-
-figure(124)
-hold on;
-fill(2.^[unique_distances; flipud(unique_distances)], [norm_upper_bound; flipud(norm_lower_bound)], ...
-'r', 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-plot(2.^unique_distances, norm_mean_vals, 'r', 'LineWidth', 2);
-box on;
-hold off;
-
-legend('','v8880','','v8360','','v9601')
+plotResults(bg_results8880, 'v8880', colors(4,:), 123, 124);
+plotResults(bg_results8360, 'v8360', colors(5,:), 123, 124);
+plotResults(bg_results9601, 'v9601', colors(6,:), 123, 124);
 
 %%
-colors = distinguishable_colors(length(files9601));
-for fileNum = 1:length(files9601)
-    [unique_distances, ~, idx] = unique(round(log2(results9601.distance(results9601.fileIx==fileNum))*50)/50);
-    mean_vals = accumarray(idx, results9601.xval_cov(results9601.fileIx==fileNum), [], @mean);
-    norm_mean_vals = mean_vals ./ max(mean_vals);
+figure(223); clf;
+figure(224); clf;
+figure(225); clf;
+plotByFOV(results9601, files9601, 'v9601 (by FOV)', 223);
+plotByFOV(results8880, files8880, 'v8880 (by FOV)', 224);
+plotByFOV(results8360, files8360, 'v8360 (by FOV)', 225);
 
-    std_vals = accumarray(idx, results9601.xval_cov(results9601.fileIx==fileNum), [], @std);
-    norm_std_vals = accumarray(idx, results9601.xval_cov(results9601.fileIx==fileNum) ./ max(mean_vals), [], @std);
+%%
+function plotResults(results, label, color, figRaw, figNorm)
+    % Compute unique distances
+    [unique_distances, mean_vals, norm_mean_vals, upper_bound, lower_bound, ...
+        norm_upper_bound, norm_lower_bound] = calculateStats(results);
 
-    count_vals = accumarray(idx, results9601.xval_cov(results9601.fileIx==fileNum), [], @numel);
-
-    sem_vals = std_vals ./ sqrt(count_vals);
-    norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
-
-    upper_bound = mean_vals + sem_vals;
-    lower_bound = mean_vals - sem_vals;
-    norm_upper_bound = norm_mean_vals + norm_sem_vals;
-    norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-    figure(223)
+    % Plot raw covariance
+    figure(figRaw);
     hold on;
-    fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-        colors(fileNum,:), 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-    plot(2.^unique_distances, mean_vals, 'Color',colors(fileNum,:), 'LineWidth', 2);
-    box on;
+    fill(2.^[unique_distances; flipud(unique_distances)], ...
+         [upper_bound; flipud(lower_bound)], ...
+         color, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    plot(2.^unique_distances, mean_vals, 'Color', color, 'LineWidth', 2, 'DisplayName', label); % Add line to legend
+    hold off;
+
+    % Plot normalized covariance
+    figure(figNorm);
+    hold on;
+    fill(2.^[unique_distances; flipud(unique_distances)], ...
+         [norm_upper_bound; flipud(norm_lower_bound)], ...
+         color, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'HandleVisibility', 'off');
+    plot(2.^unique_distances, norm_mean_vals, 'Color', color, 'LineWidth', 2, 'DisplayName', label); % Add line to legend
+    hold off;
+
+    % Add legend dynamically after all plots
+    figure(figRaw);
+    legend('show', 'Interpreter', 'none');
+
+    figure(figNorm);
+    legend('show', 'Interpreter', 'none');
+end
+
+function plotByFOV(results, files, titleText, figNum)
+    colors = distinguishable_colors(length(files));
+    figure(figNum);
+    hold on;
+
+    for fileNum = 1:length(files)
+        % Filter results by file index
+        idx = results.fileIx == fileNum;
+        [unique_distances, mean_vals, ~, upper_bound, lower_bound] = calculateStats(results, idx);
+
+        % Plot data for each FOV
+        fill(2.^[unique_distances; flipud(unique_distances)], ...
+             [upper_bound; flipud(lower_bound)], ...
+             colors(fileNum, :), 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', '');
+        plot(2.^unique_distances, mean_vals, 'Color', colors(fileNum, :), 'LineWidth', 2);
+    end
+
+    title(titleText);
     hold off;
 end
 
-title('v9601, by FOV (8 total)')
+function [unique_distances, mean_vals, norm_mean_vals, upper_bound, lower_bound, ...
+          norm_upper_bound, norm_lower_bound] = calculateStats(results, mask)
+    if nargin < 2
+        mask = true(size(results.distance));
+    end
 
-%%
-colors = distinguishable_colors(length(files8880));
-for fileNum = 1:length(files8880)
-    [unique_distances, ~, idx] = unique(round(log2(results8880.distance(results8880.fileIx==fileNum))*50)/50);
-    mean_vals = accumarray(idx, results8880.xval_cov(results8880.fileIx==fileNum), [], @mean);
+    % Compute unique distances and group stats
+    [unique_distances, ~, idx] = unique(round(log2(results.distance(mask)) * 50) / 50);
+    mean_vals = accumarray(idx, results.xval_cov(mask), [], @mean);
     norm_mean_vals = mean_vals ./ max(mean_vals);
 
-    std_vals = accumarray(idx, results8880.xval_cov(results8880.fileIx==fileNum), [], @std);
-    norm_std_vals = accumarray(idx, results8880.xval_cov(results8880.fileIx==fileNum) ./ max(mean_vals), [], @std);
-
-    count_vals = accumarray(idx, results8880.xval_cov(results8880.fileIx==fileNum), [], @numel);
-
+    std_vals = accumarray(idx, results.xval_cov(mask), [], @std);
+    count_vals = accumarray(idx, results.xval_cov(mask), [], @numel);
     sem_vals = std_vals ./ sqrt(count_vals);
-    norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
 
     upper_bound = mean_vals + sem_vals;
     lower_bound = mean_vals - sem_vals;
+
+    norm_sem_vals = sem_vals ./ max(mean_vals);
     norm_upper_bound = norm_mean_vals + norm_sem_vals;
     norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-    figure(224)
-    hold on;
-    fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-        colors(fileNum,:), 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-    plot(2.^unique_distances, mean_vals, 'Color',colors(fileNum,:), 'LineWidth', 2);
-    box on;
-    hold off;
 end
 
-title('v8880, by FOV (8 total)')
-
-%%
-colors = distinguishable_colors(length(files8360));
-for fileNum = 1:length(files8360)
-    [unique_distances, ~, idx] = unique(round(log2(results8360.distance(results8360.fileIx==fileNum))*50)/50);
-    mean_vals = accumarray(idx, results8360.xval_cov(results8360.fileIx==fileNum), [], @mean);
-    norm_mean_vals = mean_vals ./ max(mean_vals);
-
-    std_vals = accumarray(idx, results8360.xval_cov(results8360.fileIx==fileNum), [], @std);
-    norm_std_vals = accumarray(idx, results8360.xval_cov(results8360.fileIx==fileNum) ./ max(mean_vals), [], @std);
-
-    count_vals = accumarray(idx, results8360.xval_cov(results8360.fileIx==fileNum), [], @numel);
-
-    sem_vals = std_vals ./ sqrt(count_vals);
-    norm_sem_vals = norm_std_vals ./ sqrt(count_vals);
-
-    upper_bound = mean_vals + sem_vals;
-    lower_bound = mean_vals - sem_vals;
-    norm_upper_bound = norm_mean_vals + norm_sem_vals;
-    norm_lower_bound = norm_mean_vals - norm_sem_vals;
-
-    figure(225)
-    hold on;
-    fill(2.^[unique_distances; flipud(unique_distances)], [upper_bound; flipud(lower_bound)], ...
-        colors(fileNum,:), 'FaceAlpha', 0.2, 'EdgeColor', 'none');
-    plot(2.^unique_distances, mean_vals, 'Color',colors(fileNum,:), 'LineWidth', 2);
-    box on;
-    hold off;
+function fillPlot(unique_distances, upper_bound, lower_bound, color)
+    % Helper function to fill plots with transparency
+    fill(2.^[unique_distances; flipud(unique_distances)], ...
+         [upper_bound; flipud(lower_bound)], ...
+         color, 'FaceAlpha', 0.2, 'EdgeColor', 'none', 'DisplayName', '');
 end
-
-title('v8360, by FOV (8 total)')
-
