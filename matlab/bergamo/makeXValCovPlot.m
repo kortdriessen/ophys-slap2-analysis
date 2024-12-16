@@ -1,7 +1,11 @@
-function results =  makeXValCovPlot(fns)
+function results =  makeXValCovPlot(fns, useBackground)
 
 if nargin<1 || isempty(fns)
     fns = uipickfiles('FilterSpec','*_REGISTERED_RAW.tif');
+end
+
+if nargin < 2
+    useBackground = false;
 end
 
 if ~iscell(fns)
@@ -104,8 +108,16 @@ for fileIx = 1:length(fns)
 
     numLabeled = sum(meanIM>thresh);
     thresh = prctile(meanIM,(100-numLabeled/numel(meanIM)*150));
-
-    labeledPix = validPix(meanIM > thresh);
+    
+    if useBackground
+        signalMask = zeros(nRow,nCol);
+        signalMask(validPix(meanIM > thresh)) = 1;
+        backgroundMask = ~imdilate(signalMask,ones(9,9));
+        backgroundMask(mean(isnan(IM),2) >= 0.2) = false;
+        labeledPix = find(backgroundMask(:));
+    else
+        labeledPix = validPix(meanIM > thresh);
+    end
 
     IMsel = IM(labeledPix,:);
 
