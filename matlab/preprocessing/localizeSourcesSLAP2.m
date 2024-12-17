@@ -12,6 +12,9 @@ IMavg = mean(IM,3, 'omitmissing');
 IMgamma = sqrt(max(0,IMavg));
 sz = size(IM);
 valid = mean(nans,3)<0.25; %a pixel must be imaged at least 75% of the time to be included
+if ~any(valid)
+    error('Recording had no valid pixels; likely too much motion')
+end
 
 %fill in remaining data with smoothing
 if nargin<4

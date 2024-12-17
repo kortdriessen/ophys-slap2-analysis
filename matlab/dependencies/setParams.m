@@ -3,7 +3,7 @@ function params = setParams(fnName, paramsIn, forceGUI)
 
 switch fnName
 
-    case 'summarizeBergamo_NoLoCo'
+    case 'summarizeBergamo_NoLoCo'  %DEPRECATED, DELETE?
         params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
         params.sparseFac = 0.05;         tooltips.sparseFac = 'sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser';
         params.nmfIter = 5;              tooltips.nmfIter = 'number of iterations of NMF refinement';
@@ -33,7 +33,7 @@ switch fnName
         params.motionThresh = 2;         tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
         params.nanThresh = 0.25;        tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
-    case 'summarizeSLAP2'
+    case 'summarizeSLAP2' %DEPRECATED, DELETE?
         params.tau_s = 0.05;            tooltips.tau_s = 'decay time constant of glutamate signal';
         params.analyzeHz = 200; %frame rate used for analysis
         params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
@@ -74,6 +74,11 @@ switch fnName
         params.removeLines = 4; tooltips.removeLines = 'remove this many flyback lines from the top of each image';
         params.ds_time = 3; tooltips.ds_time = 'movies are downsampled (2^ds_time)x in time for alignment';
         params.denoise20Hz = false;
+    case 'extractDendrites'
+        params.manualROIs = false;  tooltips.manualROIs = 'Draw ROIs manually? If false, use SLAP2 ROIs';
+        params.chIdx = 1;           tooltips.chIdx = 'Which channel to analyze?';
+        params.windowWidth_lines = 16; tooltips.windowWidth_lines = 'exponential time averaging constant for signal extraction. bandwidth is 11kHz/windowWidth_lines';
+        params.expectedWindowWidth_lines = 5000; tooltips.expectedWindowWidth_lines = 'exponential time averaging constant for baseline calculation';
     otherwise
         error('Unknown function name passed to setParams.m')
 end             
