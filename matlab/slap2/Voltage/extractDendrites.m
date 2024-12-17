@@ -153,6 +153,6 @@ for tix = 1:nTrials
     title(['Trial' int2str(tix)])   
 end
 summary.nAnalysisROIs = nAnalysisROIs;
-save([dr filesep 'dendriticVoltageSummary.mat'], 'summary', '-v7.3');
+save([dr filesep 'dendriticVoltageSummary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'], 'summary', '-v7.3');
 
 
