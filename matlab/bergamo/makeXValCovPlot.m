@@ -1,10 +1,14 @@
-function results =  makeXValCovPlot(fns, useBackground)
+function results =  makeXValCovPlot(fns, HPfreqs, useBackground)
 
 if nargin<1 || isempty(fns)
     fns = uipickfiles('FilterSpec','*_REGISTERED_RAW.tif');
 end
 
 if nargin < 2
+    HPfreqs = 0;
+end
+
+if nargin < 3
     useBackground = false;
 end
 
@@ -24,7 +28,7 @@ for idx = 1:nXVals
     xval_splits(:,:,idx) = reshape(randperm(nTrials,nTrials - mod(nTrials,2)),size(xval_splits,1:2));
 end
 
-results = table('Size',[0 7],'VariableTypes',{'single','single','single','uint16','string','uint16','uint16'},'VariableNames',["distance","xval_cov","xval_cor","fileIx","file","pix1","pix2"]);
+results = table('Size',[0 8],'VariableTypes',{'single','single','single','single','uint16','string','uint16','uint16'},'VariableNames',["HP_freqs","distance","xval_cov","xval_cor","fileIx","file","pix1","pix2"]);
 
 for fileIx = 1:length(fns)
     fn = fns{fileIx};
@@ -120,17 +124,29 @@ for fileIx = 1:length(fns)
     end
 
     IMsel = IM(labeledPix,:);
+    nanPix = isnan(IMsel);
+    IMsel(nanPix) = 0;
 
-    trialTraces = nan([size(IMsel,1), length(orientations) / length(uniqueOrientations), length(uniqueOrientations), ceil(2 / aData.frametime)]);
+    trialTraces = nan([size(IMsel,1), length(orientations) / length(uniqueOrientations), length(uniqueOrientations), ceil(2 / aData.frametime), length(HPfreqs)]);
+    
+    for freq_ix = 1:length(HPfreqs)
+        if HPfreqs(freq_ix) == 0
+            IMsel(nanPix) = nan;
+            IMselHP = IMsel - movmedian(conv2(IMsel,ones(1,5)/5,'same')',30/aData.frametime,'omitnan')';
+        else
+            IMselHP = highpass(IMsel',HPfreqs(freq_ix),1/aData.frametime)';
+        end
+        IMselHP(nanPix) = nan;
 
-    F = griddedInterpolant(frameClkTrue,IMsel(:,1:length(frameClkTrue))','linear','none');
-    
-    for i = 1:length(orientations)
-        startTime = onTimes(i);
-        endTime = offTimes(i);
-    
-        trialTraces(:,floor((i-1) / length(uniqueOrientations))+1, uniqueOrientations == round(orientations(i) * 360 / 2 / pi),:) ...
-            = F(linspace(startTime,startTime+2,size(trialTraces,4)))';
+        F = griddedInterpolant(frameClkTrue,IMselHP(:,1:length(frameClkTrue))','linear','none');
+        
+        for i = 1:length(orientations)
+            startTime = onTimes(i);
+            endTime = offTimes(i);
+        
+            trialTraces(:,floor((i-1) / length(uniqueOrientations))+1, uniqueOrientations == round(orientations(i) * 360 / 2 / pi),:,freq_ix) ...
+                = F(linspace(startTime,startTime+2,size(trialTraces,4)))';
+        end
     end
 
     warning('off','MATLAB:table:RowsAddedExistingVars')
@@ -150,9 +166,10 @@ for fileIx = 1:length(fns)
     pix2Arr = zeros(nPairs,1,'like',labeledPix);
     fileIxArr = repmat(fileIx, [nPairs,1]); 
     fileArr = repmat(string(fn), nPairs, 1);
+    HPfreqsArr = repmat(reshape(HPfreqs,1,[]),[nPairs,1]);
     distanceArr = zeros(nPairs,1);
-    xval_covArr = nan(nPairs,1);
-    xval_corArr = nan(nPairs,1);
+    xval_covArr = nan(nPairs,length(HPfreqs));
+    xval_corArr = nan(nPairs,length(HPfreqs));
 
     validPairs = false(nPairs,1);
 
@@ -178,26 +195,28 @@ for fileIx = 1:length(fns)
         distanceArr(p) = distVal;
     
         % Compute cross-validated covariance and correlation
-        covs = nan(nXVals,1);
-        corrs = nan(nXVals,1);
+        covs = nan(nXVals,length(HPfreqs));
+        corrs = nan(nXVals,length(HPfreqs));
         for xvalIx = 1:nXVals
             t1_idx = xval_splits(:,1,xvalIx);
             t2_idx = xval_splits(:,2,xvalIx);
-    
-            pix1resp = squeeze(mean(trialTraces(idx,t1_idx,:,:),2,'omitnan'));
-            pix2resp = squeeze(mean(trialTraces(jdx,t2_idx,:,:),2,'omitnan'));
-    
-            % Flatten
-            p1 = pix1resp(:);
-            p2 = pix2resp(:);
-    
-            tmp = cov(p1,p2);
-            covs(xvalIx) = tmp(1,2);
-            corrs(xvalIx) = corr(p1,p2);
+   
+            for freq_ix = 1:length(HPfreqs)
+                pix1resp = squeeze(mean(trialTraces(idx,t1_idx,:,:,freq_ix),2,'omitnan'));
+                pix2resp = squeeze(mean(trialTraces(jdx,t2_idx,:,:,freq_ix),2,'omitnan'));
+        
+                % Flatten
+                p1 = pix1resp(:);
+                p2 = pix2resp(:);
+        
+                tmp = cov(p1,p2);
+                covs(xvalIx,freq_ix) = tmp(1,2);
+                corrs(xvalIx,freq_ix) = corr(p1,p2);
+            end
         end
     
-        xval_covArr(p) = mean(covs,'omitnan');
-        xval_corArr(p) = mean(corrs,'omitnan');
+        xval_covArr(p,:) = mean(covs,1,'omitnan');
+        xval_corArr(p,:) = mean(corrs,1,'omitnan');
     
         validPairs(p) = true;
     end
@@ -207,12 +226,13 @@ for fileIx = 1:length(fns)
     pix2Arr = pix2Arr(validPairs);
     fileIxArr = fileIxArr(validPairs);
     fileArr = fileArr(validPairs);
+    HPfreqsArr = HPfreqsArr(validPairs,:);
     distanceArr = distanceArr(validPairs);
-    xval_covArr = xval_covArr(validPairs);
-    xval_corArr = xval_corArr(validPairs);
+    xval_covArr = xval_covArr(validPairs,:);
+    xval_corArr = xval_corArr(validPairs,:);
 
-    results_movie = table(pix1Arr, pix2Arr, fileIxArr, fileArr, distanceArr, xval_covArr, xval_corArr,...
-    'VariableNames', {'pix1','pix2','fileIx','file','distance','xval_cov','xval_cor'});
+    results_movie = table(pix1Arr, pix2Arr, fileIxArr, fileArr, HPfreqsArr, distanceArr, xval_covArr, xval_corArr,...
+    'VariableNames', {'pix1','pix2','fileIx','file','HP_freqs','distance','xval_cov','xval_cor'});
 
     results = [results; results_movie];
 
