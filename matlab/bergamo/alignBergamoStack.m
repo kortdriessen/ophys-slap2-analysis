@@ -137,15 +137,4 @@ IMHP(isnan(IMHP)) = 0;
 IMHP = imgaussfilt(IMHP, [0.5 0.5])-imgaussfilt(IMHP, [4 4]);
 end
 
-function [IMs,meta, ImDescriptions] = readTiff(tiffFn)
-hTiff= ScanImageTiffReader(tiffFn);
-try
-    ImDescriptions = hTiff.descriptions;
-    meta = hTiff.metadata();
-    IMs = hTiff.data;
-catch ME
-    most.idioms.safeDeleteObj(hTiff);
-    ME.rethrow();
-end
-most.idioms.safeDeleteObj(hTiff);
-end
+
