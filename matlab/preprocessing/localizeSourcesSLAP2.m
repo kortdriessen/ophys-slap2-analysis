@@ -11,8 +11,8 @@ nans = isnan(IM);
 IMavg = mean(IM,3, 'omitmissing');
 IMgamma = sqrt(max(0,IMavg));
 sz = size(IM);
-valid = mean(nans,3)<0.25; %a pixel must be imaged at least 75% of the time to be included
-if ~any(valid)
+valid = mean(nans,3)<params.nanThresh; %a pixel must be imaged at least (1-nanThresh) of the time to be included
+if ~any(valid) & ispc
     error('Recording had no valid pixels; likely too much motion')
 end
 

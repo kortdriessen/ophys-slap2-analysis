@@ -27,6 +27,11 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTria
     discardFrames(1:nInitFrames) = true;
     rawIMs(:,:,discardFrames) = nan;
     
-    
-    [IMc, peaks] = localizeSourcesSLAP2(rawIMs, aData, params);
+    try
+        [IMc, peaks] = localizeSourcesSLAP2(rawIMs, aData, params);
+    catch ME
+        rawIMs([1 end],:,:) = nan;
+        rawIMs(:,[1 end],:) = nan;
+        [IMc, peaks] = localizeSourcesSLAP2(rawIMs, aData, params);
+    end
 end

@@ -203,7 +203,7 @@ for DMDix = nDMDs:-1:1
     p = actIM(pIM);
     sortedP = sort(p, 'descend');
     totalPix = sum(~isnan(actIM(:)) & ~somaMask(:));
-    if totalPix == 0
+    if totalPix == 0 | isempty(p)
         k = 0;
     else
         threshP = 2*sortedP(min(end, ceil(totalPix*params.maxSynapseDensity))); %maximum synapse density
