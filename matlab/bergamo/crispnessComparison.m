@@ -1,6 +1,6 @@
-drs = {'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00001_20240816_142643',
-    'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00002_20240816_143705',
-    'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_00006_20240816_155419',
+drs = {'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\750098\2024-09-24\scans\scan_00001_20240924_110500',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\750098\2024-09-24\scans\scan_00002_20240924_111556',
+    'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\750098\2024-09-24\scans\scan_00006_20240924_120622',
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\758796\2024-10-01\scans\scan_00002_20241001_100847',
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\758796\2024-10-01\scans\scan_00006_20241001_105830',
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\758796\2024-10-01\scans\scan_00008_20241001_112221',
@@ -8,6 +8,17 @@ drs = {'Z:\scratch\ophys\Michael\visual stim characterization\750098\scans\scan_
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00001_20240801_110557',
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00003_20240801_113412',
     'Z:\scratch\ophys\Michael\GluSourceExtractionValidation\743713\20240801\scans\scan_00006_20240801_121111'};
+
+% drs = {'/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/750098_01',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/750098_02',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/750098_06',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/758796_02',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/758796_06',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/758796_08',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/758796_10',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/743713_01',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/743713_03',
+%     '/root/capsule/data/iGluSnFR4f_dendrite_passiveDriftingGratings_Registered/caiman/743713_06'};
 
 ngs_reg = nan(size(drs));
 ngs_orig = nan(size(drs));
