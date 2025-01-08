@@ -60,6 +60,40 @@ for idx = 1:length(drs)
     
     meanIM_reg_crop = meanIM_reg_shifted(any(~isnan(fullFrame_orig),2),any(~isnan(fullFrame_orig),1));
     
+    tmp = nan(size(mov_reg,3)/2,1);
+
+    parfor t = 1:size(mov_reg,3)/2
+        filtFrame = imgaussfilt(mov_reg(:,:,2*t),1);
+        nanPix = isnan(filtFrame);
+        filtFrame(nanPix) = 0;
+        filtFrame = imtranslate(filtFrame,round(templateShifts(2:-1:1)));
+        filtFrame(imtranslate(nanPix,round(templateShifts(2:-1:1)))) = nan;
+        filtFrame =  filtFrame(any(~isnan(fullFrame_orig),2),any(~isnan(fullFrame_orig),1));
+        tmp(t) = corr(filtFrame(~isnan(filtFrame) & ~isnan(meanIM_reg_crop)),meanIM_reg_crop(~isnan(filtFrame) & ~isnan(meanIM_reg_crop)));
+    end
+    % CM_reg{idx} = tmp;
+    mCM_reg(idx) = mean(tmp);
+    intCM_reg(idx) = sum(1-tmp);
+
+    tmp = nan(size(mov_suite2p,3)/2,1);
+
+    parfor t = 1:size(mov_suite2p,3)/2
+        filtFrame = imgaussfilt(mov_suite2p(:,5:end,2*t),1);
+        tmp(t) = corr(filtFrame(:),meanIM_suite2p(:));
+    end
+    % CM_suite2p{idx} = tmp;
+    mCM_suite2p(idx) = mean(tmp);
+    intCM_suite2p(idx) = sum(1-tmp);
+    
+    tmp = nan(size(mov_caiman,3),1);
+    parfor t = 1:size(mov_caiman,3)
+        filtFrame = imgaussfilt(mov_caiman(:,5:end,t),1);
+        tmp(t) = corr(filtFrame(:),meanIM_caiman(:));
+    end
+    % CM_caiman{idx} = tmp;
+    mCM_caiman(idx) = mean(tmp);
+    intCM_caiman(idx) = sum(1-tmp);
+
     figure; subplot(1,4,1); imagesc(meanIM_orig); axis image; colormap gray; %imshow(imfuse(meanIM_reg_crop / prctile(meanIM_reg_crop(:),99.5),meanIM_orig / prctile(meanIM_orig(:),99.5)))
     subplot(1,4,2); imagesc(meanIM_reg_crop); axis image; colormap gray;
     subplot(1,4,3); imagesc(meanIM_caiman); axis image; colormap gray;
@@ -108,6 +142,35 @@ ylabel('% increase in crispness from original')
 % xticks([1])
 % xticklabels({'Strip Registration'})
 
+
+%%
+figure(234); hold on;
+pct_crisp_inc_reg = (ngs_reg ./ ngs_orig - 1) * 100;
+model_labels = categorical(ones(size(pct_crisp_inc_reg)),1,'Unregistered');
+boxchart(model_labels,pct_crisp_inc_reg,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,pct_crisp_inc_reg,'o','filled','b');
+
+pct_crisp_inc_suite2p = (ngs_reg ./ ngs_suite2p - 1) * 100;
+model_labels = categorical(ones(size(pct_crisp_inc_suite2p)),1,'suite2p');
+boxchart(model_labels,pct_crisp_inc_suite2p,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,pct_crisp_inc_suite2p,'o','filled','g');
+
+pct_crisp_inc_caiman = (ngs_reg ./ ngs_caiman - 1) * 100;
+model_labels = categorical(ones(size(pct_crisp_inc_caiman)),1,'CaImAn');
+boxchart(model_labels,pct_crisp_inc_caiman,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,pct_crisp_inc_caiman,'o','filled','r');
+
+% set(gca,'YDir','reverse')
+
+yline(0,'--')
+
+ylims = ylim;
+ylim([-100, ylims(2)])
+
+ylabel('% increase in crispness of strip registration from []')
+% xlim([0.5,1.5])
+% xticks([1])
+% xticklabels({'Strip Registration'})
 %%
 [H,P,CI,STATS]=ttest(ngs_orig,ngs_reg,'Tail','left');
 [P,H,STATS]=signrank(ngs_orig,ngs_reg,'Tail','left');
