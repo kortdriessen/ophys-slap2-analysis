@@ -25,77 +25,51 @@ ngs_suite2p = nan(size(drs));
 ngs_caiman = nan(size(drs));
 ngs_orig = nan(size(drs));
 
+CM_reg = cell(size(drs));
+CM_suite2p = cell(size(drs));
+CM_caiman = cell(size(drs));
+CM_orig = cell(size(drs));
+
 for idx = 1:length(drs)
     disp(['Running file ' num2str(idx)])
 
     basename = drs{idx}(regexp(drs{idx}, 'scan_[0-9]+'):end);
-    
-    mov_reg_fn = fullfile(drs{idx},[basename '_REGISTERED_RAW.tif']);
-    [mov_reg, ~, ~] = networkScanImageTiffReader(mov_reg_fn);
-    
-    mov_suite2p_fn = fullfile(drs{idx},[basename '_SUITE2P_REGISTERED.tif']);
-    [mov_suite2p, ~, ~] = networkScanImageTiffReader(mov_suite2p_fn);
-
-    mov_caiman_fn = fullfile(drs{idx},[basename '_CAIMAN_REGISTERED.tif']);
-    [mov_caiman, ~, ~] = networkScanImageTiffReader(mov_caiman_fn);
 
     mov_orig_fn = fullfile(drs{idx},[basename '.tif']);
     [mov_orig, ~, ~] = networkScanImageTiffReader(mov_orig_fn);
-    
-    meanIM_reg = mean(mov_reg(:,:,2:2:end),3,'omitnan');
-    meanIM_suite2p = mean(mov_suite2p(:,5:end,2:2:end),3,'omitnan');
-    meanIM_caiman = mean(mov_caiman(:,5:end,:),3,'omitnan');
-    meanIM_orig = mean(mov_orig(:,5:end,2:2:end),3,'omitnan');
-    
-    fullFrame_orig = padarray(meanIM_orig, floor((size(meanIM_reg) - size(meanIM_orig))/2),nan,'both');
-    fullFrame_orig = padarray(fullFrame_orig, size(meanIM_reg) - size(fullFrame_orig),nan,'pre');
-    
-    templateShifts = xcorr2_nans(fullFrame_orig,meanIM_reg,[0;0],25);
-    
-    nanPix = isnan(meanIM_reg);
-    meanIM_reg(nanPix) = 0;
-    
-    meanIM_reg_shifted = imtranslate(meanIM_reg,round(templateShifts(2:-1:1)));
-    meanIM_reg_shifted(imtranslate(nanPix,round(templateShifts(2:-1:1)))) = nan;
-    
-    meanIM_reg_crop = meanIM_reg_shifted(any(~isnan(fullFrame_orig),2),any(~isnan(fullFrame_orig),1));
-    
-    tmp = nan(size(mov_reg,3)/2,1);
+    mov_orig = mov_orig(:,5:end,2:2:end);
 
-    parfor t = 1:size(mov_reg,3)/2
-        filtFrame = imgaussfilt(mov_reg(:,:,2*t),1);
-        nanPix = isnan(filtFrame);
-        filtFrame(nanPix) = 0;
-        filtFrame = imtranslate(filtFrame,round(templateShifts(2:-1:1)));
-        filtFrame(imtranslate(nanPix,round(templateShifts(2:-1:1)))) = nan;
-        filtFrame =  filtFrame(any(~isnan(fullFrame_orig),2),any(~isnan(fullFrame_orig),1));
-        tmp(t) = corr(filtFrame(~isnan(filtFrame) & ~isnan(meanIM_reg_crop)),meanIM_reg_crop(~isnan(filtFrame) & ~isnan(meanIM_reg_crop)));
-    end
-    % CM_reg{idx} = tmp;
-    mCM_reg(idx) = mean(tmp);
-    intCM_reg(idx) = sum(1-tmp);
+    load(fullfile(drs{idx},[basename '_ALIGNMENTDATA.mat']))
 
-    tmp = nan(size(mov_suite2p,3)/2,1);
+    motionC_caiman = -h5read(fullfile(drs{idx},[basename '_CAIMAN_ADATA.h5']),'/C');
+    motionC_caiman = motionC_caiman - mean(motionC_caiman) + mean(aData.motionC);
+    motionR_caiman = -h5read(fullfile(drs{idx},[basename '_CAIMAN_ADATA.h5']),'/R');
+    motionR_caiman = motionR_caiman - mean(motionR_caiman) + mean(aData.motionR);
 
-    parfor t = 1:size(mov_suite2p,3)/2
-        filtFrame = imgaussfilt(mov_suite2p(:,5:end,2*t),1);
-        tmp(t) = corr(filtFrame(:),meanIM_suite2p(:));
-    end
-    % CM_suite2p{idx} = tmp;
-    mCM_suite2p(idx) = mean(tmp);
-    intCM_suite2p(idx) = sum(1-tmp);
+    motionC_suite2p = h5read(fullfile(drs{idx},[basename '_SUITE2P_ADATA.h5']),'/R');
+    motionC_suite2p = motionC_suite2p(2:2:end) - mean(motionC_suite2p(2:2:end)) + mean(aData.motionC);
+    motionR_suite2p = h5read(fullfile(drs{idx},[basename '_SUITE2P_ADATA.h5']),'/C');
+    motionR_suite2p = motionR_suite2p(2:2:end) - mean(motionR_suite2p(2:2:end)) + mean(aData.motionR);
+
+    nframes = min([length(aData.motionC),length(motionC_caiman),length(motionC_suite2p)]);
     
-    tmp = nan(size(mov_caiman,3),1);
-    parfor t = 1:size(mov_caiman,3)
-        filtFrame = imgaussfilt(mov_caiman(:,5:end,t),1);
-        tmp(t) = corr(filtFrame(:),meanIM_caiman(:));
+    mov_reg = nan([size(mov_orig,1:2) nframes]);
+    mov_caiman = nan([size(mov_orig,1:2) nframes]);
+    mov_suite2p = nan([size(mov_orig,1:2) nframes]);
+
+    for fix = 1:nframes
+        mov_reg(:,:,fix) = imtranslate(mov_orig(:,:,fix),-[aData.motionR(fix) aData.motionC(fix)],'FillValues',nan);
+        mov_caiman(:,:,fix) = imtranslate(mov_orig(:,:,fix),-[motionR_caiman(fix) motionC_caiman(fix)],'FillValues',nan);
+        mov_suite2p(:,:,fix) = imtranslate(mov_orig(:,:,fix),-[motionR_suite2p(fix) motionC_suite2p(fix)],'FillValues',nan);
     end
-    % CM_caiman{idx} = tmp;
-    mCM_caiman(idx) = mean(tmp);
-    intCM_caiman(idx) = sum(1-tmp);
+
+    meanIM_reg = mean(mov_reg,3,'omitnan');
+    meanIM_suite2p = mean(mov_suite2p,3,'omitnan');
+    meanIM_caiman = mean(mov_caiman,3,'omitnan');
+    meanIM_orig = mean(mov_orig,3,'omitnan');
 
     figure; subplot(1,4,1); imagesc(meanIM_orig); axis image; colormap gray; %imshow(imfuse(meanIM_reg_crop / prctile(meanIM_reg_crop(:),99.5),meanIM_orig / prctile(meanIM_orig(:),99.5)))
-    subplot(1,4,2); imagesc(meanIM_reg_crop); axis image; colormap gray;
+    subplot(1,4,2); imagesc(meanIM_reg); axis image; colormap gray;
     subplot(1,4,3); imagesc(meanIM_caiman); axis image; colormap gray;
     subplot(1,4,4); imagesc(meanIM_suite2p); axis image; colormap gray;
     drawnow;
@@ -103,7 +77,7 @@ for idx = 1:length(drs)
     [gx,gy] = gradient(meanIM_orig);
     ngs_orig(idx) = norm(sqrt(gx.^2+gy.^2),'fro');
     
-    [gx,gy] = gradient(meanIM_reg_crop);
+    [gx,gy] = gradient(meanIM_reg);
     ngs_reg(idx) = norm(sqrt(gx.^2+gy.^2),'fro');
 
     [gx,gy] = gradient(meanIM_caiman);
@@ -111,6 +85,23 @@ for idx = 1:length(drs)
 
     [gx,gy] = gradient(meanIM_suite2p);
     ngs_suite2p(idx) = norm(sqrt(gx.^2+gy.^2),'fro');
+    
+    CM_orig{idx} = nan(nframes,1);
+    CM_reg{idx} = nan(nframes,1);
+    CM_caiman{idx} = nan(nframes,1);
+    CM_suite2p{idx} = nan(nframes,1);
+    
+    mov_orig = reshape(mov_orig(:,:,1:nframes),[],nframes);
+    mov_reg = reshape(mov_reg,[],nframes);
+    mov_caiman = reshape(mov_caiman,[],nframes);
+    mov_suite2p = reshape(mov_suite2p,[],nframes);
+
+    for fix = 1:nframes
+        CM_orig{idx}(fix) = corr(mov_orig(:,fix),meanIM_orig(:),'rows','pairwise');
+        CM_orig{idx}(fix) = corr(mov_reg(:,fix),meanIM_reg(:),'rows','pairwise');
+        CM_orig{idx}(fix) = corr(mov_caiman(:,fix),meanIM_caiman(:),'rows','pairwise');
+        CM_orig{idx}(fix) = corr(mov_suite2p(:,fix),meanIM_suite2p(:),'rows','pairwise');
+    end
 end
 
 %%
@@ -171,6 +162,65 @@ ylabel('% increase in crispness of strip registration from []')
 % xlim([0.5,1.5])
 % xticks([1])
 % xticklabels({'Strip Registration'})
+
+%%
+figure(235); hold on;
+mCM_reg = cellfun(@(x) mean(x,'all'), CM_reg);
+model_labels = categorical(ones(size(mCM_reg)),1,'Strip Registration');
+boxchart(model_labels,mCM_reg,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_reg,'o','filled','b');
+
+mCM_suite2p = cellfun(@(x) mean(x,'all'), CM_suite2p);
+model_labels = categorical(ones(size(mCM_suite2p)),1,'suite2p');
+boxchart(model_labels,mCM_suite2p,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_suite2p,'o','filled','g');
+
+mCM_caiman = cellfun(@(x) mean(x,'all'), CM_caiman);
+model_labels = categorical(ones(size(mCM_caiman)),1,'CaImAn');
+boxchart(model_labels,mCM_caiman,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_caiman,'o','filled','r');
+
+% set(gca,'YDir','reverse')
+
+yline(0,'--')
+
+ylims = ylim;
+% ylim([-100, ylims(2)])
+
+ylabel('mean correlation to the mean image')
+% xlim([0.5,1.5])
+% xticks([1])
+% xticklabels({'Strip Registration'})
+
+%%
+figure(236); hold on;
+mCM_reg = cellfun(@(x) sum(1-x), CM_reg);
+model_labels = categorical(ones(size(mCM_reg)),1,'Strip Registration');
+boxchart(model_labels,mCM_reg,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_reg,'o','filled','b');
+
+mCM_suite2p = cellfun(@(x) sum(1-x), CM_suite2p);
+model_labels = categorical(ones(size(mCM_suite2p)),1,'suite2p');
+boxchart(model_labels,mCM_suite2p,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_suite2p,'o','filled','g');
+
+mCM_caiman = cellfun(@(x) sum(1-x), CM_caiman);
+model_labels = categorical(ones(size(mCM_caiman)),1,'CaImAn');
+boxchart(model_labels,mCM_caiman,'Notch','on','BoxFaceColor','none','BoxEdgeColor','k');
+swarmchart(model_labels,mCM_caiman,'o','filled','r');
+
+% set(gca,'YDir','reverse')
+
+yline(0,'--')
+
+ylims = ylim;
+% ylim([-100, ylims(2)])
+
+ylabel('integrated 1-CM')
+% xlim([0.5,1.5])
+% xticks([1])
+% xticklabels({'Strip Registration'})
+
 %%
 [H,P,CI,STATS]=ttest(ngs_orig,ngs_reg,'Tail','left');
 [P,H,STATS]=signrank(ngs_orig,ngs_reg,'Tail','left');
