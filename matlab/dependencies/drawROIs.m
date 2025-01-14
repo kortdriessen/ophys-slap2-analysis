@@ -44,7 +44,7 @@ classdef drawROIs < handle
     end
 
     methods
-        function obj = drawROIs(IM, dr, fn)
+        function obj = drawROIs(IM, dr, fn, shapedata)
             %IM is XYC
             obj.numChannels = size(IM,3);
             obj.dr = dr;
@@ -85,6 +85,15 @@ classdef drawROIs < handle
             obj.hIm = imshow(IMdisp,'parent', obj.hAx);
             set(obj.hIm, 'HitTest', 'off', 'pickableparts', 'none', 'clipping', 'on')
             set(obj.hAx, 'hittest', 'off', 'PickableParts', 'all')
+
+            %plot outlines
+            if nargin>3 && ~isempty(shapedata)
+            hold(obj.hAx, 'on')
+            for k = 1:length(shapedata)
+                boundary = shapedata{k};
+                plot(obj.hAx, boundary(:,2), boundary(:,1), 'r')
+            end
+            end
         end
 
         function setCh(obj,chIx)

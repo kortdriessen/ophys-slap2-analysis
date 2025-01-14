@@ -6,6 +6,8 @@ function trialTable = buildTrialTableSLAP2(dr)
 %numbers sometimes fail to increment. THis makes some files extra long,
 % and subsequent trial numbers get out of sync
 
+import ScanImageTiffReader.ScanImageTiffReader
+
 %parameters
 lineDiffThresh = 2000; %difference threshold for calling two recordings the same length, in lines. ~0.2 seconds
 

@@ -15,9 +15,6 @@ fullPathToTrialTable = [dr filesep 'trialTable.mat'];
 
 %PARAMETER SETTING
 if nargin>2
-    if ischar(paramsIn)  % Parse JSON String to Structure
-        paramsIn = jsondecode(paramsIn);
-    end
     params = setParams('stripRegBergamo', paramsIn);
 else
     params = setParams('stripRegBergamo');
@@ -77,34 +74,25 @@ fn = strcat(fn,ext);
 disp(['Aligning: ' [dr filesep fn]])
 
 [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
-try
-    evalc(desc{1});
+evalc(desc{1});
 
-    metaLines = strsplit(meta, '\n');
-    for lineIx = 1:length(metaLines)
-        try
-            evalc([metaLines{lineIx} ';']);
-        catch
-        end
+metaLines = strsplit(meta, '\n');
+for lineIx = 1:length(metaLines)
+    try
+        evalc([metaLines{lineIx} ';']);
+    catch
     end
-    numChannels = length(SI.hChannels.channelSave);
-    selCh = 1:numChannels;
-catch  % assume 1 channel if there is no metadata (e.g. simulated data)
-    numChannels = 1;
-    selCh = 1
+end
+numChannels = length(SI.hChannels.channelSave);
+selCh = 1:numChannels;
+
+pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
+for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
+    E = extract(desc{frame}, pat);
+    timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW>
 end
 
-try
-    pat = "frameTimestamps_sec = " + digitsPattern + "." + digitsPattern;
-    for frame = 1:10*numChannels %compute the framerate from the metadata by reading a few frames
-        E = extract(desc{frame}, pat);
-        timestamp(frame) = str2double(E{1}(23:end)); %#ok<AGROW>
-    end
-    frametime = median(diff(timestamp(1:numChannels:end)));
-catch  % use default frametime if there is no metadata (e.g. simulated data)
-    disp('Warning! Failed to compute framerate from metadata. Using default frametime=0.0023')
-    frametime = 0.0023;
-end
+frametime = median(diff(timestamp(1:numChannels:end)));
 aData.numChannels = numChannels;
 aData.frametime = frametime;
 aData.alignHz = 1/frametime/dsFac;

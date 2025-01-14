@@ -11,7 +11,10 @@ nans = isnan(IM);
 IMavg = mean(IM,3, 'omitmissing');
 IMgamma = sqrt(max(0,IMavg));
 sz = size(IM);
-valid = mean(nans,3)<0.25; %a pixel must be imaged at least 75% of the time to be included
+valid = mean(nans,3)<params.nanThresh; %a pixel must be imaged at least (1-nanThresh) of the time to be included
+if ~any(valid) & ispc
+    error('Recording had no valid pixels; likely too much motion')
+end
 
 %fill in remaining data with smoothing
 if nargin<4
@@ -46,7 +49,8 @@ IMf(nans) = nan;
 
 
 %log transform
-B = prctile(IMf(:,:,1:100), 10, 'all') -  prctile(IMf(:,:,1:100), 1, 'all'); %estimate the mean brightness of a 'dim' pixel
+firstValidFrames = find(any(~isnan(IMf), [1 2]),100, 'first');
+B = prctile(IMf(:,:,firstValidFrames), 10, 'all') -  prctile(IMf(:,:,firstValidFrames), 1, 'all'); %estimate the mean brightness of a 'dim' pixel
 IMf(~nans) = log(max(IMf(~nans),0) + B); %convert to log space so linear filtering computes products
 
 %remove all variance that looks like image movement - TESTED 10/17/24, does

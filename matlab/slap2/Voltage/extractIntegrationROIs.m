@@ -1,4 +1,4 @@
-function [ydata, time] = extractIntegrationROIs(smoothwindow, baselinewindow, chIdx)
+function extractIntegrationROIs(smoothwindow, baselinewindow, chIdx)
 
 if nargin<2
     smoothwindow = 20;
@@ -8,13 +8,7 @@ if nargin<3
     chIdx = 1;
 end
 
-% %load a slap2 datafile
-% hDF = slap2.Slap2DataFile();
-% parsePlan = hDF.hDataFile.metaData.AcquisitionContainer.ParsePlan  
-% %for every ROI, get the timeseries
-% [deltaFOverF, dFFerr, tq] = getTimeSeries(hDF, 1, iPixels, 100)
-
-hDataFile = slap2.util.DataFile(); %'acquisition_20230907_175045_DMD2.dat'
+hDataFile = slap2.util.DataFile();
 dt = hDataFile.metaData.linePeriod_s;
 zIdx = 1;
 chIdx = 1;
@@ -43,11 +37,10 @@ for rix = 1:nROIs
     ydata(:,rix) = futures(rix).fetchOutputs();
 end
 time = (0:size(ydata,1)-1).*dt;
-figure, plot(time,ydata);
-xlabel('time (s)')
-ylabel('intensity')
-
-figure,
-imagesc(labels); axis image;
-
-
+[folder, fileName, ~] = fileparts(hDataFile.filename);
+traces_fname = [fileName, '_TRACES', '.mat'];
+traces_fpath = fullfile(folder, traces_fname);
+ROIs_fname = [fileName, '_ROIs', '.tiff'];
+ROIs_fpath = fullfile(folder, ROIs_fname);
+save(traces_fpath, 'time', 'ydata');
+imwrite(uint8(labels), ROIs_fpath, 'tiff');

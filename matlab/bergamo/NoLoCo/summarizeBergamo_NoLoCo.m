@@ -2,6 +2,9 @@ function summarizeBergamo_NoLoCo(fns, dr, paramsIn)
 
 %PARAMETER SETTING
 if nargin>2
+    if ischar(paramsIn)  % Parse JSON String to Structure
+        paramsIn = jsondecode(paramsIn);
+    end
     params = setParams('summarizeBergamo_NoLoCo', paramsIn);
 else
     params = setParams('summarizeBergamo_NoLoCo');
@@ -165,6 +168,7 @@ pp = actIM; pp(~pIM) = 0; pp(pp<threshP) = 0;
 sz = size(pp);
 k = length(sources.R);
 
+if k>0
 % %Generate dFsel and F0selDS; the data only in the selected region, aligned across movies
 % selPix = false(sz(1:2));
 % for sourceIx = k:-1:1
@@ -242,6 +246,7 @@ end
 
 %prepare file for saving
 exptSummary.E = E;
+end
 exptSummary.fns = fns;
 exptSummary.dr = dr;
 exptSummary.params = params;
