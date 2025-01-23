@@ -16,7 +16,8 @@ import h5py
 import napari
 import importlib
 
-from skimage import io as skimio, restoration
+from skimage import io as skimio
+from skimage import draw
 from sklearn.cluster import DBSCAN, OPTICS, HDBSCAN
 
 sys.path.append('C:\\Users\\michael.xie\\Documents\\SLAP2_Utils\\')
@@ -37,6 +38,7 @@ from tqdm import tqdm
 
 import warnings
 
+from qtpy.QtWidgets import QPushButton, QApplication, QMessageBox
 
 def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sparseHInds, sparseHVals, 
                 allSuperPixelIDs, convMatrix, refR, refC, dr, trialTable):
@@ -132,6 +134,8 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
     residual = data/100 - baseline*dataCt
     residual_norm = residual / np.sqrt(baseline*dataCt)
 
+    residual = residual / dataCt
+
     params['decayTau_s'] = 0.03
 
     decayTau_frames = params['decayTau_s']*params['analyzeHz']
@@ -198,19 +202,20 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
     for sp in range(numSuperPixels):
         neighbors = getNeighbors(refPixIm,(np.int64(refR[sp]),np.int64(refC[sp])))
         # find the indices of the neighbors in subsampleMatrixInds
-        neighborInds = []
-        for neigh in neighbors:
-            tmp = np.where((refR.int() == neigh[0]) & (refC.int() == neigh[1]))[0]
-            neighborInds.append(tmp)
+        if len(neighbors) > 1:
+            neighborInds = []
+            for neigh in neighbors:
+                tmp = np.where((refR.int() == neigh[0]) & (refC.int() == neigh[1]))[0]
+                neighborInds.append(tmp)
 
-        neighborMatrix[sp,neighborInds] = 1
+            neighborMatrix[sp,neighborInds] = 1
     
     temporalPeaks = (residual_filt > np.roll(residual_filt,1,axis=1)) & (residual_filt > np.roll(residual_filt,-1,axis=1)) # & (R_filt > (high + 2*(high - low)))
 
     allPeaks = temporalPeaks.copy()
 
     for sp,t in zip(*np.where(temporalPeaks)):
-        if residual_filt[sp,t] < residual_filt[neighborMatrix[sp,:].astype(bool),t].max():
+        if neighborMatrix[sp,:].sum() == 0 or residual_filt[sp,t] < residual_filt[neighborMatrix[sp,:].astype(bool),t].max():
             allPeaks[sp,t] = 0
 
     allPeakLocs = np.where(allPeaks.flatten())[0]
@@ -291,11 +296,16 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
     def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
         x, y = xy
         exponent = -((x - x0)**2 / (2 * sigma_x**2) + (y - y0)**2 / (2 * sigma_y**2))
-        return amplitude * np.exp(exponent)
+        return amplitude/(2*np.pi*sigma_x*sigma_y) * np.exp(exponent)
 
     trial_peaks = []
+    trial_peaks_gaussian = []
     trial_original_peaks = []
+    trial_original_peaks_gaussian = []
     trial_peak_vals = []
+    trial_peak_vals_gaussian = []
+
+    trial_peak_sds = []
 
     for sp,t in zip(*np.where(finalPeaks)):
         # if t > 1500:
@@ -306,14 +316,19 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
         newR = int(tmpR + np.round(aData['motionDSr'][t]))
         newC = int(tmpC + np.round(aData['motionDSc'][t]))
 
-        residual_filt_frame = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow,3))
+        residual_filt_frame = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
         residual_filt_frame[:] = np.nan
 
-        residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t])), refC.int() + int(np.round(aData['motionDSc'][t])),0] = residual_filt[:,t]
-        if t < numCycles-1:
-            residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t+1])), refC.int() + int(np.round(aData['motionDSc'][t+1])),1] = residual_filt[:,t+1]
-        if t > 0:
-            residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t-1])), refC.int() + int(np.round(aData['motionDSc'][t-1])),2] = residual_filt[:,t-1]
+        for ix in range(len(decay_kernel)):
+            dt = ix - len(decay_kernel)//2
+            if t+dt >= 0 and t+dt < numCycles:
+                residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t+dt])), refC.int() + int(np.round(aData['motionDSc'][t+dt])),ix] = residual[:,t+dt]
+
+        # residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t])), refC.int() + int(np.round(aData['motionDSc'][t])),0] = residual_filt[:,t]
+        # if t < numCycles-1:
+        #     residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t+1])), refC.int() + int(np.round(aData['motionDSc'][t+1])),1] = residual_filt[:,t+1]
+        # if t > 0:
+        #     residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t-1])), refC.int() + int(np.round(aData['motionDSc'][t-1])),2] = residual_filt[:,t-1]
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -341,6 +356,19 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
             # Update peak position based on the Gaussian fit
             peakR = np.int64(newR) - patchWidth//2 + y0
             peakC = np.int64(newC) - patchWidth//2 + x0
+
+            if amplitude <= 0 or sigma_x >= 5 or sigma_y >= 15 or sigma_x < 1 or sigma_y < 1 or y0 < 0 or y0 >= patchWidth or x0 < 0 or x0 >= patchWidth:
+                # trial_peaks.append((peakR,peakC,t))
+                # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
+                # trial_peak_vals.append(residual_filt[sp,t])
+                continue
+
+            trial_peaks_gaussian.append((peakR,peakC,t))
+            trial_original_peaks_gaussian.append((np.int64(newR),np.int64(newC),t))
+            trial_peak_vals_gaussian.append(amplitude)
+            # trial_peak_vals_gaussian.append(residual_filt[sp,t])
+
+            trial_peak_sds.append((sigma_x,sigma_y))
         except:
             # If fitting fails, use quadratic interpolation
             rowNeighbors = getRowNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
@@ -366,14 +394,14 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
                 continue
                 peakR = np.int64(newR)
 
-        trial_peaks.append((peakR,peakC,t))
-        trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
+        # trial_peaks.append((peakR,peakC,t))
+        # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
 
-        trial_peak_vals.append(residual_filt[sp,t])
+        # trial_peak_vals.append(residual_filt[sp,t])
 
         # peakSDs.append((fwhm[0]/2/np.sqrt(Y[sp,t]+1e-3),fwhm[1]/2/np.sqrt(Y[sp,t]+1e-3)))    # peakSDs.append((4.5,1))
 
-    return trial_peaks, trial_original_peaks, trial_peak_vals
+    return trial_peaks_gaussian, trial_original_peaks_gaussian, trial_peak_vals_gaussian
 
 def main():
     # load SLAP2 data folder
@@ -669,42 +697,130 @@ def main():
         peaksPix = []
         originalPeaks = []
         finalPeakVals = []
+        trialIndices = []
 
-        for trial_peaks, trial_original_peaks, trial_peak_vals in results:
+        for trial_idx, (trial_peaks, trial_original_peaks, trial_peak_vals) in enumerate(results):
             peaksPix.extend(trial_peaks)
-            originalPeaks.extend(trial_original_peaks)
+            originalPeaks.extend(trial_original_peaks) 
             finalPeakVals.extend(trial_peak_vals)
+            trialIndices.extend([trial_idx] * len(trial_peaks))
 
-        # Save peaks to file
-        peaks_array = np.array(peaksPix)
-        output_filename = os.path.join(params['savedr'], f'peaks_DMD{DMDix+1}.npy')
-        np.save(output_filename, peaks_array)
-        print(f"Saved peaks to {output_filename}")
+        # Save all peak data to a single file
+        peak_data = {
+            'peaksPix': np.array(peaksPix),
+            'originalPeaks': np.array(originalPeaks),
+            'finalPeakVals': np.array(finalPeakVals),
+            'trialIndices': np.array(trialIndices)
+        }
+        output_filename = os.path.join(params['savedr'], f'peak_data_DMD{DMDix+1}.npz')
+        np.savez(output_filename, **peak_data)
+        print(f"Saved peak data to {output_filename}")
 
         # peaks histogram
-        peaksHist = np.zeros((dmdPixelsPerColumn//4,dmdPixelsPerRow*1))
+        peaksHist = np.zeros((dmdPixelsPerColumn//2,dmdPixelsPerRow*1))
+
+        scaled_finalPeakVals = np.clip(finalPeakVals, None, np.percentile(finalPeakVals, 95))
+        # scaled_finalPeakVals = scaled_finalPeakVals - np.min(scaled_finalPeakVals)
+        # scaled_finalPeakVals = scaled_finalPeakVals / np.max(scaled_finalPeakVals)
 
         for i in range(len(peaksPix)):
-            try:
-                peaksHist[round(peaksPix[i][0]/4),round(peaksPix[i][1]*1)] += 1
-            except:
-                continue
+            peaksHist[round(peaksPix[i][0]/2),round(peaksPix[i][1]*1)] += np.sqrt(scaled_finalPeakVals[i])
 
         peaksHist[peaksHist == 0] = np.nan
 
-        viewer = napari.view_image(refStack[f'DMD{DMDix+1}'][0], colormap='cyan')
+        roi_viewer = napari.view_image(refStack[f'DMD{DMDix+1}'][0], colormap='cyan')
 
         # Create a napari viewer with the correct aspect ratio
-        viewer.add_image(
+        roi_viewer.add_image(
             peaksHist,
             name='Peaks Histogram',
             colormap='red',
-            scale=(4, 1)
+            scale=(2, 1)
         )
 
-        viewer.add_points(np.array(peaksPix)[:,:2], size=1, face_color='magenta', edge_color='magenta',opacity=0.3)
+        roi_viewer.add_points(np.array(peaksPix)[:,:2], size=1, face_color='magenta', edge_color='magenta',opacity=0.3)
 
-        napari.run()
+        roi_layer = roi_viewer.add_shapes(name='ROIs',face_color=[1,1,0,0.1],edge_color='yellow',edge_width=1)
+        roi_layer.mode = 'add_polygon'
+
+        # Use a list to store both ROIs and done status
+        result = {'roi_verts': None, 'roi_shapes': None, 'done': False}
+
+        # Check if saved ROIs exist
+        saved_masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
+        if os.path.exists(saved_masks_filename):
+            load_saved = QMessageBox.question(None, 'Question', 'Load saved ROIs?') == QMessageBox.Yes
+            if load_saved == 'Yes':
+                # Load saved masks
+                masks_array = np.load(saved_masks_filename)
+                
+                # Convert masks back to vertices
+                roi_verts = []
+                roi_shapes = []
+                for mask in masks_array:
+                    # Find contours of the mask
+                    contours = draw.find_contours(mask, 0.5)
+                    if len(contours) > 0:
+                        # Take the largest contour
+                        contour = contours[0]
+                        roi_verts.append(contour)
+                        roi_shapes.append('polygon')
+                
+                # Add shapes to viewer
+                roi_layer.add_shapes(roi_verts, shape_type=roi_shapes)
+                result['roi_verts'] = roi_verts
+                result['roi_shapes'] = roi_shapes
+                result['done'] = False
+                napari.utils.notifications.show_info('Loaded saved ROIs')
+
+        if not result['done']:
+            # Callback for Done button
+            def on_done():
+                if 'ROIs' in roi_viewer.layers:
+                    result['roi_verts'] = roi_viewer.layers['ROIs'].data
+                    result['roi_shapes'] = roi_viewer.layers['ROIs'].shape_type
+                    result['done'] = True
+                    napari.utils.notifications.show_info('ROIs captured!')
+
+            # Add Done button
+            done_button = QPushButton("Done")
+            done_button.clicked.connect(on_done)
+
+            roi_viewer.window.add_dock_widget(done_button, area='right')
+            napari.utils.notifications.show_info('Draw ROIs and click "Done" when ready.')
+
+            # Keep checking until Done is clicked
+            while not result['done']:
+                QApplication.processEvents()
+                time.sleep(0.1)
+
+        if len(result['roi_verts']) > 0:
+            # Create masks for each ROI
+            masks = []
+            for i, roi_coords in enumerate(result['roi_verts']):
+                mask = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow), dtype=bool)
+                coords = np.round(roi_coords).astype(int)
+
+                if result['roi_shapes'][i] in ['polygon', 'rectangle']:
+                    rr, cc = draw.polygon(coords[:,0], coords[:,1])
+                elif result['roi_shapes'][i] == 'ellipse':
+                    center_y = (coords[0][0] + coords[2][0]) / 2
+                    center_x = (coords[0][1] + coords[2][1]) / 2
+                    height = (coords[2][0] - coords[0][0]) / 2  # semi-major axis
+                    width = (coords[1][1] - coords[0][1]) / 2   # semi-minor axis
+                    rr, cc = draw.ellipse(center_y, center_x, height, width)
+                else:
+                    raise ValueError(f"Unknown ROI shape: {result['roi_shapes'][i]}")
+                
+                valid = (rr >= 0) & (rr < dmdPixelsPerColumn) & (cc >= 0) & (cc < dmdPixelsPerRow)
+                mask[rr[valid], cc[valid]] = True
+                masks.append(mask)
+
+            # Save masks to file
+            masks_array = np.array(masks)
+            masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
+            np.save(masks_filename, masks_array)
+            print(f"Saved {len(masks)} ROI masks to {masks_filename}")
 
         break
 
