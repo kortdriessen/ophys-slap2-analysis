@@ -94,7 +94,7 @@ for fileIx = 1:length(fns)
     [nRow, nCol, ~] = size(Ad);
 
     Ad = reshape(Ad, size(Ad,1), size(Ad,2), aData.numChannels, []);
-    disp([num2str(size(Ad,4)) ' frames read']);
+    disp([num2str(size(Ad,4)) ' frames read, ' num2str(aData.numChannels) ' channels']);
     IM = reshape(Ad(:,:,min(end,activityChannel),:),[],size(Ad,4));
     clear Ad;
     
