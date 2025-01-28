@@ -22,8 +22,6 @@ from sklearn.cluster import DBSCAN, OPTICS, HDBSCAN
 
 sys.path.append('C:\\Users\\michael.xie\\Documents\\SLAP2_Utils\\')
 from slap2_utils.datafile import DataFile
-from slap2_utils.subclasses.metadata import MetaData
-from slap2_utils.utils.trace import Trace, TracePixel
 
 sys.path.append('C:\\Users\\michael.xie\\Documents\\ophys-slap2-analysis\\python')
 import reconstruct
@@ -40,8 +38,10 @@ import warnings
 
 from qtpy.QtWidgets import QPushButton, QApplication, QMessageBox
 
-def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sparseHInds, sparseHVals, 
-                allSuperPixelIDs, convMatrix, refR, refC, dr, trialTable):
+import plotly.graph_objects as go
+
+def get_trial_data(trial_data, DMDix, params, refStack, subsampleMatrixInds, sparseHInds, sparseHVals, 
+                allSuperPixelIDs, dr, trialTable):
     trialIx, keepTrial = trial_data
     
     if not keepTrial:
@@ -130,276 +130,8 @@ def get_trial_peaks(trial_data, DMDix, params, refStack, subsampleMatrixInds, sp
                 
                 data[matching_indices, DSframeIx] += allLineData[lineIdx][matched_positions,0]
                 dataCt[matching_indices, DSframeIx] += 1
-
-    residual = data/100 - baseline*dataCt
-    residual_norm = residual / np.sqrt(baseline*dataCt)
-
-    residual = residual / dataCt
-
-    params['decayTau_s'] = 0.03
-
-    decayTau_frames = params['decayTau_s']*params['analyzeHz']
-
-    decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
-
-    residual_filt = signal.convolve2d(convMatrix @ residual_norm,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
-
-    # make a function to get the nearest neighbors of a pixel in a sparse image
-    def getNeighbors(image, pixel):
-        colNeighbors = getColNeighbors(image, pixel)
-        rowNeighbors = getRowNeighbors(image, pixel)
-
-        # combine colNeighbors and rowNeighbors
-        neighbors = colNeighbors + rowNeighbors
-
-        return neighbors
-
-    def getColNeighbors(image, pixel):
-        # get the row and column of the pixel
-        r = pixel[0]
-        c = pixel[1]
-
-        # column neighbors are the first pixels above or below that are not nan
-        colNeighbors = np.where(~np.isnan(image[:,c]))[0]
-        colNeighbors = colNeighbors[max(0,(colNeighbors < r).sum()-1):len(colNeighbors)-max(0,(colNeighbors > r).sum()-1)]
-
-        colNeighbors = np.array([colNeighbors, np.ones(colNeighbors.shape)*c],dtype=np.int64)
-        colNeighbors = colNeighbors[:,(colNeighbors[0] != r) | (colNeighbors[1] != c)]
-
-        colNeighbors = list(zip(colNeighbors[0],colNeighbors[1]))
-
-        return colNeighbors
-
-    def getRowNeighbors(image, pixel):
-        r = pixel[0]
-        c = pixel[1]
-
-        # row neighbors are the first pixels left or right (or slightly diagonal) that are not nan
-        rowNeighbors = np.where(~np.isnan(image[r-2:r+3,:]))
-
-        # sort rowNeighbors by rowNeighbors[1]
-        rowNeighbors = np.array(sorted(zip(rowNeighbors[0],rowNeighbors[1]),key=lambda x: x[1]),dtype=np.int64).T
-
-        if (len(rowNeighbors) == 0):
-            print(pixel)
-
-        rowNeighbors = rowNeighbors[:,max(0,(rowNeighbors[1] < c).sum()-1):len(rowNeighbors[1])-max(0,(rowNeighbors[1] > c).sum()-1)]
-        rowNeighbors[0] = rowNeighbors[0] + r-2
-
-        # remove current pixel from rowNeighbors
-        rowNeighbors = rowNeighbors[:,(rowNeighbors[0] != r) | (rowNeighbors[1] != c)]
-
-        rowNeighbors = list(zip(rowNeighbors[0],rowNeighbors[1]))
-
-        return rowNeighbors
     
-    neighborMatrix = np.zeros((numSuperPixels,numSuperPixels))
-
-    refPixIm = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
-    refPixIm[:] = np.nan
-    refPixIm[refR.int(),refC.int()] = 1
-
-    for sp in range(numSuperPixels):
-        neighbors = getNeighbors(refPixIm,(np.int64(refR[sp]),np.int64(refC[sp])))
-        # find the indices of the neighbors in subsampleMatrixInds
-        if len(neighbors) > 1:
-            neighborInds = []
-            for neigh in neighbors:
-                tmp = np.where((refR.int() == neigh[0]) & (refC.int() == neigh[1]))[0]
-                neighborInds.append(tmp)
-
-            neighborMatrix[sp,neighborInds] = 1
-    
-    temporalPeaks = (residual_filt > np.roll(residual_filt,1,axis=1)) & (residual_filt > np.roll(residual_filt,-1,axis=1)) # & (R_filt > (high + 2*(high - low)))
-
-    allPeaks = temporalPeaks.copy()
-
-    for sp,t in zip(*np.where(temporalPeaks)):
-        if neighborMatrix[sp,:].sum() == 0 or residual_filt[sp,t] < residual_filt[neighborMatrix[sp,:].astype(bool),t].max():
-            allPeaks[sp,t] = 0
-
-    allPeakLocs = np.where(allPeaks.flatten())[0]
-    peakVals = residual_filt[np.unravel_index(allPeakLocs,(numSuperPixels,numCycles))]
-
-    kde = stats.gaussian_kde(peakVals)
-    x_range = np.linspace(peakVals.min(), peakVals.max(), 1000)
-
-    mode_idx = np.argmax(kde(x_range))
-    bottom_half = peakVals[peakVals < x_range[mode_idx]]
-    # bottom_half_kde = stats.gaussian_kde(bottom_half)
-    bottom_half_x_range = np.linspace(bottom_half.min(), bottom_half.max(), 500)
-
-    def truncated_normal(x, mu, sigma, K):
-        return K * stats.truncnorm.pdf(x, -np.inf, 0, loc=mu, scale=sigma)
-
-    popt, _ = curve_fit(lambda x, mu, sigma, K: truncated_normal(x, mu, sigma, K), bottom_half_x_range, kde(bottom_half_x_range), p0=[x_range[mode_idx], np.std(bottom_half), 1])
-    
-    fit_mu = popt[0]
-    fit_sigma = popt[1]
-    fit_K = popt[2]
-
-    # plt.hist(peakVals,bins=100)
-    # plt.plot(x_range,truncated_normal(x_range,fit_mu,fit_sigma,fit_K,-np.inf,np.inf),'r-')
-
-    noise_dist = stats.norm.pdf(x_range,fit_mu,fit_sigma)*fit_K*2
-
-    signal_dist = kde(x_range) - noise_dist
-    signal_dist[x_range < fit_mu] = 0
-    signal_dist[signal_dist < 0] = 0
-
-    # plt.plot(x_range,kde(x_range),'k-')
-    # plt.plot(x_range,noise_dist,'r-')
-    # plt.plot(x_range,signal_dist,'b-')
-
-    total_kde_integral = np.trapz(kde(x_range), x_range)
-    # total_noise_dist = np.trapz(noise_dist, x_range)
-    # total_signal_dist = np.trapz(signal_dist, x_range)
-
-    # plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
-    # plt.plot(x_range,noise_dist / total_kde_integral,'r-')
-    # plt.plot(x_range,signal_dist / total_kde_integral,'b-')
-
-    intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / kde(x_range))
-    peakVal_thresh = x_range[intersection_idx]
-    intersection_y = noise_dist[intersection_idx]
-
-    # # Plot intersection point
-    # plt.plot(peakVal_thresh, intersection_y, 'go', label='Noise/Signal Intersection')
-
-    # plt.xlabel('Peak Values')
-    # plt.ylabel('Probability Density')
-    # plt.title('PDF of Peak Values')
-    # plt.legend()
-    # plt.grid(True)
-    # plt.show()
-
-    plt.figure()
-    plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
-    plt.plot(x_range,noise_dist / total_kde_integral,'r-')
-    plt.plot(x_range,signal_dist / total_kde_integral,'b-')
-    plt.plot(peakVal_thresh, intersection_y, 'go')
-    plt.xlabel('Peak Values')
-    plt.ylabel('Probability Density')
-    plt.title('PDF of Peak Values')
-    plt.savefig(os.path.join(params['savedr'], f'peak_value_distributions_DMD{DMDix+1}_T{trialIx+1}.png'))
-    plt.close()
-
-    # low = np.percentile(peakVals,1)
-    # high = np.percentile(peakVals,50)
-
-    # finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
-    finalPeakLocs = allPeakLocs[peakVals > peakVal_thresh]
-
-    finalPeaks = np.zeros((numSuperPixels,numCycles))
-    finalPeaks[np.unravel_index(finalPeakLocs,(numSuperPixels,numCycles))] = 1
-
-    def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
-        x, y = xy
-        exponent = -((x - x0)**2 / (2 * sigma_x**2) + (y - y0)**2 / (2 * sigma_y**2))
-        return amplitude/(2*np.pi*sigma_x*sigma_y) * np.exp(exponent)
-
-    trial_peaks = []
-    trial_peaks_gaussian = []
-    trial_original_peaks = []
-    trial_original_peaks_gaussian = []
-    trial_peak_vals = []
-    trial_peak_vals_gaussian = []
-
-    trial_peak_sds = []
-
-    for sp,t in zip(*np.where(finalPeaks)):
-        # if t > 1500:
-        #     continue
-        tmpR = refR[sp]
-        tmpC = refC[sp]
-
-        newR = int(tmpR + np.round(aData['motionDSr'][t]))
-        newC = int(tmpC + np.round(aData['motionDSc'][t]))
-
-        residual_filt_frame = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
-        residual_filt_frame[:] = np.nan
-
-        for ix in range(len(decay_kernel)):
-            dt = ix - len(decay_kernel)//2
-            if t+dt >= 0 and t+dt < numCycles:
-                residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t+dt])), refC.int() + int(np.round(aData['motionDSc'][t+dt])),ix] = residual[:,t+dt]
-
-        # residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t])), refC.int() + int(np.round(aData['motionDSc'][t])),0] = residual_filt[:,t]
-        # if t < numCycles-1:
-        #     residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t+1])), refC.int() + int(np.round(aData['motionDSc'][t+1])),1] = residual_filt[:,t+1]
-        # if t > 0:
-        #     residual_filt_frame[refR.int() + int(np.round(aData['motionDSr'][t-1])), refC.int() + int(np.round(aData['motionDSc'][t-1])),2] = residual_filt[:,t-1]
-
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-            residual_filt_frame = np.nanmean(residual_filt_frame,axis=2)
-
-        patchWidth = 21
-        peakPatch = residual_filt_frame[np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
-        
-        # Create x and y coordinates
-        y, x = np.indices(peakPatch.shape)
-        xy = np.column_stack((x.ravel(), y.ravel()))
-        
-        # Initial guess for parameters
-        initial_guess = [np.nanmax(peakPatch), patchWidth//2, patchWidth//2, 2, 2]
-        # Fit the 2D Gaussian
-        try:
-            # Ignore NaNs in peakPatch
-            valid_mask = ~np.isnan(peakPatch.ravel())
-            x_valid = x.ravel()[valid_mask]
-            y_valid = y.ravel()[valid_mask]
-            peakPatch_valid = peakPatch.ravel()[valid_mask]
-            popt, _ = curve_fit(gaussian_2d, (x_valid, y_valid), peakPatch_valid, p0=initial_guess)
-            amplitude, x0, y0, sigma_x, sigma_y = popt
-            
-            # Update peak position based on the Gaussian fit
-            peakR = np.int64(newR) - patchWidth//2 + y0
-            peakC = np.int64(newC) - patchWidth//2 + x0
-
-            if amplitude <= 0 or sigma_x >= 5 or sigma_y >= 15 or sigma_x < 1 or sigma_y < 1 or y0 < 0 or y0 >= patchWidth or x0 < 0 or x0 >= patchWidth:
-                # trial_peaks.append((peakR,peakC,t))
-                # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
-                # trial_peak_vals.append(residual_filt[sp,t])
-                continue
-
-            trial_peaks_gaussian.append((peakR,peakC,t))
-            trial_original_peaks_gaussian.append((np.int64(newR),np.int64(newC),t))
-            trial_peak_vals_gaussian.append(amplitude)
-            # trial_peak_vals_gaussian.append(residual_filt[sp,t])
-
-            trial_peak_sds.append((sigma_x,sigma_y))
-        except:
-            # If fitting fails, use quadratic interpolation
-            rowNeighbors = getRowNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
-            colNeighbors = getColNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
-
-            if len(rowNeighbors) >= 2:
-                # ratioC = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]]))
-                # dC = (1-ratioC)/(1+ratioC)/2
-                # peakC = np.int64(newC) - dC
-
-                peakC = (np.int64(newC)*residual_filt_frame[np.int64(newR),np.int64(newC)] + rowNeighbors[0][1]*residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + rowNeighbors[1][1]*residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])
-            else:
-                continue
-                peakC = np.int64(newC)
-
-            if len(colNeighbors) >= 2:
-                # ratioR = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[0][0],colNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[1][0],colNeighbors[1][1]]))
-                # dR = (1-ratioR)/(1+ratioR)/2 * 4.5
-                # peakR = np.int64(newR) - dR
-
-                peakR = (np.int64(newR)*residual_filt_frame[np.int64(newR),np.int64(newC)] + colNeighbors[0][0]*residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + colNeighbors[1][0]*residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])
-            else:
-                continue
-                peakR = np.int64(newR)
-
-        # trial_peaks.append((peakR,peakC,t))
-        # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
-
-        # trial_peak_vals.append(residual_filt[sp,t])
-
-        # peakSDs.append((fwhm[0]/2/np.sqrt(Y[sp,t]+1e-3),fwhm[1]/2/np.sqrt(Y[sp,t]+1e-3)))    # peakSDs.append((4.5,1))
+    return data/100, dataCt, baseline, aData
 
     return trial_peaks_gaussian, trial_original_peaks_gaussian, trial_peak_vals_gaussian
 
@@ -491,9 +223,10 @@ def main():
     params['discardInitial_s'] = 0.1
     params['numChannels'] = aData['numChannels'][0,0]
     params['alignHz'] = aData['alignHz'][0,0]
-    params['analyzeHz'] = 1/aData['frametime'][0,0]
+    params['analyzeHz'] = 200
     params['activityChannel'] = 1
     params['savedr'] = savedr
+    params['decayTau_s'] = 0.03
 
     # Get the lookup file path
     lookupFile = trialTable['lookupFile'][0]
@@ -673,10 +406,10 @@ def main():
 
             convMatrix[spIdx,:] = tmpMap[refR.int(),refC.int()]
 
-        trial_data = [(i, keepTrials[DMDix,i]) for i in range(nTrials)]
+        trial_info = [(i, keepTrials[DMDix,i]) for i in range(nTrials)]
 
-        get_trial_peaks_partial = partial(
-            get_trial_peaks,
+        get_trial_data_partial = partial(
+            get_trial_data,
             DMDix=DMDix,
             params=params,
             refStack=refStack,
@@ -684,15 +417,312 @@ def main():
             sparseHInds=sparseHInds,
             sparseHVals=sparseHVals,
             allSuperPixelIDs=allSuperPixelIDs,
-            convMatrix=convMatrix,
-            refR=refR,
-            refC=refC,
             dr=dr,
             trialTable=trialTable
         )
 
         with mp.Pool(processes=mp.cpu_count()) as pool:
-            results = list(tqdm(pool.imap(get_trial_peaks_partial, trial_data), total=len(trial_data),desc="Processing trials"))
+            results = list(tqdm(pool.imap(get_trial_data_partial, trial_info), total=len(trial_info),desc="Processing trials"))
+
+        # Concatenate trial data
+        data = np.concatenate([r[0] for r in results if len(r[0]) > 0], axis=1)
+        dataCt = np.concatenate([r[1] for r in results if len(r[1]) > 0], axis=1)
+        baseline = np.concatenate([r[2] for r in results if len(r[2]) > 0], axis=1)
+        motionDSr = np.concatenate([r[3]['motionDSr'] for r in results], axis=0)
+        motionDSc = np.concatenate([r[3]['motionDSc'] for r in results], axis=0)
+        motionDSz = np.concatenate([r[3]['motionDSz'] for r in results], axis=0)
+
+        # get peaks
+        residual = data - baseline*dataCt
+        residual_norm = residual / np.sqrt(baseline*dataCt)
+
+        residual = residual / dataCt
+
+        decayTau_frames = params['decayTau_s']*params['alignHz']
+
+        decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
+
+        residual_filt = signal.convolve2d(convMatrix @ residual_norm,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
+
+        # make a function to get the nearest neighbors of a pixel in a sparse image
+        def getNeighbors(image, pixel):
+            colNeighbors = getColNeighbors(image, pixel)
+            rowNeighbors = getRowNeighbors(image, pixel)
+
+            # combine colNeighbors and rowNeighbors
+            neighbors = colNeighbors + rowNeighbors
+
+            return neighbors
+
+        def getColNeighbors(image, pixel):
+            # get the row and column of the pixel
+            r = pixel[0]
+            c = pixel[1]
+
+            # column neighbors are the first pixels above or below that are not nan
+            colNeighbors = np.where(~np.isnan(image[:,c]))[0]
+            colNeighbors = colNeighbors[max(0,(colNeighbors < r).sum()-1):len(colNeighbors)-max(0,(colNeighbors > r).sum()-1)]
+
+            colNeighbors = np.array([colNeighbors, np.ones(colNeighbors.shape)*c],dtype=np.int64)
+            colNeighbors = colNeighbors[:,(colNeighbors[0] != r) | (colNeighbors[1] != c)]
+
+            colNeighbors = list(zip(colNeighbors[0],colNeighbors[1]))
+
+            return colNeighbors
+
+        def getRowNeighbors(image, pixel):
+            r = pixel[0]
+            c = pixel[1]
+
+            # row neighbors are the first pixels left or right (or slightly diagonal) that are not nan
+            rowNeighbors = np.where(~np.isnan(image[r-2:r+3,:]))
+
+            # sort rowNeighbors by rowNeighbors[1]
+            rowNeighbors = np.array(sorted(zip(rowNeighbors[0],rowNeighbors[1]),key=lambda x: x[1]),dtype=np.int64).T
+
+            if (len(rowNeighbors) == 0):
+                print(pixel)
+
+            rowNeighbors = rowNeighbors[:,max(0,(rowNeighbors[1] < c).sum()-1):len(rowNeighbors[1])-max(0,(rowNeighbors[1] > c).sum()-1)]
+            rowNeighbors[0] = rowNeighbors[0] + r-2
+
+            # remove current pixel from rowNeighbors
+            rowNeighbors = rowNeighbors[:,(rowNeighbors[0] != r) | (rowNeighbors[1] != c)]
+
+            rowNeighbors = list(zip(rowNeighbors[0],rowNeighbors[1]))
+
+            return rowNeighbors
+        
+        neighborMatrix = np.zeros((numSuperPixels,numSuperPixels))
+
+        refPixIm = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
+        refPixIm[:] = np.nan
+        refPixIm[refR.int(),refC.int()] = 1
+
+        for sp in range(numSuperPixels):
+            neighbors = getNeighbors(refPixIm,(np.int64(refR[sp]),np.int64(refC[sp])))
+            # find the indices of the neighbors in subsampleMatrixInds
+            if len(neighbors) > 1:
+                neighborInds = []
+                for neigh in neighbors:
+                    tmp = np.where((refR.int() == neigh[0]) & (refC.int() == neigh[1]))[0]
+                    neighborInds.append(tmp)
+
+                neighborMatrix[sp,neighborInds] = 1
+        
+        # Find temporal peaks using vectorized operations
+        temporalPeaks = (residual_filt > np.roll(residual_filt,1,axis=1)) & (residual_filt > np.roll(residual_filt,-1,axis=1))
+
+        # Pre-compute neighbor masks and max values
+        neighbor_sums = neighborMatrix.sum(axis=1)
+        neighbor_mask = neighbor_sums > 0
+        
+        # Convert sparse neighborMatrix to CSR format for efficient operations
+        neighborMatrix_sparse = sparse.csr_matrix(neighborMatrix)
+        
+        # Get max values for each neighbor group at each timepoint using matrix multiplication
+        # This avoids the double loop and uses efficient sparse matrix operations
+        neighbor_maxes = np.zeros_like(residual_filt)
+        
+        # Define function for parallel processing
+        def process_timepoint(t):
+            return np.asarray(np.max(neighborMatrix_sparse.multiply(np.tile(residual_filt[:,t],
+                            (neighborMatrix_sparse.shape[1],1))),axis=0)).flatten()
+        
+        with mp.Pool() as pool:
+            results = list(tqdm(
+                pool.imap(process_timepoint, range(residual_filt.shape[1])),
+                total=residual_filt.shape[1],
+                desc="Processing timepoints"
+            ))
+            
+        # Combine results into neighbor_maxes array
+        for t, result in enumerate(results):
+            neighbor_maxes[:,t] = result
+        # Create mask for valid peaks using broadcasting
+        valid_peaks = (neighbor_mask[:,None] & 
+                      (residual_filt >= neighbor_maxes)) | ~neighbor_mask[:,None]
+        
+        # Apply masks to get final peaks
+        allPeaks = temporalPeaks & valid_peaks
+        
+        # Get peak locations and values efficiently
+        allPeakLocs = np.where(allPeaks.ravel())[0]
+        peakVals = residual_filt.ravel()[allPeakLocs]
+
+        kde = stats.gaussian_kde(peakVals)
+        x_range = np.linspace(peakVals.min(), peakVals.max(), 1000)
+
+        mode_idx = np.argmax(kde(x_range))
+        bottom_half = peakVals[peakVals < x_range[mode_idx]]
+        # bottom_half_kde = stats.gaussian_kde(bottom_half)
+        bottom_half_x_range = np.linspace(bottom_half.min(), bottom_half.max(), 500)
+
+        def truncated_normal(x, mu, sigma, K):
+            return K * stats.truncnorm.pdf(x, -np.inf, 0, loc=mu, scale=sigma)
+
+        popt, _ = curve_fit(lambda x, mu, sigma, K: truncated_normal(x, mu, sigma, K), bottom_half_x_range, kde(bottom_half_x_range), p0=[x_range[mode_idx], np.std(bottom_half), 1])
+        
+        fit_mu = popt[0]
+        fit_sigma = popt[1]
+        fit_K = popt[2]
+
+        # plt.hist(peakVals,bins=100)
+        # plt.plot(x_range,truncated_normal(x_range,fit_mu,fit_sigma,fit_K,-np.inf,np.inf),'r-')
+
+        noise_dist = stats.norm.pdf(x_range,fit_mu,fit_sigma)*fit_K*2
+
+        signal_dist = kde(x_range) - noise_dist
+        signal_dist[x_range < fit_mu] = 0
+        signal_dist[signal_dist < 0] = 0
+
+        # plt.plot(x_range,kde(x_range),'k-')
+        # plt.plot(x_range,noise_dist,'r-')
+        # plt.plot(x_range,signal_dist,'b-')
+
+        total_kde_integral = np.trapz(kde(x_range), x_range)
+        # total_noise_dist = np.trapz(noise_dist, x_range)
+        # total_signal_dist = np.trapz(signal_dist, x_range)
+
+        # plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
+        # plt.plot(x_range,noise_dist / total_kde_integral,'r-')
+        # plt.plot(x_range,signal_dist / total_kde_integral,'b-')
+
+        intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / kde(x_range))
+        peakVal_thresh = x_range[intersection_idx]
+        intersection_y = noise_dist[intersection_idx]
+
+        # # Plot intersection point
+        # plt.plot(peakVal_thresh, intersection_y, 'go', label='Noise/Signal Intersection')
+
+        # plt.xlabel('Peak Values')
+        # plt.ylabel('Probability Density')
+        # plt.title('PDF of Peak Values')
+        # plt.legend()
+        # plt.grid(True)
+        # plt.show()
+
+        plt.figure()
+        plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
+        plt.plot(x_range,noise_dist / total_kde_integral,'r-')
+        plt.plot(x_range,signal_dist / total_kde_integral,'b-')
+        plt.plot(peakVal_thresh, intersection_y, 'go')
+        plt.xlabel('Peak Values')
+        plt.ylabel('Probability Density')
+        plt.title('PDF of Peak Values')
+        plt.savefig(os.path.join(params['savedr'], f'peak_value_distributions_DMD{DMDix+1}_T{trialIx+1}.png'))
+        plt.close()
+
+        # low = np.percentile(peakVals,1)
+        # high = np.percentile(peakVals,50)
+
+        # finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
+        finalPeakLocs = allPeakLocs[peakVals > peakVal_thresh]
+
+        finalPeaks = np.zeros((numSuperPixels,numCycles))
+        finalPeaks[np.unravel_index(finalPeakLocs,(numSuperPixels,numCycles))] = 1
+
+        def gaussian_2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
+            x, y = xy
+            exponent = -((x - x0)**2 / (2 * sigma_x**2) + (y - y0)**2 / (2 * sigma_y**2))
+            return amplitude/(2*np.pi*sigma_x*sigma_y) * np.exp(exponent)
+
+        trial_peaks = []
+        trial_peaks_gaussian = []
+        trial_original_peaks = []
+        trial_original_peaks_gaussian = []
+        trial_peak_vals = []
+        trial_peak_vals_gaussian = []
+
+        trial_peak_sds = []
+
+        for sp,t in zip(*np.where(finalPeaks)):
+            # if t > 1500:
+            #     continue
+            tmpR = refR[sp]
+            tmpC = refC[sp]
+
+            newR = int(tmpR + np.round(motionDSr[t]))
+            newC = int(tmpC + np.round(motionDSc[t]))
+
+            residual_filt_frame = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
+            residual_filt_frame[:] = np.nan
+
+            for ix in range(len(decay_kernel)):
+                dt = ix - len(decay_kernel)//2
+                if t+dt >= 0 and t+dt < numCycles:
+                    residual_filt_frame[refR.int() + int(np.round(motionDSr[t+dt])), refC.int() + int(np.round(motionDSc[t+dt])),ix] = residual[:,t+dt]
+
+            # residual_filt_frame[refR.int() + int(np.round(motionDSr[t])), refC.int() + int(np.round(motionDSc[t])),0] = residual_filt[:,t]
+            # if t < numCycles-1:
+            #     residual_filt_frame[refR.int() + int(np.round(motionDSr[t+1])), refC.int() + int(np.round(motionDSc[t+1])),1] = residual_filt[:,t+1]
+            # if t > 0:
+            #     residual_filt_frame[refR.int() + int(np.round(motionDSr[t-1])), refC.int() + int(np.round(motionDSc[t-1])),2] = residual_filt[:,t-1]
+
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", category=RuntimeWarning)
+                residual_filt_frame = np.nanmean(residual_filt_frame,axis=2)
+
+            patchWidth = 21
+            peakPatch = residual_filt_frame[np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
+            
+            # Create x and y coordinates
+            y, x = np.indices(peakPatch.shape)
+            xy = np.column_stack((x.ravel(), y.ravel()))
+            
+            # Initial guess for parameters
+            initial_guess = [np.nanmax(peakPatch), patchWidth//2, patchWidth//2, 2, 2]
+            # Fit the 2D Gaussian
+            try:
+                # Ignore NaNs in peakPatch
+                valid_mask = ~np.isnan(peakPatch.ravel())
+                x_valid = x.ravel()[valid_mask]
+                y_valid = y.ravel()[valid_mask]
+                peakPatch_valid = peakPatch.ravel()[valid_mask]
+                popt, _ = curve_fit(gaussian_2d, (x_valid, y_valid), peakPatch_valid, p0=initial_guess)
+                amplitude, x0, y0, sigma_x, sigma_y = popt
+                
+                # Update peak position based on the Gaussian fit
+                peakR = np.int64(newR) - patchWidth//2 + y0
+                peakC = np.int64(newC) - patchWidth//2 + x0
+
+                if amplitude <= 0 or sigma_x >= 5 or sigma_y >= 15 or sigma_x < 1 or sigma_y < 1 or y0 < 0 or y0 >= patchWidth or x0 < 0 or x0 >= patchWidth:
+                    # trial_peaks.append((peakR,peakC,t))
+                    # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
+                    # trial_peak_vals.append(residual_filt[sp,t])
+                    continue
+
+                trial_peaks_gaussian.append((peakR,peakC,t))
+                trial_original_peaks_gaussian.append((np.int64(newR),np.int64(newC),t))
+                trial_peak_vals_gaussian.append(amplitude)
+                # trial_peak_vals_gaussian.append(residual_filt[sp,t])
+
+                trial_peak_sds.append((sigma_x,sigma_y))
+            except:
+                # If fitting fails, use quadratic interpolation
+                rowNeighbors = getRowNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
+                colNeighbors = getColNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
+
+                if len(rowNeighbors) >= 2:
+                    # ratioC = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]]))
+                    # dC = (1-ratioC)/(1+ratioC)/2
+                    # peakC = np.int64(newC) - dC
+
+                    peakC = (np.int64(newC)*residual_filt_frame[np.int64(newR),np.int64(newC)] + rowNeighbors[0][1]*residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + rowNeighbors[1][1]*residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])
+                else:
+                    continue
+                    peakC = np.int64(newC)
+
+                if len(colNeighbors) >= 2:
+                    # ratioR = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[0][0],colNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[1][0],colNeighbors[1][1]]))
+                    # dR = (1-ratioR)/(1+ratioR)/2 * 4.5
+                    # peakR = np.int64(newR) - dR
+
+                    peakR = (np.int64(newR)*residual_filt_frame[np.int64(newR),np.int64(newC)] + colNeighbors[0][0]*residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + colNeighbors[1][0]*residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])
+                else:
+                    continue
+                    peakR = np.int64(newR)
+
 
         peaksPix = []
         originalPeaks = []
@@ -822,8 +852,79 @@ def main():
             np.save(masks_filename, masks_array)
             print(f"Saved {len(masks)} ROI masks to {masks_filename}")
 
+            traces, _ , _ , _ = np.linalg.lstsq(masks_array.reshape((masks_array.shape[0],-1)).T, integration_movie.T.reshape((-1,integration_movie.shape[0])))
+
+            def plot_time_series(traces, time_points=None, title='Time Series'):
+                """
+                Create interactive plotly figure for multiple time series
+                
+                Parameters:
+                traces: np.array of shape (n_traces, n_timepoints)
+                time_points: optional array of time values
+                title: string for plot title
+                
+                Returns:
+                None (saves interactive HTML file)
+                """
+                
+                # Create time points if not provided
+                if time_points is None:
+                    time_points = np.arange(traces.shape[1])
+                
+                # Create figure
+                fig = go.Figure()
+                
+                # Add each time series
+                for i in range(traces.shape[0]):
+                    fig.add_trace(
+                        go.Scatter(
+                            x=time_points,
+                            y=traces[i],
+                            name=f'Trace {i+1}',
+                            mode='lines',
+                            hovertemplate='Time: %{x}<br>Value: %{y:.2f}<extra></extra>'
+                        )
+                    )
+                
+                # Update layout
+                fig.update_layout(
+                    title=title,
+                    xaxis_title='Time Point',
+                    yaxis_title='Value',
+                    showlegend=True,
+                    # Add range slider
+                    xaxis=dict(
+                        rangeslider=dict(visible=True),
+                        type='linear'
+                    ),
+                    # Make it more interactive
+                    hovermode='x unified'
+                )
+                
+                # Save as HTML file
+                fig.write_html(os.path.join(params['savedr'],f'traces_plot_DMD{DMDix+1}.html'))
+                
+                # Optionally display in notebook
+                # fig.show()
+
+            # Use the function
+            plot_time_series(traces, title='20 Time Series')
+
         break
 
 if __name__ == '__main__':
     main()
 
+# integrationMovie = np.zeros((residual_filt.shape[1],800,1280))
+# integrationMovie[:] = np.nan
+
+# residual_filt_movie = np.zeros((residual_filt.shape[1],800,1280))
+# residual_filt_movie[:] = np.nan
+
+# for t in range(residual_filt.shape[1]):
+#     integrationMovie[t,refR.int() + int(np.round(motionDSr[t])), refC.int() + int(np.round(motionDSc[t]))] = data[:,t] / 100 / dataCt[:,t]
+#     residual_filt_movie[t,refR.int() + int(np.round(motionDSr[t])), refC.int() + int(np.round(motionDSc[t]))] = residual_filt[:,t]
+
+# peaks3D = []
+# for sp,t in zip(*np.where(finalPeaks)):
+#     peaks3D.append((t, refR[sp].int() + int(np.round(motionDSr[t])), refC[sp].int() + int(np.round(motionDSc[t]))))
