@@ -2,3 +2,5 @@
 *.mat
 *.tif
 *.asv
+matlab/slap2/pathdef.m
+Copy_of_+ScanImageTiffReader
