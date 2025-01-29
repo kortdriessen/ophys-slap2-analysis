@@ -20,13 +20,12 @@ from skimage import io as skimio
 from skimage import draw
 from sklearn.cluster import DBSCAN, OPTICS, HDBSCAN
 
-sys.path.append('C:\\Users\\michael.xie\\Documents\\SLAP2_Utils\\')
-from slap2_utils.datafile import DataFile
+from slap2_utils import DataFile
 
-sys.path.append('C:\\Users\\michael.xie\\Documents\\ophys-slap2-analysis\\python')
+sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
 
-sys.path.append('C:\\Users\\michael.xie\\Documents\\ophys-slap2-analysis\\python\\slap2analysis')
+sys.path.append(str(Path(__file__).parent))
 import deconvlucy
 
 import multiprocessing as mp
