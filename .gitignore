@@ -2,3 +2,6 @@
 *.mat
 *.tif
 *.asv
+__pycache__/
+*.pyc
+*.pyo
