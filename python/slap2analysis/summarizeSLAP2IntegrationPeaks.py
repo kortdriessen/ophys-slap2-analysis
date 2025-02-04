@@ -17,7 +17,7 @@ import napari
 import importlib
 
 from skimage import io as skimio
-from skimage import draw
+from skimage import draw, measure
 from sklearn.cluster import DBSCAN, OPTICS, HDBSCAN
 
 from slap2_utils import DataFile
@@ -197,8 +197,10 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     
     trial_ix, data, dataCt, baseline, (motionDSr, motionDSc, motionDSz) = trialData
 
-    numCycles = motionDSr.shape[1]
+    numCycles = motionDSr.shape[0]
     numSuperPixels = data.shape[0]
+
+    # print(f"{trial_ix}; numSuperPixels: {numSuperPixels}, numCycles: {numCycles} data: {data.shape}, motionDSr: {motionDSr.shape}")
 
     # get peaks
     residual = data - baseline*dataCt
@@ -219,7 +221,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # This avoids the double loop and uses efficient sparse matrix operations
     neighbor_maxes = np.zeros_like(residual_filt)
 
-    neighbor_sums = neighborMatrix_sparse.sum(axis=1).toarray().flatten() 
+    neighbor_sums = np.array(neighborMatrix_sparse.sum(axis=1)).flatten() 
     neighbor_mask = neighbor_sums > 0
     
     for t in range(residual_filt.shape[1]):
@@ -247,7 +249,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     def truncated_normal(x, mu, sigma, K):
         return K * stats.truncnorm.pdf(x, -np.inf, 0, loc=mu, scale=sigma)
 
-    print('fitting peak value pdf...')
+    # print('fitting peak value pdf...')
     popt, _ = curve_fit(lambda x, mu, sigma, K: truncated_normal(x, mu, sigma, K), bottom_half_x_range, kde(bottom_half_x_range), p0=[x_range[mode_idx], np.std(bottom_half), 1])
 
     fit_mu = popt[0]
@@ -275,7 +277,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # plt.plot(x_range,noise_dist / total_kde_integral,'r-')
     # plt.plot(x_range,signal_dist / total_kde_integral,'b-')
 
-    intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / kde(x_range))
+    intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / (kde(x_range)+1e-8))
     peakVal_thresh = x_range[intersection_idx]
     intersection_y = noise_dist[intersection_idx]
 
@@ -289,7 +291,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # plt.grid(True)
     # plt.show()
 
-    print('plotting peak values pdf')
+    # print(f"{trial_ix} plotting peak values pdf")
     plt.figure()
     plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
     plt.plot(x_range,noise_dist / total_kde_integral,'r-')
@@ -305,7 +307,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # high = np.percentile(peakVals,50)
 
     # finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
-    print('choose top peaks')
+    # print(f"{trial_ix} choose top peaks")
     finalPeakLocs = allPeakLocs[peakVals > peakVal_thresh]
 
     finalPeaks = np.zeros((numSuperPixels,numCycles))
@@ -411,10 +413,12 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     return trial_peaks, trial_original_peaks, trial_peak_vals
 
 def get_traces(trial_ix, roi_masks, DMDix, trialTable):
-
+    print(f"Getting trial {trial_ix+1} traces")
     integration_movie = skimio.imread(trialTable['fnRegDSInt'][DMDix,trial_ix][0])
+    integration_movie = integration_movie[::2]
+    integration_movie[np.isnan(integration_movie)] = 0
     
-    traces, _ , _ , _ = np.linalg.lstsq(roi_masks.reshape((roi_masks.shape[0],-1)).T, integration_movie.T.reshape((-1,integration_movie.shape[0])))
+    traces, _ , _ , _ = np.linalg.lstsq(roi_masks.reshape((roi_masks.shape[0],-1)).T, integration_movie.T.reshape((-1,integration_movie.shape[0])), rcond=None)
 
     return traces
 
@@ -689,6 +693,7 @@ def main():
             convMatrix[spIdx,:] = tmpMap[refR.int(),refC.int()]
 
         trial_info = [(i, keepTrials[DMDix,i]) for i in range(nTrials)]
+        # processes = []
 
         get_trial_data_partial = partial(
             get_trial_data,
@@ -703,16 +708,24 @@ def main():
             trialTable=trialTable
         )
 
-        with mp.Pool(processes=mp.cpu_count()) as pool:
+        # for info in trial_info:
+        #     p = mp.Process(target=get_trial_data_partial, args=(info,))
+        #     p.start()
+        #     processes.append(p)
+
+        # for p in processes:
+        #     p.join()
+
+        with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
             results = list(pool.imap(get_trial_data_partial, trial_info))
 
         # Concatenate trial data
-        data = [r[0] for r in results]
-        dataCt = [r[1] for r in results]
-        baseline = [r[2] for r in results]
-        motionDSr = [r[3]['motionDSr'] for r in results]
-        motionDSc = [r[3]['motionDSc'] for r in results]
-        motionDSz = [r[3]['motionDSz'] for r in results]
+        # data = [r[0] for r in results]
+        # dataCt = [r[1] for r in results]
+        # baseline = [r[2] for r in results]
+        # motionDSr = [r[3]['motionDSr'] for r in results]
+        # motionDSc = [r[3]['motionDSc'] for r in results]
+        # motionDSz = [r[3]['motionDSz'] for r in results]
 
         neighborMatrix = np.zeros((numSuperPixels,numSuperPixels))
 
@@ -809,29 +822,32 @@ def main():
         result = {'roi_verts': None, 'roi_shapes': None, 'done': False}
 
         # Check if saved ROIs exist
-        saved_masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
-        if os.path.exists(saved_masks_filename):
+        masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
+        if os.path.exists(masks_filename):
             load_saved = QMessageBox.question(None, 'Question', 'Load saved ROIs?') == QMessageBox.Yes
-            if load_saved == 'Yes':
+            if load_saved:
+                print('Loading saved ROIs')
                 # Load saved masks
-                masks_array = np.load(saved_masks_filename)
+                result['roi_verts'], result['roi_shapes'] = np.load(masks_filename,allow_pickle=True)
                 
-                # Convert masks back to vertices
-                roi_verts = []
-                roi_shapes = []
-                for mask in masks_array:
-                    # Find contours of the mask
-                    contours = draw.find_contours(mask, 0.5)
-                    if len(contours) > 0:
-                        # Take the largest contour
-                        contour = contours[0]
-                        roi_verts.append(contour)
-                        roi_shapes.append('polygon')
+                # # Convert masks back to vertices
+                # roi_verts = []
+                # roi_shapes = []
+                # for mask in masks_array:
+                #     # Find contours of the mask
+                #     contours = measure.find_contours(mask, 0.5)
+                #     if len(contours) > 0:
+                #         # Take the largest contour
+                #         contour = contours[0]
+                #         roi_verts.append(contour)
+                #         roi_shapes.append('polygon')
                 
                 # Add shapes to viewer
-                roi_layer.add_shapes(roi_verts, shape_type=roi_shapes)
-                result['roi_verts'] = roi_verts
-                result['roi_shapes'] = roi_shapes
+                # roi_layer.add_shapes(roi_verts, shape_type=roi_shapes)
+
+                roi_layer.data = result['roi_verts']
+                roi_layer.shape_type = result['roi_shapes']
+
                 result['done'] = False
                 napari.utils.notifications.show_info('Loaded saved ROIs')
 
@@ -839,8 +855,8 @@ def main():
             # Callback for Done button
             def on_done():
                 if 'ROIs' in roi_viewer.layers:
-                    result['roi_verts'] = roi_viewer.layers['ROIs'].data
-                    result['roi_shapes'] = roi_viewer.layers['ROIs'].shape_type
+                    result['roi_verts'] = roi_layer.data
+                    result['roi_shapes'] = roi_layer.shape_type
                     result['done'] = True
                     napari.utils.notifications.show_info('ROIs captured!')
 
@@ -857,6 +873,8 @@ def main():
                 time.sleep(0.1)
 
         if len(result['roi_verts']) > 0:
+            np.save(masks_filename, np.array([result['roi_verts'],result['roi_shapes']], dtype=object))
+
             # Create masks for each ROI
             masks = []
             for i, roi_coords in enumerate(result['roi_verts']):
@@ -880,8 +898,6 @@ def main():
 
             # Save masks to file
             masks_array = np.array(masks)
-            masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
-            np.save(masks_filename, masks_array)
             print(f"Saved {len(masks)} ROI masks to {masks_filename}")
 
             get_traces_partial = partial(
@@ -891,10 +907,13 @@ def main():
                 trialTable = trialTable
             )
 
-            with mp.Pool(processes=mp.cpu_count()) as pool:
+            with mp.Pool(processes=4) as pool:
                 results = list(tqdm(pool.imap(get_traces_partial, range(nTrials)), total=nTrials, desc="Getting Traces"))
             
-            np.save(os.path.join(params['savedr'], f'traces_DMD{DMDix+1}.npy'), results)
+            for i, res in enumerate(results):
+                print(f"Trial {i+1}: type = {type(res)}, shape = {res.shape if isinstance(res, np.ndarray) else 'Not an array'}")
+
+            np.savez(os.path.join(params['savedr'], f'traces_DMD{DMDix+1}.npz'), *results)
 
             # def plot_time_series(traces, time_points=None, title='Time Series'):
             #     """
