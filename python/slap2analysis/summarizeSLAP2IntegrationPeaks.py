@@ -413,7 +413,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     return trial_peaks, trial_original_peaks, trial_peak_vals
 
 def get_traces(trial_ix, roi_masks, DMDix, trialTable):
-    print(f"Getting trial {trial_ix+1} traces")
+    # print(f"Getting trial {trial_ix+1} traces")
     integration_movie = skimio.imread(trialTable['fnRegDSInt'][DMDix,trial_ix][0])
     integration_movie = integration_movie[::2]
     integration_movie[np.isnan(integration_movie)] = 0
@@ -910,9 +910,6 @@ def main():
             with mp.Pool(processes=4) as pool:
                 results = list(tqdm(pool.imap(get_traces_partial, range(nTrials)), total=nTrials, desc="Getting Traces"))
             
-            for i, res in enumerate(results):
-                print(f"Trial {i+1}: type = {type(res)}, shape = {res.shape if isinstance(res, np.ndarray) else 'Not an array'}")
-
             np.savez(os.path.join(params['savedr'], f'traces_DMD{DMDix+1}.npz'), *results)
 
             # def plot_time_series(traces, time_points=None, title='Time Series'):
@@ -971,7 +968,7 @@ def main():
             # # Use the function
             # plot_time_series(traces, title='20 Time Series')
 
-        break
+        # break
 
 if __name__ == '__main__':
     main()
