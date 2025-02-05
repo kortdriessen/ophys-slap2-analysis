@@ -277,7 +277,9 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # plt.plot(x_range,noise_dist / total_kde_integral,'r-')
     # plt.plot(x_range,signal_dist / total_kde_integral,'b-')
 
-    intersection_idx = np.argmin(np.abs(noise_dist - signal_dist) / (kde(x_range)+1e-8))
+    valid_x_range = (signal_dist > max(signal_dist) * 0.1) | (noise_dist > max(noise_dist) * 0.1)
+    intersection_idx = np.argmin(np.abs(noise_dist[valid_x_range] - signal_dist[valid_x_range]) / (noise_dist[valid_x_range]+1e-8))
+    intersection_idx = np.where(valid_x_range)[0][intersection_idx]
     peakVal_thresh = x_range[intersection_idx]
     intersection_y = noise_dist[intersection_idx]
 
@@ -296,7 +298,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     plt.plot(x_range,kde(x_range) / total_kde_integral,'k-')
     plt.plot(x_range,noise_dist / total_kde_integral,'r-')
     plt.plot(x_range,signal_dist / total_kde_integral,'b-')
-    plt.plot(peakVal_thresh, intersection_y, 'go')
+    plt.plot(peakVal_thresh, intersection_y / total_kde_integral, 'go')
     plt.xlabel('Peak Values')
     plt.ylabel('Probability Density')
     plt.title('PDF of Peak Values')
