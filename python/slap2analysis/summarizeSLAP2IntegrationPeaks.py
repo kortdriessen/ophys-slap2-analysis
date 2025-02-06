@@ -540,6 +540,7 @@ def main():
         lt = f['lookupTable']
         refs = f['#refs#']
         
+        # see if this can be made compatible for variable nDMDs
         # allSuperPixelIDs
         allSuperPixelIDs_refs = lt['allSuperPixelIDs'][:].flat
         allSuperPixelIDs = {'DMD1': refs[allSuperPixelIDs_refs[0]][:].T.astype(np.int32),
@@ -554,12 +555,12 @@ def main():
 
     # Print shapes to verify
     print("Shapes:")
-    for DMDix in range(2):
+    for DMDix in range(nDMDs):
         print(f"allSuperPixelIDs DMD{DMDix+1}: {allSuperPixelIDs['DMD'+str(DMDix+1)].shape}")
         print(f"sparseMaskInds DMD{DMDix+1}: {sparseMaskInds['DMD'+str(DMDix+1)].shape}")
 
     refStack = {}
-    for DMDix in range(2):
+    for DMDix in range(nDMDs):
         pattern = f"**/*DMD{DMDix+1}_CONFIG2-REFERENCE*"
         matching_files = list(Path(dr).glob(pattern))
         if matching_files:
@@ -568,7 +569,7 @@ def main():
             numChannels = len(trialTable['refStack'][0,DMDix]['channels'][0,0].T)
             refStackTmp = skimio.imread(first_file) / 100
             refStackTmp = refStackTmp.reshape(-1, numChannels, refStackTmp.shape[1], refStackTmp.shape[2]).transpose(1,0,2,3)
-            refStack['DMD'+str(DMDix+1)] = refStackTmp
+            refStack[f'DMD{DMDix+1}'] = refStackTmp
         else:
             print(f"No matching files found for DMD{DMDix+1}")
 
@@ -586,13 +587,13 @@ def main():
 
     if not os.path.exists(psf_path):
         psf = {}
-        for DMDix in range(2):
+        for DMDix in range(nDMDs):
             print(f"Calculating PSF for DMD{DMDix+1}")
             numChannels = len(trialTable['refStack'][0,DMDix]['channels'][0,0].T)
             IM_dil5 = trialTable['refStack'][0,DMDix]['IM'][0,0].transpose(2,1,0)
             IM_dil5 = IM_dil5.reshape(-1, numChannels, IM_dil5.shape[1], IM_dil5.shape[2]).transpose(1,0,2,3)
 
-            tmp = deconvlucy.deconvlucy(refStack[f'DMD{DMDix+1}'][0], IM_dil5[0], num_iter=100)
+            tmp = deconvlucy.deconvlucy(refStack[f'DMD{DMDix+1}'][0], IM_dil5[0], num_iter=50)
             tmp = tmp[np.argmax(np.sum(tmp, axis=(1,2)))]
 
             # Fit elongated 2D Gaussian to the PSF
@@ -629,18 +630,23 @@ def main():
 
             psf[f'DMD{DMDix+1}'] = (tmp+tmp[-1::-1,:]+tmp[:,::-1]+tmp[-1::-1,::-1])/4
 
-        # save as two channel tiff
-        # Create 2-channel array for PSF
-        psf_combined = np.zeros((2, psf['DMD1'].shape[0], psf['DMD1'].shape[1]))
-        psf_combined[0] = psf['DMD1']
-        psf_combined[1] = psf['DMD2']
+        combined_dims = [0,0]
+        for DMDix in range(nDMDs):
+            combined_dims[0] = max(psf[f'DMD{DMDix+1}'].shape[0], combined_dims[0])
+            combined_dims[1] = max(psf[f'DMD{DMDix+1}'].shape[1], combined_dims[1])
+
+        psf_combined = np.zeros((nDMDs, combined_dims[0], combined_dims[1]))
+        for DMDix in range(nDMDs):
+            psf_combined[DMDix] = np.pad(psf[f'DMD{DMDix+1}'], (((combined_dims[0] - psf[f'DMD{DMDix+1}'].shape[0])//2,(combined_dims[0] - psf[f'DMD{DMDix+1}'].shape[0])//2), ((combined_dims[1] - psf[f'DMD{DMDix+1}'].shape[1])//2,(combined_dims[1] - psf[f'DMD{DMDix+1}'].shape[1])//2)), constant_values = np.min(psf[f'DMD{DMDix+1}']))
+
         skimio.imsave(psf_path, psf_combined.astype(np.float32))
     else:
         psf_combined = skimio.imread(psf_path)
-        psf = {
-            'DMD1': psf_combined[0],
-            'DMD2': psf_combined[1]
-        }
+    
+    psf = {
+        'DMD1': psf_combined[0],
+        'DMD2': psf_combined[1]
+    }
 
     del psf_combined
 
@@ -679,10 +685,12 @@ def main():
 
         for spIdx in range(subsampleMatrixInds.shape[0]):
             tmpMap = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
+            tmpMap[:] = np.nan
+
             tmpMap[refR[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[0]//2+1,refC[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
 
             sparseHInds[0,spIdx*filterSize:(spIdx+1)*filterSize] = subsampleMatrixInds[spIdx,1] - 1
-            sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize] = np.where(tmpMap.flatten() > 0)[0]
+            sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize] = np.where(~np.isnan(tmpMap.flatten()))[0]
 
             sparseHVals[spIdx*filterSize:(spIdx+1)*filterSize] = tmpMap.flatten()[sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize].astype(np.uint32)]
 
