@@ -112,11 +112,13 @@ for fix = 1:numel(fns)
         if i == 1
             offIdxs = find((frameClkTrue > startTime - 1) & (frameClkTrue < startTime));
         else
-            offIdxs = find((frameClkTrue > offTimes(i-1)) & (frameClkTrue < startTime));
+            % offIdxs = find((frameClkTrue > offTimes(i-1)) & (frameClkTrue < startTime));
+            offIdxs = find((frameClkTrue > startTime-0.5) & (frameClkTrue < startTime));
         end
         
         pixResponse(:, floor((i-1) / length(uniqueOrientations))+1, uniqueOrientations == round(orientations(i) * 360 / 2 / pi)) ...
-            = max(0,mean(dF(:,trialIdxs),2,'omitnan') - mean(dF(:,offIdxs),2,'omitnan'));
+            = mean(dF(:,trialIdxs),2,'omitnan') - mean(dF(:,offIdxs),2,'omitnan');
+        %max(0,mean(dF(:,trialIdxs),2,'omitnan') - mean(dF(:,offIdxs),2,'omitnan'));
         %mean(IM(:,trialIdxs),2,'omitnan') - mean(IM(:,offIdxs),2,'omitnan');
 
         pixResponse(mean(isnan(dF(:,trialIdxs)),2) > 0.1 | mean(isnan(dF(:,offIdxs)),2) > 0.1, ...
@@ -128,7 +130,8 @@ for fix = 1:numel(fns)
     pixDir = nan(nRow*nCol,1);
     pixOSI = nan(nRow*nCol,1);
     
-    pixAmp = sqrt(sum(squeeze(mean(pixResponse,2,'omitnan')).^2,2,'omitmissing'));
+    pixAmp = squeeze(mean(mean(pixResponse,2,'omitnan'),3,'omitnan')); %
+    % pixAmp = sqrt(sum(squeeze(mean(pixResponse,2,'omitnan')).^2,2,'omitmissing'));
     
     for i = 1:size(pixResponse,1)
         tmp = [0; 0];
@@ -151,18 +154,21 @@ for fix = 1:numel(fns)
     
     imDir = reshape(pixDir,nRow,nCol);
     imOSI = reshape(pixOSI,nRow,nCol);
+    % imAmp = max(0,reshape(pixAmp,nRow,nCol));
     imAmp = reshape(pixAmp,nRow,nCol);
     
     % Normalize the images to [0, 1]
     imDir = imDir / 360;
     
     osiMaxLim = prctile(pixOSI,99.9);
-    imOSI = max(0, imOSI - min(imOSI(:)));
-    imOSI = min(1, imOSI / (osiMaxLim - min(pixOSI)) );
+    osiMinLim = 0;
+    imOSI = max(0, imOSI - osiMinLim);
+    imOSI = min(1, imOSI / (osiMaxLim - osiMinLim) );
     
     ampMaxLim = prctile(pixAmp,99.9);
-    imAmp = max(0, imAmp - min(imAmp(:)));
-    imAmp = min(1, imAmp / (ampMaxLim - min(pixAmp)) );
+    ampMinLim = prctile(pixAmp,10);
+    imAmp = max(0, imAmp - ampMinLim);
+    imAmp = min(1, imAmp / (ampMaxLim - ampMinLim) );
     
     % Create the HSV image
     hue = imDir; % Hue corresponds to the direction values

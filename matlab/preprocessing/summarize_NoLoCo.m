@@ -188,6 +188,8 @@ for DMDix = nDMDs:-1:1
     %select sources
     %strategy 1: find peaks directly on aligned activity image
     actIM = mean(actAligned(:,:,:,validTrials), 4, 'includenan');
+    medIM = nanmedfilt2(actIM, (2*ceil(1.5*params.dXY)+1).*[1 1]);
+    actIM = actIM-medIM; %subtract a local baseline
     pIM = actIM == ordfilt2(actIM, 9, ones(3));
     %Mask out somata from activity image
     somaMask = false(size(actIM));
