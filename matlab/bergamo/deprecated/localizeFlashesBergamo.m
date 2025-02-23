@@ -122,8 +122,8 @@ for rix = 1:length(tilestartsR)
         selStats = rrr>=tilestartsR(max(1,rix-1)) & rrr<=tileendsR(min(end,rix+1))  & ccc>=tilestartsC(max(1,cix-1)) & ccc<=tileendsC(min(end,cix+1));
 
         S = summary(tilestartsR(max(1,rix-1)):tileendsR(min(end,rix+1)), tilestartsC(max(1,cix-1)):tileendsC(min(end,cix+1)));
-        Sp = prctile(S(:), [1 33]);
-        Sthresh =  Sp(2) + 5*(Sp(2)-Sp(1));
+        Sp = prctile(S(:), [1 33]); % assume at least 1/3 of pixels are in the background
+        Sthresh =  Sp(2) + 5*(Sp(2)-Sp(1)); % 33rd - 1st prctile is estimate of the spread
         selS = summaryVals>Sthresh;
 
         vals = vvv(selStats & selS);

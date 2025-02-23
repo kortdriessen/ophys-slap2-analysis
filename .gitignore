@@ -2,5 +2,8 @@
 *.mat
 *.tif
 *.asv
+__pycache__/
+*.pyc
+*.pyo
 matlab/slap2/pathdef.m
 Copy_of_+ScanImageTiffReader
