@@ -6,16 +6,19 @@ sub_log_means = log_means(ySearch,xSearch,zSearch,channels,:);
 
 scalingFactorTable = ones(size(sub_likelihood_means,1:4));
 
-for y = 1:length(ySearch)
-    for x = 1:length(xSearch)
-        for z = 1:length(zSearch)
-            for chIx = 1:length(channels)
-                expectedData = squeeze(sub_likelihood_means(y,x,z,chIx,validSPs));
-                tmpData = data(validSPs,chIx);
-                scalingFactorTable(y,x,z,chIx) = sum(tmpData(~isnan(expectedData))) ./ sum(expectedData,"omitnan");
-            end
-        end
-    end
+for chIx = 1:length(channels)
+    % Slice once for all y, x, z values to reduce indexing inside the loop
+    expectedData = squeeze(sub_likelihood_means(:,:,:,chIx,validSPs)); % Size [y, x, z, validSPs]
+    
+    % Replicate tmpData to match the expectedData shape
+    tmpData = reshape(data(validSPs, chIx), [1, 1, 1, length(validSPs)]);
+    
+    % Compute numerator and denominator using matrix operations
+    numerator = sum(tmpData .* ~isnan(expectedData), 4);
+    denominator = sum(expectedData, 4, 'omitnan');
+    
+    % Store the result in the scalingFactorTable
+    scalingFactorTable(:,:,:,chIx) = numerator ./ denominator;
 end
 
 scaled_likelihood_means = scalingFactorTable .* sub_likelihood_means;

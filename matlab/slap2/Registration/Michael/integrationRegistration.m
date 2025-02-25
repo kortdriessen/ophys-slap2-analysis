@@ -81,11 +81,30 @@ for DMDix = nDMDs:-1:1
         refStack(:,:,:,chIx) = permute(ReferenceStack_.data{chIx},[2 1 3]);
     end
 
-    numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
+    if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan)
+        numLinesPerCycle = length(metaData.AcquisitionContainer.AcquisitionPlan.superPixelIDs);
+
+        zs_ix = horzcat(metaData.AcquisitionContainer.AcquisitionPlan.activeZs{:});
+        zs_ix = unique(zs_ix);
+
+        zPlanes = nan(1,numLinesPerCycle);
+        for ix = 1:numLinesPerCycle
+            if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan.activeZs{ix})
+                zPlanes(ix) = metaData.AcquisitionContainer.AcquisitionPlan.activeZs{ix}(1);
+            end
+        end
+        for ix = 1:length(zs_ix)
+            zPlane_um = mean(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory(zPlanes == zs_ix(ix)));
+            zs(ix) = zPlane_um;
+        end
+    else
+        zs = metaData.AcquisitionContainer.ParsePlan.zs;
+        numLinesPerCycle = length(metaData.AcquisitionContainer.ParsePlan.acqParsePlan);
+    end
 
     dmdPixelsPerColumn = metaData.dmdPixelsPerColumn;
     dmdPixelsPerRow = metaData.dmdPixelsPerRow;
-    numFastZs = length(metaData.AcquisitionContainer.ParsePlan.zs);
+    numFastZs = length(zs);
 
     % get list of superpixels and extract data
 
@@ -93,19 +112,29 @@ for DMDix = nDMDs:-1:1
 
     fastZ2RefZ = zeros(numFastZs,1);
     for z = 1:numFastZs
-        [~, ind] = min(abs(ReferenceStack_.zs - metaData.AcquisitionContainer.ParsePlan.zs(z)));
+        [~, ind] = min(abs(ReferenceStack_.zs - zs(z)));
         fastZ2RefZ(z) = ind;
     end
 
     for lineSweepIdx = 1:numLinesPerCycle
-        superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
+        if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan)
+            superPixIdxs = metaData.AcquisitionContainer.AcquisitionPlan.superPixelIDs{lineSweepIdx}';
+        else
+            superPixIdxs = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).superPixelID;
+        end
 
-        if size(superPixIdxs,1) == 0; continue; end
-
-        zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1) + 1;
+        if numel(superPixIdxs) == 0; continue; end
+        
+        if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan)
+            zIdx = metaData.AcquisitionContainer.AcquisitionPlan.activeZs{lineSweepIdx}(1);
+        else
+            zIdx = metaData.AcquisitionContainer.ParsePlan.acqParsePlan(lineSweepIdx).sliceIdx(1)+1;
+        end
 
         % only take integration mode pixels
-        superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
+        if params.integrationOnly
+            superPixIdxs(superPixIdxs <= dmdPixelsPerColumn*dmdPixelsPerRow) = [];
+        end
 
         spIDs = superPixIdxs*100+zIdx; % add z plane to end of superpixel ID
         allSuperPixelIDs{DMDix} = [allSuperPixelIDs{DMDix}; spIDs]; % make list of unique superpixels across all Zs
@@ -217,7 +246,7 @@ dt = linerateHz/aData.alignHz;
 if dt < numLinesPerCycle
     aData.alignHz = floor(linerateHz / numLinesPerCycle);
     dt = linerateHz/aData.alignHz;
-    disp(['Requested DS freq too fast, adjusting to ' aData.alignHz ' Hz']);
+    disp(['Requested DS freq too fast, adjusting to ' int2str(aData.alignHz) ' Hz']);
 end
 
 fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
@@ -276,7 +305,7 @@ splitPixels = accumarray(groupIndices, lookupTable.sparseMaskInds{DMD_ix}(:, 1),
 medianIndices = cellfun(@(x) x(round(length(x)/2)), splitPixels);
 
 % Convert linear indices to row and column coordinates
-[spRows, spCols] = ind2sub([dmdPixelsPerColumn, dmdPixelsPerRow], medianIndices);
+[spRows, spCols, spPlanes] = ind2sub([dmdPixelsPerColumn, dmdPixelsPerRow, numFastZs], medianIndices);
 
 registrationFailed = false;
 fprintf("Inferring motion...\n")
@@ -299,7 +328,7 @@ for DSframeIx = 1:nDSframes
     for t = 1:length(allLineData)
         superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineIndices(t)};
 
-        if size(superPixIdxs,1) == 0; continue; end
+        if numel(superPixIdxs) == 0; continue; end
 
         lineData = allLineData{t};
         zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t));
@@ -316,8 +345,7 @@ for DSframeIx = 1:nDSframes
     if mean(spCt == 0) > 0.5; continue; end
 
     % calculate log likelihoods at all shifts
-    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, lookupTable.likelihood_means{DMD_ix} ...
-                                                                                .* repmat(reshape(spCt,[1 1 1 1 length(lookupTable.allSuperPixelIDs{DMD_ix})]),[size(lookupTable.likelihood_means{DMD_ix},1:4) 1]), ...
+    [logLikelihoodTable, scalingFactorTable] = poissonLogLikelihoodTable(data, bsxfun(@times, lookupTable.likelihood_means{DMD_ix}, reshape(spCt, [1 1 1 1 length(lookupTable.allSuperPixelIDs{DMD_ix})])), ...
                                                                         log_means,ySearch,xSearch,zSearch,channels,params.robust);
 
     [loglikelihoodDS(DSframeIx), I] = max(logLikelihoodTable(:));
@@ -346,32 +374,34 @@ for DSframeIx = 1:nDSframes
     % dataMatrix(:,DSframeIx) = data;
     % expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
     
-    A1 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
-    for cIdx = unique(spCols)'
-        spIdxs = find(spCols == cIdx);
-        % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
-        % rowSpacings = diff(queriedRows);
-        
-        if numel(spIdxs) > 1
-            A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
-        else
-            continue;
-        end
-    end
-    fTIF.WriteIMG(single(A1));
-    if numChannels==2
-        A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+    for zIdx = 1:numFastZs
+        A1 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
         for cIdx = unique(spCols)'
-            spIdxs = find(spCols == cIdx);
+            spIdxs = find(spCols == cIdx & spPlanes == zIdx);
             % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
             % rowSpacings = diff(queriedRows);
+            
             if numel(spIdxs) > 1
-                A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
             else
                 continue;
             end
         end
-        fTIF.WriteIMG(single(A2));
+        fTIF.WriteIMG(single(A1));
+        if numChannels==2
+            A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+            for cIdx = unique(spCols)'
+                spIdxs = find(spCols == cIdx & spPlanes == zIdx);
+                % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
+                % rowSpacings = diff(queriedRows);
+                if numel(spIdxs) > 1
+                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                else
+                    continue;
+                end
+            end
+            fTIF.WriteIMG(single(A2));
+        end
     end
     
     ySearch = max(1,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) + searchRadius);
