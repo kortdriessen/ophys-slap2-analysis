@@ -36,6 +36,8 @@ end
 [r, c, d] = ind2sub([dmdPixelsPerColumn dmdPixelsPerRow numFastZs], refPixs);
 d = fastZ2RefZ(d);
 
+f = waitbar(0,'Calculating lookup table...');
+i = 0;
 for y = 1:numY
     for x = 1:numX
         for z = 1:numZ
@@ -52,10 +54,13 @@ for y = 1:numY
             % displacement from the reference image
             for chIx = channels
                 motionLUT(y,x,z,chIx,validInds) = reference(sub2ind([dmdPixelsPerColumn dmdPixelsPerRow numPlanes max(channels)], ...
-                    shiftedR(validInds), shiftedC(validInds), shiftedD(validInds),chIx * ones(size(validInds))));
+                    shiftedR(validInds), shiftedC(validInds), shiftedD(validInds),chIx * ones(size(shiftedD(validInds)))));
+                i = i+1;
+                waitbar(i/(numY*numX*numZ*length(channels)))
             end
         end
     end
 end
 
+close(f);
 fprintf('done - took %f sec\n', toc);
