@@ -152,7 +152,11 @@ for DMDix = nDMDs:-1:1
 
     % using sparse matrix
     sparseMaskInds{DMDix} = [];
-    allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+    if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan)
+        allPixelReplacementMaps = metaData.AcquisitionContainer.AcquisitionPlan.pixelReplacementMaps;
+    else
+        allPixelReplacementMaps = metaData.AcquisitionContainer.ParsePlan.pixelReplacementMaps;
+    end
 
     for i = 1:length(allSuperPixelIDs{DMDix})
         tmpMask = zeros(dmdPixelsPerColumn,dmdPixelsPerRow,numFastZs);
