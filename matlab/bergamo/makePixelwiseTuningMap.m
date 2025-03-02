@@ -166,14 +166,14 @@ for fix = 1:numel(fns)
     imOSI = min(1, imOSI / (osiMaxLim - osiMinLim) );
     
     ampMaxLim = prctile(pixAmp,99.9);
-    ampMinLim = prctile(pixAmp,10);
+    ampMinLim = prctile(pixAmp,40);
     imAmp = max(0, imAmp - ampMinLim);
     imAmp = min(1, imAmp / (ampMaxLim - ampMinLim) );
     
     % Create the HSV image
     hue = imDir; % Hue corresponds to the direction values
     saturation = imOSI; % Saturation corresponds to the OSI values
-    value = imAmp; % Set value (brightness) to be equal to saturation
+    value = sqrt(imAmp); % Set value (brightness) to be equal to saturation
     
     % Combine into an HSV image
     hsvImage = cat(3, hue, saturation, value);

@@ -230,8 +230,13 @@ try
     
             if numel(superPixIdxs) == 0; continue; end
     
-            lineData = max(0,allLineData{t});
-            zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t))-1;
+            lineData = allLineData{t};
+            badSPsMask = (lineData < 0);
+
+            superPixIdxs(badSPsMask) = [];
+            lineData(badSPsMask) = [];
+
+            zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t));
     
             spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
             [~,spIdx] = ismember(spID,lookupTable.allSuperPixelIDs{DMD_ix});
@@ -239,7 +244,7 @@ try
             data(spIdx(spIdx>0),:) = data(spIdx(spIdx>0),:) + single(lineData(spIdx>0,:));
             spCt(spIdx(spIdx>0)) = spCt(spIdx(spIdx>0)) + 1;
         end
-        data = data ./ 100 ./ spCt;
+        data = data ./ spCt;
         data(spCt == 0,:) = nan;
     
         if mean(spCt == 0) > 0.5; continue; end
@@ -257,7 +262,7 @@ try
                     continue;
                 end
             end
-            fTIF.WriteIMG(single(A1));
+            fTIF.WriteIMG(uint16(A1));
             if numChannels==2
                 A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
                 for cIdx = unique(spCols)'
@@ -268,7 +273,7 @@ try
                         continue;
                     end
                 end
-                fTIF.WriteIMG(single(A2));
+                fTIF.WriteIMG(uint16(A2));
             end
         end
     end
