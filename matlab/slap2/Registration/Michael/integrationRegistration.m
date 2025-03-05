@@ -386,12 +386,12 @@ for DSframeIx = 1:nDSframes
             % rowSpacings = diff(queriedRows);
             
             if numel(spIdxs) > 1
-                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
             else
                 continue;
             end
         end
-        fTIF.WriteIMG(single(A1));
+        fTIF.WriteIMG(uint16(A1));
         if numChannels==2
             A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
             for cIdx = unique(spCols)'
@@ -399,12 +399,12 @@ for DSframeIx = 1:nDSframes
                 % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
                 % rowSpacings = diff(queriedRows);
                 if numel(spIdxs) > 1
-                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
                 else
                     continue;
                 end
             end
-            fTIF.WriteIMG(single(A2));
+            fTIF.WriteIMG(uint16(A2));
         end
     end
     
