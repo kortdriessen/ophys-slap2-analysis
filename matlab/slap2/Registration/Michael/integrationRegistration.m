@@ -110,10 +110,10 @@ for DMDix = nDMDs:-1:1
 
     allSuperPixelIDs{DMDix} = [];
 
-    fastZ2RefZ = zeros(numFastZs,1);
+    fastZ2RefZ{DMDix} = zeros(numFastZs,1);
     for z = 1:numFastZs
         [~, ind] = min(abs(ReferenceStack_.zs - zs(z)));
-        fastZ2RefZ(z) = ind;
+        fastZ2RefZ{DMDix}(z) = ind;
     end
 
     for lineSweepIdx = 1:numLinesPerCycle
@@ -207,7 +207,7 @@ for DMDix = nDMDs:-1:1
     yPre = params.maxshiftXY; yPost = params.maxshiftXY;
     zPre = params.maxshiftZ; zPost = params.maxshiftZ;
 
-    likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ,-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
+    likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ{DMDix},-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
     % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs{DMDix})]),[size(likelihood_means{DMDix},1:4) 1]);
 end
 lookupTable.likelihood_means = likelihood_means;
@@ -219,6 +219,7 @@ lookupTable.yPre = yPre;
 lookupTable.yPost = yPost;
 lookupTable.zPre = zPre;
 lookupTable.zPost = zPost;
+lookupTable.fastZ2RefZ = fastZ2RefZ;
 
 save(trialTable.lookupFile,'lookupTable','-v7.3');
 
@@ -386,12 +387,12 @@ for DSframeIx = 1:nDSframes
             % rowSpacings = diff(queriedRows);
             
             if numel(spIdxs) > 1
-                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
             else
                 continue;
             end
         end
-        fTIF.WriteIMG(single(A1));
+        fTIF.WriteIMG(uint16(A1));
         if numChannels==2
             A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
             for cIdx = unique(spCols)'
@@ -399,12 +400,12 @@ for DSframeIx = 1:nDSframes
                 % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
                 % rowSpacings = diff(queriedRows);
                 if numel(spIdxs) > 1
-                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs),1:dmdPixelsPerColumn);
+                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
                 else
                     continue;
                 end
             end
-            fTIF.WriteIMG(single(A2));
+            fTIF.WriteIMG(uint16(A2));
         end
     end
     
