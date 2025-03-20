@@ -20,7 +20,7 @@ from skimage import io as skimio
 from skimage import draw, measure
 from sklearn.cluster import DBSCAN, OPTICS, HDBSCAN
 
-from slap2_utils import DataFile
+import slap2_utils
 
 sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
@@ -39,7 +39,7 @@ from qtpy.QtWidgets import QPushButton, QApplication, QMessageBox
 
 import plotly.graph_objects as go
 
-def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, sparseHInds, sparseHVals, 
+def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
                 allSuperPixelIDs, dr, trialTable):
     trialIx, keepTrial = trial_info
     
@@ -50,13 +50,14 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, spa
     dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
     numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[1]
     numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
+    numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
 
-    nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
+    nPixels = dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs
 
     aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
 
     numCycles = aData['motionDSr'].shape[0]
-    uniqueMotion, motInds = np.unique(np.round(np.concatenate((aData['motionDSr'],aData['motionDSc'],aData['motionDSz']+11),axis=1)),axis=0,return_inverse=True)
+    uniqueMotion, motInds = np.unique(np.round(np.concatenate((aData['motionDSr'],aData['motionDSc'],aData['motionDSz']),axis=1)),axis=0,return_inverse=True)
 
     Afinal = torch.empty((nPixels,0))
     phiFinal = torch.empty((numCycles,0))
@@ -64,7 +65,7 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, spa
     importlib.reload(reconstruct)
 
     startTime = time.time()
-    baseline = reconstruct.reconstruct(Afinal,phiFinal,refStack[f'DMD{DMDix+1}'][0],torch.from_numpy(aData['brightnessDS']),subsampleMatrixInds.T,sparseHInds,sparseHVals,uniqueMotion,motInds).detach().numpy()
+    baseline = reconstruct.reconstruct(Afinal,phiFinal,refStack[f'DMD{DMDix+1}'][0],torch.from_numpy(aData['brightnessDS']),subsampleMatrixInds.T,fastZ2RefZ[f'DMD{DMDix+1}'],sparseHInds,sparseHVals,uniqueMotion,motInds).detach().numpy()
     endTime = time.time()
 
     # print(f"Elapsed Time: {endTime - startTime} sec")
@@ -77,7 +78,8 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, spa
     firstLine = trialTable['firstLine'][DMDix,trialIx]
     lastLine = trialTable['lastLine'][DMDix,trialIx]
 
-    hDataFile = DataFile(os.path.join(dr, source_fn))
+    importlib.reload(slap2_utils)
+    hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
 
     dt = 1/params['alignHz']/hDataFile.metaData.linePeriod_s
 
@@ -113,7 +115,7 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, spa
         valid_lines = np.where([hDataFile.lineDataNumElements[int(li)-1] != 0 for li in lineIndices])[0]
         
         for lineIdx in valid_lines:
-            positions = hDataFile.lineSuperPixelIDs[int(lineIndices[lineIdx])-1][0]
+            positions = hDataFile.lineSuperPixelIDs[int(lineIndices[lineIdx])-1]
             zIdx = hDataFile.lineFastZIdxs[int(lineIndices[lineIdx])-1]
             
             # Compute lookup values and matches in one go
@@ -132,7 +134,7 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, spa
     
     return data/100, dataCt, baseline, aData
 
-    return trial_peaks_gaussian, trial_original_peaks_gaussian, trial_peak_vals_gaussian
+    # return trial_peaks_gaussian, trial_original_peaks_gaussian, trial_peak_vals_gaussian
 
 def process_timepoint(residual_frame, neighborMatrix_sparse):
     return np.max(neighborMatrix_sparse.multiply(np.tile(residual_frame,
@@ -193,18 +195,18 @@ def getRowNeighbors(image, pixel):
 
     return rowNeighbors
 
-def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, params, DMDix, convMatrix, neighborMatrix_sparse):
+def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, refD,params, DMDix, convMatrix, neighborMatrix_sparse):
     
     trial_ix, data, dataCt, baseline, (motionDSr, motionDSc, motionDSz) = trialData
 
     numCycles = motionDSr.shape[0]
     numSuperPixels = data.shape[0]
-
+    numFastZs = max(refD.numpy()) + 1
     # print(f"{trial_ix}; numSuperPixels: {numSuperPixels}, numCycles: {numCycles} data: {data.shape}, motionDSr: {motionDSr.shape}")
 
     # get peaks
     residual = data - baseline*dataCt
-    residual_norm = residual / np.sqrt(baseline*dataCt)
+    residual_norm = residual / (np.sqrt(baseline*dataCt) + 1*(baseline*dataCt == 0))
 
     residual = residual / dataCt
 
@@ -332,13 +334,13 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
         newR = int(tmpR + np.round(motionDSr[t]))
         newC = int(tmpC + np.round(motionDSc[t]))
 
-        residual_filt_frame = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
+        residual_filt_frame = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
         residual_filt_frame[:] = np.nan
 
         for ix in range(len(decay_kernel)):
             dt = ix - len(decay_kernel)//2
             if t+dt >= 0 and t+dt < numCycles:
-                residual_filt_frame[refR.int() + int(np.round(motionDSr[t+dt])), refC.int() + int(np.round(motionDSc[t+dt])),ix] = residual[:,t+dt]
+                residual_filt_frame[refD,refR + int(np.round(motionDSr[t+dt])), refC + int(np.round(motionDSc[t+dt])),ix] = residual[:,t+dt]
 
         # residual_filt_frame[refR.int() + int(np.round(motionDSr[t])), refC.int() + int(np.round(motionDSc[t])),0] = residual_filt[:,t]
         # if t < numCycles-1:
@@ -348,10 +350,10 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            residual_filt_frame = np.nanmean(residual_filt_frame,axis=2)
+            residual_filt_frame = np.nanmean(residual_filt_frame,axis=3)
 
         patchWidth = 21
-        peakPatch = residual_filt_frame[np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
+        peakPatch = residual_filt_frame[refD[sp],np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
         
         # Create x and y coordinates
         y, x = np.indices(peakPatch.shape)
@@ -381,8 +383,8 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
                 # trial_peak_vals.append(residual_filt[sp,t])
                 continue
 
-            trial_peaks.append((peakR,peakC,t))
-            trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
+            trial_peaks.append((int(refD[sp]),peakR,peakC,t))
+            trial_original_peaks.append((int(refD[sp]),int(newR),int(newC),t))
             trial_peak_vals.append(amplitude)
             # trial_peak_vals_gaussian.append(residual_filt[sp,t])
 
@@ -471,13 +473,13 @@ def main():
     for trialIx in range(nTrials-1, -1, -1):
         for DMDix in range(nDMDs):
             # Check registration TIFF files
-            tiff_fn = os.path.splitext(os.path.basename(trialTable['fnRegDS'][DMDix,trialIx][0]))[0]
+            tiff_fn = os.path.splitext(os.path.basename(trialTable['fnRegDSInt'][DMDix,trialIx][0]))[0]
             if not os.path.exists(os.path.join(dr, tiff_fn + '.tif')):
                 print(f'Missing tiff file: {tiff_fn}')
                 keepTrials[DMDix,trialIx] = False
                 
             # Check alignment data files
-            align_fn = os.path.splitext(os.path.basename(trialTable['fnAdata'][DMDix,trialIx][0]))[0]
+            align_fn = os.path.splitext(os.path.basename(trialTable['fnAdataInt'][DMDix,trialIx][0]))[0]
             if not os.path.exists(os.path.join(dr, align_fn + '.mat')):
                 print(f'Missing alignData file: {align_fn}')
                 keepTrials[DMDix,trialIx] = False
@@ -550,8 +552,12 @@ def main():
         sparseMaskInds_refs = lt['sparseMaskInds'][:].flat
         sparseMaskInds = {'DMD1': refs[sparseMaskInds_refs[0]][:].T.astype(np.int32),
                         'DMD2': refs[sparseMaskInds_refs[1]][:].T.astype(np.int32)}
+        
+        fastZ2RefZ_refs = lt['fastZ2RefZ'][:].flat
+        fastZ2RefZ = {'DMD1': refs[fastZ2RefZ_refs[0]][:].T.astype(np.int32),
+                    'DMD2': refs[fastZ2RefZ_refs[1]][:].T.astype(np.int32)}
 
-    del sparseMaskInds_refs, allSuperPixelIDs_refs
+    del sparseMaskInds_refs, allSuperPixelIDs_refs, fastZ2RefZ_refs
 
     # Print shapes to verify
     print("Shapes:")
@@ -650,12 +656,14 @@ def main():
 
     del psf_combined
 
-    for DMDix in range(nDMDs-1, -1, -1):
+    for DMDix in range(nDMDs): 
+        # range(nDMDs-1, -1, -1):
         print(f'Processing DMD{DMDix+1}')
 
         dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
         dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
         numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[1]
+        numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
         numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
 
         nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
@@ -670,24 +678,28 @@ def main():
             subsampleMatrixInds[spIdx,1] = spIdx+1
 
         refPixs = torch.from_numpy(subsampleMatrixInds[:,0])
-        refD = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor')
-        refC = torch.div((refPixs - refD * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor')
-        refR = refPixs % dmdPixelsPerColumn
+        refD = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
+        refC = torch.div((refPixs - refD * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor').int()
+        refR = (refPixs % dmdPixelsPerColumn).int()
+        
+        # refD = torch.from_numpy(fastZ2RefZ[f'DMD{DMDix+1}'][refD.numpy()].flatten()-1)
 
-        openPixs = torch.from_numpy(sparseMaskInds[f'DMD{DMDix+1}'][:,0]-1)
-        d = torch.div(openPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor')
-        c = torch.div((openPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor')
-        r = openPixs % dmdPixelsPerColumn
+        # openPixs = torch.from_numpy(sparseMaskInds[f'DMD{DMDix+1}'][:,0]-1)
+        # d = torch.div(openPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor')
+        # c = torch.div((openPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor')
+        # r = openPixs % dmdPixelsPerColumn
 
         filterSize = psf[f'DMD{DMDix+1}'].shape[0]*psf[f'DMD{DMDix+1}'].shape[1]
         sparseHInds = np.zeros((2,numSuperPixels*filterSize))
         sparseHVals = np.zeros((numSuperPixels*filterSize,))
 
         for spIdx in range(subsampleMatrixInds.shape[0]):
-            tmpMap = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
+            tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
             tmpMap[:] = np.nan
 
-            tmpMap[refR[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[0]//2+1,refC[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
+            tmpMap[refD[spIdx],
+                    refR[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[0]//2+1,
+                    refC[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
 
             sparseHInds[0,spIdx*filterSize:(spIdx+1)*filterSize] = subsampleMatrixInds[spIdx,1] - 1
             sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize] = np.where(~np.isnan(tmpMap.flatten()))[0]
@@ -697,10 +709,12 @@ def main():
         convMatrix = np.zeros((numSuperPixels,numSuperPixels))
 
         for spIdx in range(subsampleMatrixInds.shape[0]):
-            tmpMap = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
-            tmpMap[refR[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[0]//2+1,refC[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
+            tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
+            tmpMap[refD[spIdx],
+                    refR[spIdx]-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx]+psf[f'DMD{DMDix+1}'].shape[0]//2+1,
+                    refC[spIdx]-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx]+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
 
-            convMatrix[spIdx,:] = tmpMap[refR.int(),refC.int()]
+            convMatrix[spIdx,:] = tmpMap[refD,refR,refC]
 
         trial_info = [(i, keepTrials[DMDix,i]) for i in range(nTrials)]
         # processes = []
@@ -711,6 +725,7 @@ def main():
             params=params,
             refStack=refStack,
             subsampleMatrixInds=subsampleMatrixInds,
+            fastZ2RefZ=fastZ2RefZ,
             sparseHInds=sparseHInds,
             sparseHVals=sparseHVals,
             allSuperPixelIDs=allSuperPixelIDs,
@@ -739,17 +754,17 @@ def main():
 
         neighborMatrix = np.zeros((numSuperPixels,numSuperPixels))
 
-        refPixIm = np.zeros((dmdPixelsPerColumn,dmdPixelsPerRow))
+        refPixIm = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
         refPixIm[:] = np.nan
-        refPixIm[refR.int(),refC.int()] = 1
+        refPixIm[refD,refR,refC] = 1
 
         for sp in range(numSuperPixels):
-            neighbors = getNeighbors(refPixIm,(np.int64(refR[sp]),np.int64(refC[sp])))
+            neighbors = getNeighbors(refPixIm[refD[sp]],(np.int64(refR[sp]),np.int64(refC[sp])))
             # find the indices of the neighbors in subsampleMatrixInds
             if len(neighbors) > 1:
                 neighborInds = []
                 for neigh in neighbors:
-                    tmp = np.where((refR.int() == neigh[0]) & (refC.int() == neigh[1]))[0]
+                    tmp = np.where((refR == neigh[0]) & (refC == neigh[1]) & (refD == refD[sp]))[0]
                     neighborInds.append(tmp)
 
                 neighborMatrix[sp,neighborInds] = 1
@@ -765,6 +780,7 @@ def main():
             dmdPixelsPerRow = dmdPixelsPerRow,
             refR = refR,
             refC = refC,
+            refD = refD,
             params = params,
             DMDix = DMDix,
             convMatrix = convMatrix,
@@ -802,14 +818,14 @@ def main():
         peakTrials = np.array(peak_trials)
 
         # peaks histogram
-        peaksHist = np.zeros((dmdPixelsPerColumn//2,dmdPixelsPerRow*1))
+        peaksHist = np.zeros((numRefStackZs,dmdPixelsPerColumn//2,dmdPixelsPerRow*1))
 
         scaled_finalPeakVals = np.clip(finalPeakVals, None, np.percentile(finalPeakVals, 95))
         # scaled_finalPeakVals = scaled_finalPeakVals - np.min(scaled_finalPeakVals)
         # scaled_finalPeakVals = scaled_finalPeakVals / np.max(scaled_finalPeakVals)
 
         for i in range(len(peaksPix)):
-            peaksHist[round(peaksPix[i][0]/2),round(peaksPix[i][1]*1)] += np.sqrt(scaled_finalPeakVals[i])
+            peaksHist[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(peaksPix[i][0])])-1,round(peaksPix[i][1]/2),round(peaksPix[i][2]*1)] += np.sqrt(scaled_finalPeakVals[i])
 
         peaksHist[peaksHist == 0] = np.nan
 
@@ -823,7 +839,7 @@ def main():
             scale=(2, 1)
         )
 
-        roi_viewer.add_points(np.array(peaksPix)[:,:2], size=1, face_color='magenta', border_color='magenta',opacity=0.3)
+        roi_viewer.add_points(np.array(peaksPix)[:,:3], size=1, face_color='magenta', edge_color='magenta', opacity=0.3)
 
         roi_layer = roi_viewer.add_shapes(name='ROIs',face_color=[1,1,0,0.1],edge_color='yellow',edge_width=1)
         roi_layer.mode = 'add_polygon'
