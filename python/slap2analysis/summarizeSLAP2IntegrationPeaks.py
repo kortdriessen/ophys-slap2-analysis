@@ -838,8 +838,8 @@ def main():
             colormap='red',
             scale=(2, 1)
         )
-
-        roi_viewer.add_points(np.array(peaksPix)[:,:3], size=1, face_color='magenta', edge_color='magenta', opacity=0.3)
+        
+        roi_viewer.add_points(np.array([[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(x[0])])-1,x[1],x[2]] for x in peaksPix]), size=1, face_color='magenta', edge_color='magenta', opacity=0.3)
 
         roi_layer = roi_viewer.add_shapes(name='ROIs',face_color=[1,1,0,0.1],edge_color='yellow',edge_width=1)
         roi_layer.mode = 'add_polygon'
