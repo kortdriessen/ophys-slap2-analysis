@@ -48,7 +48,7 @@ function spData = getSuperPixelData(dr, trialTable)
 nDMDs = size(trialTable.filename,1);
 for DMDix = nDMDs:-1:1
     [~,n] = fileparts(trialTable.filename{DMDix,1});
-    n_base = n; %regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
+    n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
     metaDataFileName = fullfile(dr, [n_base '.meta']);
     mustBeFile(metaDataFileName);
     metaData = load(metaDataFileName, '-mat');
