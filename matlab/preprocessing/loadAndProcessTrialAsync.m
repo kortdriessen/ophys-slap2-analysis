@@ -7,7 +7,7 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTria
     nanPx = repmat(mean(isnan(IM), [3 4])>params.nanThresh, 1,1,size(IM,3));
     meanIM(nanPx) = nan;
 
-    rawIMs = squeeze(IM(:,:,1,:));
+    rawIMs = squeeze(IM(:,:,params.activityChannel,:));
     clear IM
 
     %load alignment data

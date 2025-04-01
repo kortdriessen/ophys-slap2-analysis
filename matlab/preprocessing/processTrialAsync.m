@@ -20,8 +20,8 @@ switch params.microscope
         motionC = interp1(alignData.DSframes, alignData.motionDSc, frameLines, 'pchip', 'extrap') + motOutput(2);
         motionR = interp1(alignData.DSframes, alignData.motionDSr, frameLines, 'pchip', 'extrap') + motOutput(1);
 
-        labeled = medfilt2(meanIM(:,:,1), [3 3]);
-        labeled = ~isnan(meanIM(:,:,1)) & labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
+        labeled = medfilt2(meanIM(:,:,params.activityChannel), [3 3]);
+        labeled = ~isnan(meanIM(:,:,params.activityChannel)) & labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
         for cix = numChannels:-1:1
             tmp = double(meanIM(:,:,cix));
             mLabeled{cix} = tmp(labeled);
@@ -30,10 +30,11 @@ switch params.microscope
         Ysz = [length(alignData.trimRows) length(alignData.trimCols)];
         selPx2D = selPx2D(1:size(alignData.viewC,1), 1:size(alignData.viewC,2));
 
+        orderedChannels = [params.activityChannel:numChannels, 1:params.activityChannel-1];
         %interpolate the raw data at the shifted coordinates
         for fix = nFrames:-1:1
-            for cix = 1:numChannels
-                Y = S2data.getImage(cix, frameLines(fix), ceil(dt), 1);
+            for cix = 1:numel(orderedChannels)
+                Y = S2data.getImage(orderedChannels(cix), frameLines(fix), ceil(dt), 1);
                 Y = Y(alignData.trimRows, alignData.trimCols);
                 Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData.viewC+motionC(fix), alignData.viewR+motionR(fix), 'linear', nan);
                 if cix==1
@@ -43,9 +44,9 @@ switch params.microscope
                 end
 
                 %compute global ROI activity
-                mIM = meanIM(:,:,cix);
+                mIM = meanIM(:,:,orderedChannels(cix));
                 yLabeled = double(Y(labeled)); nans= isnan(yLabeled);
-                FF = (sum(yLabeled(~nans))./sum(mLabeled{cix}(~nans))).*sum(mLabeled{cix});
+                FF = (sum(yLabeled(~nans))./sum(mLabeled{orderedChannels(cix)}(~nans))).*sum(mLabeled{orderedChannels(cix)});
                 exptSummary.global.F(fix,cix) = FF;
 
                 %compute user ROI activity
@@ -63,7 +64,7 @@ switch params.microscope
         %perform SVD on user ROIs to denoise
         exptSummary.ROIs.Fsvd = nan(length(roiData), nFrames, numChannels);
         for rix = 1:length(roiData)
-            for cix = 1:numChannels
+            for cix = 1:numel(orderedChannels)
                 Dtmp = double(Fpx{rix}(:,:,cix));
                 [UU,SS,VV,bg] = nansvd(Dtmp,3, 10, params.nanThresh);
                 roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
