@@ -145,7 +145,8 @@ for DMDix = nDMDs:-1:1
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
     for trialIx = nTrials:-1:1
-        if ~keepTrials(DMDix,trialIx)
+        if ~keepTrials(DMDix,trialIx) || all(isnan(actIM(:,:,1,trialIx)), 'all')
+            disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
             continue %skip
         end
         disp(['trial: ' int2str(trialIx)])
@@ -280,7 +281,12 @@ for DMDix = nDMDs:-1:1
         parfor trialIx = 1:nTrials
             if any(validTrials==trialIx)
                 fnRaw = fns{trialIx};
+                try
                 E{trialIx} = processTrialAsync(dr, fnRaw, fls(trialIx), els(trialIx), W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
+                catch ME
+                    disp(['Error occurred processing trial:' int2str(trialIx) ' ' fnRaw]);
+                    disp(ME);
+                end
             end
         end
     else %BERGAMO

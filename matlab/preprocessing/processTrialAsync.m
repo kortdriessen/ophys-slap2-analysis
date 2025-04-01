@@ -65,11 +65,11 @@ switch params.microscope
         for rix = 1:length(roiData)
             for cix = 1:numChannels
                 Dtmp = double(Fpx{rix}(:,:,cix));
-                nanFrames = all(isnan(Dtmp),1);
-                nanPx = any(isnan(Dtmp(:, ~nanFrames)),2);
-                Dtmp = Dtmp(~nanPx, ~nanFrames);
-                [UU,SS,VV] = svds(Dtmp,1);
-                exptSummary.ROIs.Fsvd(rix,~nanFrames,cix) = sum(UU)*SS*VV';
+                [UU,SS,VV,bg] = nansvd(Dtmp,3, 10, params.nanThresh);
+                roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
+                [~,selPC] = max(roiLikeness);
+                Fsvd = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
+                exptSummary.ROIs.Fsvd(rix,:,cix) =Fsvd;
             end
         end
         clear Fpx;
