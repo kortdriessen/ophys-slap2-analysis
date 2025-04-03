@@ -26,6 +26,9 @@ copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel 
 
 %confirm that all files exist
 [trialTable, keepTrials] = verifyFiles(trialTablefn, dr, params);
+for dmdIx = 1:numel(trialTable.refStack)
+    trialTable.refStack{dmdIx}.IM = []; %this uses a lot of memory and we won't need it
+end
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
 nTrials = size(trialTable.filename,2);
 firstValidTrial = find(all(keepTrials,1),1,'first');
@@ -139,11 +142,12 @@ for DMDix = nDMDs:-1:1
 
     %align all mean images to template
     disp('Aligning across trials...')
-    meanAligned = []; actAligned = []; pAligned = [];
+    meanAligned = []; actAligned = [];
     corrCoeff = nan(1,nTrials);
     motOutput = nan(2,nTrials);
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
+    clear M
     for trialIx = nTrials:-1:1
         if ~keepTrials(DMDix,trialIx) || all(isnan(actIM(:,:,1,trialIx)), 'all')
             disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
@@ -159,6 +163,7 @@ for DMDix = nDMDs:-1:1
         end
         actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
+    clear Mpad
 
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;
@@ -231,7 +236,6 @@ for DMDix = nDMDs:-1:1
 
         %prune any sources that got clipped by pixel selection process
         keepSources = sum(selPix, [1 2])>5;
-        k = sum(keepSources, 'all');
         sources.R = sources.R(keepSources);
         sources.C = sources.C(keepSources);
         selPix = selPix(:,:,keepSources);
@@ -256,6 +260,7 @@ for DMDix = nDMDs:-1:1
             disp('fatal Error extracting sources')
             rethrow(ME)
         end
+        clear dFsel
 
         %for each file, load high res data and refine
         params.tau_full=params.tau_s*params.analyzeHz;
@@ -276,28 +281,28 @@ for DMDix = nDMDs:-1:1
                     end
                 end
 
-        fls = trialTable.firstLine(DMDix,:);
-        els = trialTable.lastLine(DMDix,:);
-        parfor trialIx = 1:nTrials
-            if any(validTrials==trialIx)
-                fnRaw = fns{trialIx};
-                try
-                E{trialIx} = processTrialAsync(dr, fnRaw, fls(trialIx), els(trialIx), W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
-                catch ME
-                    disp(['Error occurred processing trial:' int2str(trialIx) ' ' fnRaw]);
-                    disp(ME);
+                fls = trialTable.firstLine(DMDix,:);
+                els = trialTable.lastLine(DMDix,:);
+                parfor trialIx = 1:nTrials
+                    if any(validTrials==trialIx)
+                        fnRaw = fns{trialIx};
+                        try
+                            E{trialIx} = processTrialAsync(dr, fnRaw, fls(trialIx), els(trialIx), W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
+                        catch ME
+                            disp(['Error occurred processing trial:' int2str(trialIx) ' ' fnRaw]);
+                            disp(ME);
+                        end
+                    end
+                end
+            else %BERGAMO
+                parfor trialIx = 1:nTrials
+                    if any(validTrials==trialIx)
+                        fnRaw = fns{trialIx};
+                        E{trialIx} = processTrialAsync(dr, fnRaw, [], [], W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
+                    end
                 end
             end
         end
-    else %BERGAMO
-        parfor trialIx = 1:nTrials
-            if any(validTrials==trialIx)
-                fnRaw = fns{trialIx};
-                E{trialIx} = processTrialAsync(dr, fnRaw, [], [], W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
-            end
-            end
-        end
-    end
 
         %per-trial images
         exptSummary.E(:,DMDix) = E; %experiment data
@@ -312,6 +317,8 @@ for DMDix = nDMDs:-1:1
     exptSummary.perTrialActIms{DMDix} = actIM;
     exptSummary.perTrialActIMsAligned{DMDix} = actAligned;
     exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector for each trial
+
+    clear meanAligned meanIM actAligned F0selDS E
 end
 
 %prepare file for saving

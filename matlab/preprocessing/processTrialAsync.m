@@ -204,7 +204,7 @@ exptSummary.dF.denoised(:,:,1) = sum(W,1)'.*H3; %[source#, time, channel]
 exptSummary.dF.nonneg(:,:,1) = sum(W,1)'.*H4; %[source#, time, channel]
 exptSummary.dF.ls(:,:,1) = sum(W,1)'.*H5; %[source#, time, channel] LEAST SQUARES SOLVE
 exptSummary.F0(:,:,1) = F0;
-exptSummary.footprints = Wfull;
+exptSummary.footprints = single(Wfull);
 exptSummary.discardFrames = discard;
 
 
