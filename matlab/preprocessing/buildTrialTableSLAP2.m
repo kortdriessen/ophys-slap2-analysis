@@ -33,7 +33,10 @@ end
 DMDixs = [1 2];
 %find the files within the entire folder structure named REFERENCE
 for DMDix = DMDixs
-    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*-REFERENCE*']);
+    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*_CONFIG1-REFERENCE*']);
+    if isempty(list)
+        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*-REFERENCE*']);
+    end
     switch length(list)
     case 0
         error(['Could not find reference image within folder: ' dr])

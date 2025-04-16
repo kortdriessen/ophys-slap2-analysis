@@ -69,12 +69,15 @@ function lookupTable = makeRefLookupTable(dr, trialTable, params)
 nDMDs = size(trialTable.filename,1);
 for DMDix = nDMDs:-1:1
     [~,n] = fileparts(trialTable.filename{DMDix,1});
-    n_base = n; %regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
+    n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
     metaDataFileName = fullfile(dr, [n_base '.meta']);
     mustBeFile(metaDataFileName);
     metaData = load(metaDataFileName, '-mat');
 
-    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) 'REFERENCE*']);
+    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG2-REFERENCE*']);
+    if isempty(list)
+        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*-REFERENCE*']);
+    end
     ReferenceStack_ = slap2.gui.refstack.ReferenceStack.loadTif(fullfile(list(1).folder, list(1).name));
     numChannelsRefStack = numel(ReferenceStack_.data);
     for chIx = numChannelsRefStack:-1:1
