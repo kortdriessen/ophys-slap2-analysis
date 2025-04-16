@@ -22,10 +22,13 @@ else
     end
 end
 
-copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops 
+copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops
 
 %confirm that all files exist
 [trialTable, keepTrials] = verifyFiles(trialTablefn, dr, params);
+for dmdIx = 1:numel(trialTable.refStack)
+    trialTable.refStack{dmdIx}.IM = []; %this uses a lot of memory and we won't need it
+end
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
 nTrials = size(trialTable.filename,2);
 firstValidTrial = find(all(keepTrials,1),1,'first');
@@ -139,13 +142,15 @@ for DMDix = nDMDs:-1:1
 
     %align all mean images to template
     disp('Aligning across trials...')
-    meanAligned = []; actAligned = []; pAligned = [];
+    meanAligned = []; actAligned = [];
     corrCoeff = nan(1,nTrials);
     motOutput = nan(2,nTrials);
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
+    clear M
     for trialIx = nTrials:-1:1
-        if ~keepTrials(DMDix,trialIx)
+        if ~keepTrials(DMDix,trialIx) || all(isnan(actIM(:,:,1,trialIx)), 'all')
+            disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
             continue %skip
         end
         disp(['trial: ' int2str(trialIx)])
@@ -158,6 +163,7 @@ for DMDix = nDMDs:-1:1
         end
         actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
+    clear Mpad
 
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;
@@ -218,85 +224,90 @@ for DMDix = nDMDs:-1:1
     %not implemented
 
     if k>0
-    %Generate IMsel; the data only in the selected region, aligned across movies
-    selPix = false([sz(1:2) k]);
-    for sourceIx = k:-1:1
-        rr = max(1, round(sources.R(sourceIx)-params.dXY)):min(sz(1),  round(sources.R(sourceIx))+params.dXY);
-        cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
-        selPix(rr,cc,sourceIx) = true;
-    end
-    pxAlwaysValid = mean(isnan(meanAligned(:,:,1,validTrials)),4)<params.nanThresh;
-    selPix = selPix & repmat(pxAlwaysValid, 1, 1, k); %ADJUST SELECTED PIXELS NOT TO INCLUDE POORLY MEASURED PIXELS
-
-    %prune any sources that got clipped by pixel selection process
-    keepSources = sum(selPix, [1 2])>5;
-    k = sum(keepSources, 'all');
-    sources.R = sources.R(keepSources);
-    sources.C = sources.C(keepSources);
-    selPix = selPix(:,:,keepSources);
-
-    %accumulate dF of selected pixels for initial NMF of downsampled movies
-    F0selDS = cell(nTrials,1); dFsel = cell(1,nTrials);
-    fns = trialTable.fnRegDS(DMDix, :);
-    parfor trialIx = 1:nTrials
-        if any(validTrials==trialIx)
-            [~,fn, ext] = fileparts(fns{trialIx}); fn = [fn ext];
-            [dFsel{trialIx}, F0selDS{trialIx}] = DFselAsync([dr filesep fn], discardFrames{trialIx}, selPix, motOutput(:,trialIx), params); %path, discardFrames, selPix, motOutput, params
+        %Generate IMsel; the data only in the selected region, aligned across movies
+        selPix = false([sz(1:2) k]);
+        for sourceIx = k:-1:1
+            rr = max(1, round(sources.R(sourceIx)-params.dXY)):min(sz(1),  round(sources.R(sourceIx))+params.dXY);
+            cc = max(1, round(sources.C(sourceIx)-params.dXY)):min(sz(2),  round(sources.C(sourceIx))+params.dXY);
+            selPix(rr,cc,sourceIx) = true;
         end
-    end
-    dFsel = cell2mat(dFsel); %collapse into an array
+        pxAlwaysValid = mean(isnan(meanAligned(:,:,1,validTrials)),4)<params.nanThresh;
+        selPix = selPix & repmat(pxAlwaysValid, 1, 1, k); %ADJUST SELECTED PIXELS NOT TO INCLUDE POORLY MEASURED PIXELS
 
-    %to do:
-    %option to use only top 10% most active frames
-    %extract sources from downsampled movie dF
-    try
-        [W0,~] = extractSourcesLoRes(dFsel, sources, selPix, params);
-    catch ME
-        disp('fatal Error extracting sources')
-        rethrow(ME)
-    end
+        %prune any sources that got clipped by pixel selection process
+        keepSources = sum(selPix, [1 2])>5;
+        sources.R = sources.R(keepSources);
+        sources.C = sources.C(keepSources);
+        selPix = selPix(:,:,keepSources);
 
-    %for each file, load high res data and refine
-    params.tau_full=params.tau_s*params.analyzeHz;
-    if isempty(ROIs) || isempty(ROIs(DMDix))
+        %accumulate dF of selected pixels for initial NMF of downsampled movies
+        F0selDS = cell(nTrials,1); dFsel = cell(1,nTrials);
+        fns = trialTable.fnRegDS(DMDix, :);
+        parfor trialIx = 1:nTrials
+            if any(validTrials==trialIx)
+                [~,fn, ext] = fileparts(fns{trialIx}); fn = [fn ext];
+                [dFsel{trialIx}, F0selDS{trialIx}] = DFselAsync([dr filesep fn], discardFrames{trialIx}, selPix, motOutput(:,trialIx), params); %path, discardFrames, selPix, motOutput, params
+            end
+        end
+        dFsel = cell2mat(dFsel); %collapse into an array
+
+        %to do:
+        %option to use only top 10% most active frames
+        %extract sources from downsampled movie dF
+        try
+            [W0,~] = extractSourcesLoRes(dFsel, sources, selPix, params);
+        catch ME
+            disp('fatal Error extracting sources')
+            rethrow(ME)
+        end
+        clear dFsel
+
+        %for each file, load high res data and refine
+        params.tau_full=params.tau_s*params.analyzeHz;
+        if isempty(ROIs) || isempty(ROIs(DMDix))
+            roiData =[];
+        else
+            roiData = ROIs(DMDix).roiData;
+        end
+        E = cell(nTrials,1);
+        fns = trialTable.fnRaw(DMDix,:);
+        if size(W0, 2) > 0
+            if strcmpi(params.microscope, 'SLAP2')
+                if params.nParallelWorkers>1
+                    newN = min(min(24,nWorkers*5), size(trialTable.filename,2)); %this step is not very memory-demanding for SLAP2; increase parallel workers
+                    if nWorkers~=newN
+                        delete(gcp('nocreate'));
+                        parpool('processes',newN); %limit the number of workers to avoid running out of RAM
+                    end
+                end
+
+                fls = trialTable.firstLine(DMDix,:);
+                els = trialTable.lastLine(DMDix,:);
+                parfor trialIx = 1:nTrials
+                    if any(validTrials==trialIx)
+                        fnRaw = fns{trialIx};
+                        try
+                            E{trialIx} = processTrialAsync(dr, fnRaw, fls(trialIx), els(trialIx), W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
+                        catch ME
+                            disp(['Error occurred processing trial:' int2str(trialIx) ' ' fnRaw]);
+                            disp(ME);
+                        end
+                    end
+                end
+            else %BERGAMO
+                parfor trialIx = 1:nTrials
+                    if any(validTrials==trialIx)
+                        fnRaw = fns{trialIx};
+                        E{trialIx} = processTrialAsync(dr, fnRaw, [], [], W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
+                    end
+                end
+            end
+        end
+
+        %per-trial images
+        exptSummary.E(:,DMDix) = E; %experiment data
+    else
         roiData =[];
-    else
-        roiData = ROIs(DMDix).roiData;
-    end
-    E = cell(nTrials,1);
-    fns = trialTable.fnRaw(DMDix,:);
-    if size(W0, 2) > 0
-    if strcmpi(params.microscope, 'SLAP2')
-        if params.nParallelWorkers>1
-            newN = min(min(24,nWorkers*5), size(trialTable.filename,2)); %this step is not very memory-demanding for SLAP2; increase parallel workers
-            if nWorkers~=newN
-                delete(gcp('nocreate'));
-                parpool('processes',newN); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
-            end
-        end
-
-        fls = trialTable.firstLine(DMDix,:);
-        els = trialTable.lastLine(DMDix,:);
-        parfor trialIx = 1:nTrials
-            if any(validTrials==trialIx)
-                fnRaw = fns{trialIx};
-                E{trialIx} = processTrialAsync(dr, fnRaw, fls(trialIx), els(trialIx), W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
-            end
-        end
-    else %BERGAMO
-        parfor trialIx = 1:nTrials
-            if any(validTrials==trialIx)
-                fnRaw = fns{trialIx};
-                E{trialIx} = processTrialAsync(dr, fnRaw, [], [], W0, F0selDS{trialIx}, selPix, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
-            end
-            end
-        end
-    end
-
-    %per-trial images
-    exptSummary.E(:,DMDix) = E; %experiment data
-    else
-    roiData =[];
     end
     exptSummary.aData(:,DMDix) = alignData;
     exptSummary.userROIs{DMDix} = roiData;
@@ -306,6 +317,8 @@ for DMDix = nDMDs:-1:1
     exptSummary.perTrialActIms{DMDix} = actIM;
     exptSummary.perTrialActIMsAligned{DMDix} = actAligned;
     exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector for each trial
+
+    clear meanAligned meanIM actAligned F0selDS E
 end
 
 %prepare file for saving
@@ -463,7 +476,7 @@ denoiseWindow = ceil(params.denoiseWindow_s .* params.alignHz); %params.denoiseW
 
 rawIM = copyReadDeleteScanImageTiff(path);
 rawIM = reshape(rawIM, size(rawIM,1), size(rawIM,2), params.numChannels, []); %deinterleave;
-rawIM = squeeze(rawIM(:,:,1,:));
+rawIM = squeeze(rawIM(:,:,params.activityChannel,:));
 rawIM(:,:,discardFrames) = nan;
 
 szTmp = size(rawIM);

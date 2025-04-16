@@ -25,14 +25,14 @@ switch fnName
         params.denoiseWindow_s = 0.25;   tooltips.denoiseWindow_s= 'the timescale on which signals can be smoothed when denoising, seconds';
         params.baselineWindow_Glu_s = 4; tooltips.baselineWindow_Glu_s= 'timescale for calculating F0 in glutamate channel, seconds';
         params.baselineWindow_Ca_s = 4;  tooltips.baselineWindow_Ca_s= 'timescale for calculating F0 in calcium channel, seconds';
-        params.activityChannel = 2;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
+        params.activityChannel = 1;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
         params.tau_s = 0.05;             tooltips.tau_s = 'decay time constant of glutamate signal';
         params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
-        params.nParallelWorkers = 8;     tooltips.nWorkers = 'number of parallel workers';
-        params.drawUserRois = false;      tooltips.drawUserRois = 'pop up a GUI to annotate user ROIs?';  
+        params.nParallelWorkers = 6;     tooltips.nWorkers = 'number of parallel workers';
+        params.drawUserRois = false;     tooltips.drawUserRois = 'pop up a GUI to annotate user ROIs?';  
         params.motionThresh = 2;         tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
-        params.nanThresh = 0.25;        tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
+        params.nanThresh = 0.25;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
     case 'summarizeSLAP2' %DEPRECATED, DELETE?
         params.tau_s = 0.05;            tooltips.tau_s = 'decay time constant of glutamate signal';
         params.analyzeHz = 200; %frame rate used for analysis
@@ -55,6 +55,8 @@ switch fnName
         params.nWorkers = 16; tooltips.nWorkers = 'number of parallel workers';
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
         params.refStackTemplate = false; tooltips.refStackTemplate = 'Use ref stack as template';
+        params.isReVolt = false; tooltips.isReVolt = 'select true for recordings with simultaneous red 1P imaging';
+        params.includeIntegrationROIs = false; tooltips.includeIntegrationROIs = 'Use integration ROIs for alignment and TIFF generation?';
     case 'integrationRegistration'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshiftXY = 25; tooltips.maxshift = 'Maximum frame offset,in pixels';
@@ -80,6 +82,16 @@ switch fnName
         params.chIdx = 1;           tooltips.chIdx = 'Which channel to analyze?';
         params.windowWidth_lines = 16; tooltips.windowWidth_lines = 'exponential time averaging constant for signal extraction. bandwidth is 11kHz/windowWidth_lines';
         params.expectedWindowWidth_lines = 5000; tooltips.expectedWindowWidth_lines = 'exponential time averaging constant for baseline calculation';
+    case 'summarize_Voltage'
+        params.tau = 0.001;            tooltips.tau_s = 'decay time constant of voltage signal';
+        params.analyzeHz = 200; %frame rate used for analysis
+        params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
+        params.sigma_px = 1.5; tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
+        params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
+        params.baselineWindow_s = 4; %timescale for calculating F0 in glutamate channel, seconds
+        params.exptType = {'"V1 Gratings"', '"BCI"', '"other"'};  tooltips.exptType ='Experiment type';
+        params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease thresh to be more stringent on motion correction when censoring frames';   
+        params.manualRois = false;
     otherwise
         error('Unknown function name passed to setParams.m')
 end             
