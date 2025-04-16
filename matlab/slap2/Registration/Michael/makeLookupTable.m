@@ -48,16 +48,17 @@ for y = 1:numY
             validInds = (shiftedR >= 1) & (shiftedR <= dmdPixelsPerColumn) & (shiftedC >= 1) & (shiftedC <= dmdPixelsPerRow) ...
                 & (shiftedD >= 1) & (shiftedD <= numPlanes);
 
-            if sum(validInds) == 0; continue; end
-
-            % select expected value of superpixel at (x,y,z)
-            % displacement from the reference image
-            for chIx = channels
-                motionLUT(y,x,z,chIx,validInds) = reference(sub2ind([dmdPixelsPerColumn dmdPixelsPerRow numPlanes max(channels)], ...
-                    shiftedR(validInds), shiftedC(validInds), shiftedD(validInds),chIx * ones(size(shiftedD(validInds)))));
-                i = i+1;
-                waitbar(i/(numY*numX*numZ*length(channels)))
+            if sum(validInds) ~= 0;
+                % select expected value of superpixel at (x,y,z)
+                % displacement from the reference image
+                for chIx = channels
+                    motionLUT(y,x,z,chIx,validInds) = reference(sub2ind([dmdPixelsPerColumn dmdPixelsPerRow numPlanes max(channels)], ...
+                        shiftedR(validInds), shiftedC(validInds), shiftedD(validInds),chIx * ones(size(shiftedD(validInds)))));
+                end
             end
+
+            i = i+1;
+            waitbar(i/(numY*numX*numZ))
         end
     end
 end
