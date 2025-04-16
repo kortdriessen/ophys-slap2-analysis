@@ -35,10 +35,13 @@ nDMDs = size(trialTable.filename,1);
 [dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
 fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
 fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
+firstLine = trialTable.firstLine;
 parfor p_ix = 1:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
-    [fnRegDS{p_ix}, fnAdata{p_ix}]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+    [fnRegDS{p_ix}, fnAdata{p_ix}, firstLine(p_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
 end
+trialTable.firstLineOriginal = trialTable.firstLine; %during alignment of some data we discard initial frames
+trialTable.firstLine = firstLine;
 trialTable.fnRegDS = fnRegDS;
 trialTable.fnAdata = fnAdata;
 trialTable.alignParams = params;
@@ -47,11 +50,21 @@ save([dr filesep fn], "trialTable")
 disp('done multiRoiRegistration.')
 end
 
-function [fnwrite, fnAdata] = alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+function [fnwrite, fnAdata, firstLine] = alignAsync(dr, trialTable, params, f_ix, DMD_ix)
+
+if params.includeIntegrationROIs
+    spTypeFlag = 0; %use all superpixel types
+else
+    spTypeFlag = 1; %use only raster superpixels
+end
 
 fn = trialTable.filename{DMD_ix,f_ix};
 fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix)];
-firstLine = trialTable.firstLine(DMD_ix,f_ix);
+if isfield(trialTable,'firstLineOriginal')
+    firstLine = trialTable.firstLineOriginal(DMD_ix,f_ix);
+else
+    firstLine = trialTable.firstLine(DMD_ix,f_ix);
+end
 lastLine = trialTable.lastLine(DMD_ix, f_ix);
 aData = params;
 
@@ -78,15 +91,45 @@ disp(['Aligning: ' [dr filesep fn]])
     linerateHz = 1/meta.linePeriod_s;
     dt = linerateHz/aData.alignHz;
     numChannels = S2data.numChannels;
-    %numLines = lastLine-firstLine+1;
+    if params.isReVolt
+        numChannels = 1;
+        redChannel =2;
+
+        % load frames until you see the light turn on on channel 2
+        f0 = firstLine; minI = []; maxI = [];
+        fEnd = round(0.8*firstLine + 0.2*lastLine);
+        nSamps = 10;
+        while (fEnd-f0)>(nSamps*dt)
+            frames = round(linspace(f0,fEnd,nSamps));
+            ii = nan(1,nSamps);
+            for fix = 1:nSamps
+                ii(fix) = mean(S2data.getImage(redChannel, frames(fix), ceil(dt), 1, spTypeFlag), 'all', 'omitnan'); %moving image Ch1
+            end
+            if isempty(minI)
+                minI = min(ii, [], 'omitnan');
+                maxI = max(ii, [], 'omitnan');
+            end
+            ixEnd = find(ii>(0.1*minI + 0.9*maxI), 1,'first');
+            ix0 = find(ii(1:ixEnd)<(0.9*minI + 0.1*maxI), 1, 'last');
+            if isempty(ix0) || isempty(ixEnd)
+                warning(['isReVolt flag was set but laser on time could not be detected for file:' fn '. skipping...'])
+                return
+            end
+            fEnd = frames(ixEnd); f0 = frames(ix0);
+            
+        end
+        firstLine = round(interp1(ii, frames, (minI+maxI)/2));
+    end
     
+    %numLines = lastLine-firstLine+1;
     %sanity checks
     assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
+    metaZ = S2data.hDataFile.fastZs;
 
     %%%%%Make an initial template
     %crosscorrelate each initial frame to each other
     disp('generating template')
-    initFrames = ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
+    initFrames =   round(linspace(firstLine, lastLine, 40));%ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
     nInitFrames = length(initFrames);
 
     if nInitFrames==0
@@ -95,12 +138,16 @@ disp(['Aligning: ' [dr filesep fn]])
     end
     for fix = nInitFrames:-1:1
         for cix = numChannels:-1:1
-            Y(:,:,cix,fix) = S2data.getImage(cix, initFrames(fix), ceil(dt), 1);
+            Y(:,:,cix,fix) = S2data.getImage(cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
         end
     end
 
-    Y = squeeze(sum(Y,3));
-    
+    if params.isReVolt
+        Y = squeeze(Y(:,:,1,:));
+    else
+        Y = squeeze(sum(Y,3)); %use both channels;
+    end
+
     %make data smaller for alignment 
     trimRows = find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last'); 
     trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last'); 
@@ -127,6 +174,9 @@ disp(['Aligning: ' [dr filesep fn]])
     template = mean(template, 3); 
     
     if params.refStackTemplate
+        if params.isReVolt
+            error('refStack alignment not implemented for reVolt imaging')
+        end
         fullTemplate = nan(size(trialTable.refStack{DMD_ix}.IM,[2 1]));
         fullTemplate((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift)) = template;
     
@@ -171,10 +221,10 @@ disp(['Aligning: ' [dr filesep fn]])
     disp('Registering:');
     try
     for DSframeIx = 1:nDSframes
-        M1 = S2data.getImage(1, DSframes(DSframeIx), ceil(dt), 1); %moving image Ch1
+        M1 = S2data.getImage(1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
         M1 = M1(trimRows, trimCols);
         if numChannels==2
-            M2 =  S2data.getImage(2, DSframes(DSframeIx), ceil(dt), 1); %moving image Ch2
+            M2 =  S2data.getImage(2, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch2
             M2 = M2(trimRows, trimCols);
             M = M1+M2;
         else
@@ -257,6 +307,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
     if std(motionDSc)>1.5 || std(motionDSr)>1.5
         registrationFailed = true;
+        warning(['Too much motion in file: ' fn]);
     end
     if registrationFailed
         disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
@@ -273,6 +324,7 @@ disp(['Aligning: ' [dr filesep fn]])
         aData.motionDSz = motionDSz;
     end
     aData.aError = aErrorDS;
+    aData.Z = metaZ;
     %aData.aRankCorrDS = aRankCorrDS;
     aData.recNegErr = recNegErr;
     aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
