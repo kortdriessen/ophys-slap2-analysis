@@ -103,7 +103,7 @@ disp(['Aligning: ' [dr filesep fn]])
             frames = round(linspace(f0,fEnd,nSamps));
             ii = nan(1,nSamps);
             for fix = 1:nSamps
-                ii(fix) = mean(S2data.getImage(redChannel, frames(fix), ceil(dt), 1, spTypeFlag), 'all', 'omitnan'); %moving image Ch1
+                    ii(fix) = mean(getImageWrapper(S2data, redChannel, frames(fix), ceil(dt), 1, spTypeFlag), 'all', 'omitnan'); %moving image Ch1
             end
             if isempty(minI)
                 minI = min(ii, [], 'omitnan');
@@ -138,7 +138,7 @@ disp(['Aligning: ' [dr filesep fn]])
     end
     for fix = nInitFrames:-1:1
         for cix = numChannels:-1:1
-            Y(:,:,cix,fix) = S2data.getImage(cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
+                Y(:,:,cix,fix) = getImageWrapper(S2data, cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
         end
     end
 
@@ -221,10 +221,10 @@ disp(['Aligning: ' [dr filesep fn]])
     disp('Registering:');
     try
     for DSframeIx = 1:nDSframes
-        M1 = S2data.getImage(1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
+        M1 = getImageWrapper(S2data, 1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
         M1 = M1(trimRows, trimCols);
         if numChannels==2
-            M2 =  S2data.getImage(2, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch2
+            M2 =  getImageWrapper(S2data, 2, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch2
             M2 = M2(trimRows, trimCols);
             M = M1+M2;
         else
@@ -351,4 +351,12 @@ function meta = loadMetadata(datFilename)
     ix = strfind(datFilename, 'DMD'+digitsPattern(1));
     metaFilename = [datFilename(1:ix+3) '.meta'];
     meta = load(metaFilename, '-mat');
+end
+
+function IM = getImageWrapper(S2data, channel, frames, dt, zPlane, spTypeFlag)
+if spTypeFlag
+    IM = S2data.getImage(channel, frames, dt, zPlane, spTypeFlag);
+else
+    IM = S2data.getImage(channel, frames, dt, zPlane); %for backward compatibility
+end
 end
