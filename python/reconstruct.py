@@ -1,23 +1,25 @@
 import torch
 import numpy as np
 
-def reconstruct(A, phi, B, beta, subsampleMatrixInds, sparseHInds, sparseHVals, uniqueMotion, motInds, framesToUse=[]):
+def reconstruct(A, phi, B, beta, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, uniqueMotion, motInds, framesToUse=[]):
     numCycles = phi.shape[0]
     numSuperPixels = subsampleMatrixInds.shape[1]
+    numFastZs = fastZ2RefZ.shape[0]
 
     if not isinstance(framesToUse, np.ndarray):
         framesToUse = np.arange(numCycles)
 
     (numZs, dmdPixelsPerColumn, dmdPixelsPerRow) = B.shape
-    nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
+    nPixels = dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs
 
     dataEst = torch.zeros(numSuperPixels,framesToUse.shape[0])
 
     refPixs = torch.from_numpy(subsampleMatrixInds[0])
 
-    d = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor')
-    c = torch.div((refPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor')
-    r = refPixs % dmdPixelsPerColumn
+    d = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
+    c = torch.div((refPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor').int()
+    r = (refPixs % dmdPixelsPerColumn).int()
+    d = torch.from_numpy(fastZ2RefZ[d.numpy()].flatten()-1)
 
     mIdxs = motInds[framesToUse]
 
@@ -25,9 +27,9 @@ def reconstruct(A, phi, B, beta, subsampleMatrixInds, sparseHInds, sparseHVals, 
         i = np.where(mIdxs == m)[0]
         t = framesToUse[i]
 
-        newR = r+uniqueMotion[m,0]
-        newC = c+uniqueMotion[m,1]
-        newD = uniqueMotion[m,2] - 1
+        newR = r+uniqueMotion[m,0].astype(int)
+        newC = c+uniqueMotion[m,1].astype(int)
+        newD = d+uniqueMotion[m,2].astype(int)
 
         sparseHIndsShifted = sparseHInds.copy()
         sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[m,0].astype(int) * dmdPixelsPerRow + uniqueMotion[m,1].astype(int)
@@ -36,7 +38,7 @@ def reconstruct(A, phi, B, beta, subsampleMatrixInds, sparseHInds, sparseHVals, 
 
         X = torch.sparse.mm(H, A)
 
-        dataEst[:,i] = X.float() @ (beta[t].reshape((1,len(t))) * phi[t,:].T.reshape((-1,len(t)))).float() + torch.as_tensor(B[newD.astype(np.uint8)][newR.int(),newC.int()].reshape((-1,1))) @ beta[t].reshape((1,len(t))).to(torch.float32)
+        dataEst[:,i] = X.float() @ (beta[t].reshape((1,len(t))) * phi[t,:].T.reshape((-1,len(t)))).float() + torch.as_tensor(B[newD,newR,newC].reshape((-1,1))) @ beta[t].reshape((1,len(t))).to(torch.float32)
 
     return torch.maximum(dataEst, torch.zeros_like(dataEst))
 

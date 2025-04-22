@@ -577,7 +577,17 @@ def main():
             refStackTmp = refStackTmp.reshape(-1, numChannels, refStackTmp.shape[1], refStackTmp.shape[2]).transpose(1,0,2,3)
             refStack[f'DMD{DMDix+1}'] = refStackTmp
         else:
-            print(f"No matching files found for DMD{DMDix+1}")
+            pattern = f"**/*DMD{DMDix+1}-REFERENCE*"
+            matching_files = list(Path(dr).glob(pattern))
+            if matching_files:
+                first_file = str(matching_files[0])
+                print(f"DMD{DMDix+1} ref stack file: {first_file}")
+                numChannels = len(trialTable['refStack'][0,DMDix]['channels'][0,0].T)
+                refStackTmp = skimio.imread(first_file) / 100
+                refStackTmp = refStackTmp.reshape(-1, numChannels, refStackTmp.shape[1], refStackTmp.shape[2]).transpose(1,0,2,3)
+                refStack[f'DMD{DMDix+1}'] = refStackTmp
+            else:
+                print(f"No matching files found for DMD{DMDix+1}")
 
 
     # Save as multi-channel TIFF
