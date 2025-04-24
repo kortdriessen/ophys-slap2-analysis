@@ -26,9 +26,9 @@ copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel 
 
 %confirm that all files exist
 [trialTable, keepTrials] = verifyFiles(trialTablefn, dr, params);
-for dmdIx = 1:numel(trialTable.refStack)
-    trialTable.refStack{dmdIx}.IM = []; %this uses a lot of memory and we won't need it
-end
+% for dmdIx = 1:numel(trialTable.refStack)
+%     trialTable.refStack{dmdIx}.IM = []; %this uses a lot of memory and we won't need it
+%end
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
 nTrials = size(trialTable.filename,2);
 firstValidTrial = find(all(keepTrials,1),1,'first');
@@ -123,12 +123,12 @@ for DMDix = nDMDs:-1:1
     end
     %Assemble same-sized mean images from different-sized trial means
     szm1 = max(cellfun(@(x)size(x,1),mIM)); szm2 = max(cellfun(@(x)size(x,2), aIM));
-    meanIM = nan(szm1,szm2,numChannels, nTrials); actIM = nan(szm1,szm2,1, nTrials);
+    meanIM = nan(szm1,szm2,numChannels, nTrials); activIM = nan(szm1,szm2,1, nTrials);
     for trialIx = 1:nTrials
         tmp =  mIM{trialIx};
         meanIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp;
         tmp =  aIM{trialIx};
-        actIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp;
+        activIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp;
     end
     params.sz = size(meanIM, [1 2]);
 
@@ -142,14 +142,15 @@ for DMDix = nDMDs:-1:1
 
     %align all mean images to template
     disp('Aligning across trials...')
-    meanAligned = []; actAligned = [];
+    meanAligned = []; 
+    actAligned = nan(size(meanIM,1), size(meanIM,2),1,nTrials);
     corrCoeff = nan(1,nTrials);
     motOutput = nan(2,nTrials);
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
     clear M
     for trialIx = nTrials:-1:1
-        if ~keepTrials(DMDix,trialIx) || all(isnan(actIM(:,:,1,trialIx)), 'all')
+        if ~keepTrials(DMDix,trialIx) || all(isnan(activIM(:,:,1,trialIx)), 'all')
             disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
             continue %skip
         end
@@ -161,9 +162,9 @@ for DMDix = nDMDs:-1:1
         for chIx = 1:size(meanIM,3)
             meanAligned(:,:,chIx,trialIx) = interp2(meanIM(:,:,chIx,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
         end
-        actAligned(:,:,1,trialIx) = interp2(actIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
+        actAligned(:,:,1,trialIx) = interp2(activIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
-    clear Mpad
+    clear Mpad activIM
 
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;
@@ -222,7 +223,7 @@ for DMDix = nDMDs:-1:1
     end
     %strategy 2: use peaks
     %not implemented
-
+    disp(['Number of sources: ' num2str(k)]);
     if k>0
         %Generate IMsel; the data only in the selected region, aligned across movies
         selPix = false([sz(1:2) k]);
