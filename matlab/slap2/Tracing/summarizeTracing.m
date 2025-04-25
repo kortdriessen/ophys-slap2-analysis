@@ -1,6 +1,6 @@
 function summarizeTracing()
-%Registers a NeuroLucida tracing to a set of ExptSummary files
-%Creates a tracingSummary file in each exptSummary file folder
+%Registers a NeuroLucida or SNT tracing to a set of ExptSummary files
+%adds a tracingSummary file to the exptSummary file folder
 
 %script to localize synapses from experimentSummary in a traced stack, and
 %vice-versa
@@ -25,20 +25,27 @@ z_spacing_neurolucida = 1.5;
 minNodeSpacing = 0.2;
 
 %file picking
-hM = msgbox('Select Tracing XML file', 'modal');
+hM = msgbox('Select Tracing XML or SWC file', 'modal');
 waitfor(hM);
-[fn_xml,dr_xml] = uigetfile({'*.xml', '*.swc'}, 'Select tracing file'); %pick a tracing
-xml_fn = [dr_xml filesep fn_xml];
-if isempty(fn_xml) || isempty(dr_xml)
+[fn_tracing,dr_tracing] = uigetfile('*.*', 'Select tracing file'); %pick a tracing
+tracing_fn = [dr_tracing filesep fn_tracing];
+if ~any(fn_tracing) || ~any(dr_tracing)
     disp('Canceled. Aborting summarizeTracing.')
     return
 end
+[~, ext] = fileparts(tracing_fn);
+if strcmpi(ext, 'xml')
+    isNeurolucida = true;
+else
+    isNeurolucida = false;
+end
+
 
 hM = msgbox('Select Large Reference Stack', 'modal');
 waitfor(hM);
-[fn_tiff, dr_tiff] = uigetfile([dr_xml filesep '*REFERENCE.tif'], 'Select REFERENCE stack');
+[fn_tiff, dr_tiff] = uigetfile([dr_tracing filesep '*REFERENCE.tif'], 'Select REFERENCE stack');
 tiff_fn = [dr_tiff filesep fn_tiff];
-if isempty(fn_tiff) || isempty(dr_tiff)
+if ~any(fn_tiff) || ~any(dr_tiff)
     disp('Canceled. Aborting summarizeTracing.')
     return
 end
@@ -52,14 +59,14 @@ if numel(mf)~=1
 else
     meta_fn = [mf.folder filesep mf.name];
 end
-if isempty(fn_meta) || isempty(dr_meta)
+if ~any(fn_meta) || ~any(dr_meta)
     disp('Canceled. Aborting summarizeTracing.')
     return
 end
 
 hM = msgbox('Pick all experimentSummary files for this neuron', 'modal');
 waitfor(hM);
-pathToExptSummary = uipickfiles('filterspec', [dr_xml filesep '*.mat']); %pick experimentSummaries
+pathToExptSummary = uipickfiles('filterspec', [dr_tracing filesep '*.mat']); %pick experimentSummaries
 
 %load SLAP2 refIM metadata, which includes the DMD->sample transformation
 %meta_fn = '\\allen\aind\scratch\ophys\Maedeh\V1_visual_stimuli\776270\slap2_776270_2025-01-28_13-31-36\Neuron3\stack1\largeStack_20250128_140833_DMD1.meta';
@@ -69,9 +76,9 @@ meta = load(meta_fn, '-mat');
 DMD1 = meta.machineConfiguration(find(strcmpi({meta.machineConfiguration.instanceName}, 'Path1'),1, 'first'));
 DMD2 = meta.machineConfiguration(find(strcmpi({meta.machineConfiguration.instanceName}, 'Path2'),1, 'first'));
 tform = zeros(3);tform(3,3) = 1;
-tform(1:2,1:2) = DMD1.configuration.dmdPixel2SampleTransform(1:2,1:2); %the 4 is to keep rough pixel scale
+tform(1:2,1:2) = DMD1.configuration.dmdPixel2SampleTransform(1:2,1:2);
 DMDtform{1} = affinetform2d(tform);
-tform(1:2,1:2) = DMD2.configuration.dmdPixel2SampleTransform(1:2,1:2); %the 4 is to keep rough pixel scale
+tform(1:2,1:2) = DMD2.configuration.dmdPixel2SampleTransform(1:2,1:2); 
 DMDtform{2} = affinetform2d(tform);
 switch meta.acquisitionPathName
     case 'Path1'
@@ -92,35 +99,67 @@ rIm= imwarp(rIm,affinetform2d(reftform), 'OutputView',outputView_ref, 'FillValue
 rIm = max(0, rIm, "includemissing");
 rIm_lim = prctile(rIm(~isnan(rIm)),99.9);
 
-%load tracing as xml
-%xml_fn = '\\allen\aind\scratch\ophys\Maedeh\V1_visual_stimuli\776270\slap2_776270_2025-01-28_13-31-36\Neuron3\stack1\tracing1.xml';
-[xyz_raw, parent_raw] = parseNeurolucidaXML(xml_fn);
-
-%if multiple trees were traced, ensure there is a single origin point at position 1
-roots = find(parent_raw==0);
-if length(roots)>1
-    newRoot = mean(xyz_raw(roots,:));
-    xyz = [newRoot ; xyz_raw];
-    parent = [0; parent_raw+1];
+for imIx = 1:length(A.descriptions)
+    sliceMeta = jsondecode(A.descriptions{imIx});
+    zPlanes(imIx) = sliceMeta.z;
+end
+zSpacingStack = median(diff(unique(zPlanes)));
+if isempty(zSpacingStack)
+    zSpacingStack =1.5;
+    warning(['Failed to extract Z spacing from refstack metadata, defaulting to ' num2str(zSpacingStack)])
 end
 
-%convert the tree to the SLAP2 sample coordinate system
-%first, convert to pixels
-xyz_px(:,1) = (xyz(:,1)./xy_spacing_neurolucida);
-xyz_px(:,2) = -(xyz(:,2)./xy_spacing_neurolucida);
+%load tracing
+%xml_fn = '\\allen\aind\scratch\ophys\Maedeh\V1_visual_stimuli\776270\slap2_776270_2025-01-28_13-31-36\Neuron3\stack1\tracing1.xml';
+if isNeurolucida
+    [xyz_raw, parent_raw] = parseNeurolucidaXML(tracing_fn);
+
+    %if multiple trees were traced, ensure there is a single origin point at position 1
+    roots = find(parent_raw==0);
+    if length(roots)>1
+        newRoot = mean(xyz_raw(roots,:));
+        xyz = [newRoot ; xyz_raw];
+        parent = [0; parent_raw+1];
+    end
+
+    %convert to pixels
+    xyz_px(:,1) = (xyz(:,1)./xy_spacing_neurolucida);
+    xyz_px(:,2) = -(xyz(:,2)./xy_spacing_neurolucida);
+    xyz_spacing = [xy_spacing_neurolucida -z_spacing_neurolucida];
+
+else %SWC file
+    [nodes, children, xyz_spacing] = parseSWC(tracing_fn);
+    parent = [nodes.parent]';
+
+    if isempty(xyz_spacing)
+        xyz_spacing = [0.25 0.25 zSpacingStack]; %import the z spacing from the metadata
+        for ix = 1:numel(nodes)
+            nodes(ix).x = nodes(ix).x.*xyz_spacing(1);
+            nodes(ix).y = nodes(ix).y.*xyz_spacing(2);
+            nodes(ix).z = nodes(ix).z.*xyz_spacing(3);
+        end
+    end
+    disp('smoothing tree...')
+    smoothedNodes = smoothZPositions(nodes,children, 5);
+    
+    xyz_px(:,1) = ([smoothedNodes.x]./xyz_spacing(1));
+    xyz_px(:,2) = ([smoothedNodes.y]./xyz_spacing(2));
+    xyz_px(:,3) = ([smoothedNodes.z]./xyz_spacing(3));
+end
 
 %transform pixel coords to reference coords
-xyzR(:,3) = xyz(:,3); %initially, use z coordinates in microns (assuming neurolucida got spacing right)
+xyzR(:,3) = xyz_px(:,3).*zSpacingStack; %use z coordinates in microns
 [xyzR(:,1),xyzR(:,2)] = transformPointsForward(reftform,xyz_px(:,1),xyz_px(:,2));
 
 %upsample
 [xyzR, parent] = upsampleCoordinates(xyzR, parent, minNodeSpacing); %in units of microns in the sample;
-%xyzR(:,3) = xyzR(:,3)*1.5;
-%xyzR(:,3) = -xyzR(:,3)/z_spacing_neurolucida; %convert Z axis coordinates to pixels
 
 %sanity check coordinate system
-figure, imshow(mean(sqrt(rIm),3),outputView_ref, []);
-hold on, scatter(xyzR(:,1),xyzR(:,2));
+doSanityCheck = false;
+if doSanityCheck
+    figure, imshow(mean(sqrt(rIm),3),outputView_ref, []);
+    hold on, scatter(xyzR(:,1),xyzR(:,2));
+end
 
 %compute a dendrogram
 %dendrogramXZ = [];
@@ -138,6 +177,7 @@ for expt_ix = 1:nExpts
 
     %load reference stack if it has been removed for space reasons
     if isempty(exptSummary.trialTable.refStack{1}.IM)
+        disp('Reloading reference image into trial Table...');
         trialTableFn  =  [aFolder filesep 'trialTable.mat'];
         if ~exist(trialTableFn, 'file')
             [trialTableFn, tmpdr] = uigetfile([aFolder filesep '*trialTable.mat'], 'select trial Table');
@@ -166,30 +206,32 @@ for expt_ix = 1:nExpts
         % get coordinates for transforming the ROIs to the activity refIM space
         cropRow = exptSummary.aData{firstValidTrial,DMDix}.cropRow;
         cropCol = exptSummary.aData{firstValidTrial,DMDix}.cropCol;
-        %aIm = nan(size(refPlane));
-        %meanA = max(0, exptSummary.meanIM{DMDix}(:,:,1), 'includemissing');
-        %aIm(cropRow+[1:size(meanA,1)], cropCol+[1:size(meanA,2)]) = meanA;
 
-        %outputView = affineOutputView(size(refPlane),DMDtform{DMDix}, 'BoundsStyle', "FollowOutput");
-        %outputView.ImageSize = outputView.ImageSize*4;
-        aIm = imwarp(refPlane, DMDtform{DMDix},  'OutputView', outputView_ref,'FillValues',nan);
-        aIm_lim = prctile(aIm(~isnan(aIm)),99.9);
+        % load manual registration data
+        fn_annotations = [aFolder filesep 'tracingRegistrationData_DMD' int2str(DMDix) '.mat'];
+        if exist(fn_annotations, 'file')
+            load(fn_annotations, 'annotations');
+        else
+            aIm = imwarp(refPlane, DMDtform{DMDix},  'OutputView', outputView_ref,'FillValues',nan);
+            aIm_lim = prctile(aIm(~isnan(aIm)),99.9);
 
-        figure,imshow3D(sqrt(max(0,rIm(:,:,:))/rIm_lim));
-        figure, imshow(sqrt(max(0, aIm./aIm_lim)));
-        refPlaneIx(DMDix) = input('Enter best matching plane>>');
+            figure,imshow3D(sqrt(max(0,rIm(:,:,:))/rIm_lim));
+            figure, imshow(sqrt(max(0, aIm./aIm_lim)));
+            annotations.refPlaneIx = input('Enter best matching plane>>');
 
-        selPtsAct = []; selPtsRef = [];
-        ok = false;
-        while ~ok
-            [selPts1,selPts2] = cpselect(sqrt(aIm./aIm_lim),sqrt(rIm(:,:,refPlaneIx(DMDix))./rIm_lim),"Wait",true);
-            [selPtsAct(:,2), selPtsAct(:,1)] =  outputView_ref.intrinsicToWorld(selPts1(:,2), selPts1(:,1));
-            [selPtsRef(:,2), selPtsRef(:,1)]= outputView_ref.intrinsicToWorld(selPts2(:,2), selPts2(:,1));
-            nPts = size(selPtsAct,1);
-            ok = nPts>=3;
+            selPtsAct = []; selPtsRef = [];
+            ok = false;
+            while ~ok
+                [selPts1,selPts2] = cpselect(sqrt(aIm./aIm_lim),sqrt(rIm(:,:,annotations.refPlaneIx)./rIm_lim),"Wait",true);
+                [selPtsAct(:,2), selPtsAct(:,1)] =  outputView_ref.intrinsicToWorld(selPts1(:,2), selPts1(:,1));
+                [selPtsRef(:,2), selPtsRef(:,1)]= outputView_ref.intrinsicToWorld(selPts2(:,2), selPts2(:,1));
+                nPts = size(selPtsAct,1);
+                ok = nPts>=3;
+            end
+            annotations.tform_CPs = fitgeotform2d(selPtsAct(:,1:2),selPtsRef(:,1:2),transformType);
+            save(fn_annotations, 'annotations');
         end
-        tform_CPs{DMDix} = fitgeotform2d(selPtsAct(:,1:2),selPtsRef(:,1:2),transformType); 
-
+        
         %get activity ROI coordinates
         firstValidTrial = find(~isempty(exptSummary.E(:,DMDix)),1,'first');
         footprints = exptSummary.E{firstValidTrial,DMDix}.footprints;
@@ -202,11 +244,12 @@ for expt_ix = 1:nExpts
         end
         %first, transform raw points to the moving image space
         tmp =  transformPointsForward(DMDtform{DMDix}, roiPosRaw);   
+
         %now, transform to the reference image space
-        roiPosR{DMDix} = cat(2, transformPointsForward(tform_CPs{DMDix}, tmp), refPlaneIx(DMDix)*ones(nROIs,1).*-z_spacing_neurolucida); %positions of all the ROIs in the reference image
+        roiPosR{DMDix} = cat(2, transformPointsForward(annotations.tform_CPs, tmp), annotations.refPlaneIx*ones(nROIs,1).*xyz_spacing(3)); %positions of all the ROIs in the reference image
 
         %sanity check
-        figure, imshow(sqrt(rIm(:,:,refPlaneIx(DMDix))./rIm_lim), outputView_ref); hold on, scatter(roiPosR{DMDix}(:,1), roiPosR{DMDix}(:,2));
+        figure, imshow(sqrt(rIm(:,:,annotations.refPlaneIx)./rIm_lim), outputView_ref); hold on, scatter(roiPosR{DMDix}(:,1), roiPosR{DMDix}(:,2));
         
         RRdistances = squareform(pdist(roiPosR{DMDix}(:,1:2)));
 
@@ -257,7 +300,7 @@ for expt_ix = 1:nExpts
     cableDistance = treePathDistance(xyzR, parent, [cell2mat(roi2tree) 1]); % the distance matrices now include soma as last term
 
     %compute euclidean distance
-    euclideanDistance = squareform(pdist([cell2mat(roiPosR') xyzR(1,:)])); % the distance matrices now include soma as last term
+    euclideanDistance = squareform(pdist([cell2mat(roiPosR') ; xyzR(1,:)])); % the distance matrices now include soma as last term
 
     %populate the tracingSummary
     tracingSummary.exptSummary_fn = pathToExptSummary;
@@ -273,11 +316,12 @@ for expt_ix = 1:nExpts
     tracingSummary.dendrogramXZ = dendrogramXZ;
     tracingSummary.projectionXZ = projectionXZ;
     tracingSummary.tiffFn = tiff_fn;
-    tracingSummary.xmlFn = xml_fn;
+    tracingSummary.xmlFn = tracing_fn;
     tracingSummary.metaFn = meta_fn;
 
-    
-    save(strcat(drSave, filesep, 'tracingSummary-', datestr(now, 'YYmmDD-HHMMSS'), '.mat'), 'tracingSummary');
+    exptSummary.tracing = tracingSummary;
+    save(pathToExptSummary, 'exptSummary')
+    %save(strcat(drSave, filesep, 'tracingSummary-', datestr(now, 'YYmmDD-HHMMSS'), '.mat'), 'tracingSummary');
 end
 
 
