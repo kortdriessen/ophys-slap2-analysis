@@ -82,18 +82,20 @@ else
     ROIs = [];
 end
 
-%load some metadata
-[~, fn, ext] = fileparts(trialTable.fnAdata{1,firstValidTrial});
-load([dr filesep fn ext], 'aData');
-numChannels = aData.numChannels;
-params.numChannels = numChannels;
-params.alignHz = aData.alignHz;
-if ~strcmpi(params.microscope, 'SLAP2')
-    params.analyzeHz = 1/aData.frametime; %analyze conventional recordings at the acquisitoin framerate
-end
-
 %PROCESS DATA
 for DMDix = nDMDs:-1:1
+    %load some metadata
+    [~, fn, ext] = fileparts(trialTable.fnAdata{DMDix,firstValidTrial});
+    load([dr filesep fn ext], 'aData');
+    numChannels = aData.numChannels;
+    params.numChannels = numChannels;
+    params.alignHz = aData.alignHz;
+    if ~strcmpi(params.microscope, 'SLAP2')
+        params.analyzeHz = 1/aData.frametime; %analyze conventional recordings at the acquisitoin framerate
+    end
+    exptSummary.Z(DMDix) = aData.Z;
+    clear aData
+
     %set up parallelization
     if params.nParallelWorkers>1
         p = gcp('nocreate');
@@ -131,8 +133,6 @@ for DMDix = nDMDs:-1:1
         activIM(1:size(tmp,1),1:size(tmp,2),:,trialIx) = tmp;
     end
     params.sz = size(meanIM, [1 2]);
-
-    clear aData
 
     %Make template
     disp('Making template for aligning across trials...')
