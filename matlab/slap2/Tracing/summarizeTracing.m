@@ -303,7 +303,7 @@ for expt_ix = 1:nExpts
     euclideanDistance = squareform(pdist([cell2mat(roiPosR') ; xyzR(1,:)])); % the distance matrices now include soma as last term
 
     %populate the tracingSummary
-    tracingSummary.exptSummary_fn = pathToExptSummary;
+    tracingSummary.exptSummary_fn = pathToExptSummary{expt_ix};
     tracingSummary.coords = xyzR;  %xyz coordinates in the reference space
     tracingSummary.ROIcoords = roiPosR ;
     tracingSummary.matched = matched;
@@ -319,8 +319,13 @@ for expt_ix = 1:nExpts
     tracingSummary.xmlFn = tracing_fn;
     tracingSummary.metaFn = meta_fn;
 
-    exptSummary.tracing = tracingSummary;
-    save(pathToExptSummary, 'exptSummary')
+    response = questdlg('Save to experiment summary?');
+    if strcmpi(response, 'Yes')
+        exptSummary.tracing = tracingSummary;
+        disp('Saving...')
+        save(pathToExptSummary{expt_ix}, 'exptSummary', '-v7.3');
+        disp(['Done tracingSummary for ' pathToExptSummary{expt_ix}])
+    end
     %save(strcat(drSave, filesep, 'tracingSummary-', datestr(now, 'YYmmDD-HHMMSS'), '.mat'), 'tracingSummary');
 end
 
