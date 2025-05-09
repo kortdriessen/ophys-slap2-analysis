@@ -97,8 +97,12 @@ for DMDix = nDMDs:-1:1
             end
         end
         for ix = 1:length(zs_ix)
-            zPlane_um = mean(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory(zPlanes == zs_ix(ix)));
-            zs(ix) = zPlane_um;
+            if all(isnan(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory))
+                zs(ix) = metaData.remoteFocusPosition_um;
+            else
+                zPlane_um = mean(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory(zPlanes == zs_ix(ix)));
+                zs(ix) = zPlane_um;
+            end
         end
     else
         zs = metaData.AcquisitionContainer.ParsePlan.zs;
