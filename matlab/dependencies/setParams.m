@@ -84,14 +84,14 @@ switch fnName
         params.expectedWindowWidth_lines = 5000; tooltips.expectedWindowWidth_lines = 'exponential time averaging constant for baseline calculation';
     case 'summarize_Voltage'
         params.tau = 0.001;            tooltips.tau_s = 'decay time constant of voltage signal';
-        params.analyzeHz = 200; %frame rate used for analysis
+        params.analyzeHz = 1000; %frame rate used for analysis
         params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
-        params.sigma_px = 1.5; tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
         params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
-        params.baselineWindow_s = 4; %timescale for calculating F0 in glutamate channel, seconds
+        params.baselineWindow_s = 1; %timescale for calculating F0 in glutamate channel, seconds
         params.exptType = {'"V1 Gratings"', '"BCI"', '"other"'};  tooltips.exptType ='Experiment type';
         params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease thresh to be more stringent on motion correction when censoring frames';   
-        params.manualRois = false;
+        params.manualRois = false;      tooltips.manualRois = 'Redraw ROIs manually? If false, will use the ROIs drawn at imaging time';
+        params.integrationOnly = true;  tooltips.integrationOnly = 'Only process integration ROIs?';
     otherwise
         error('Unknown function name passed to setParams.m')
 end             

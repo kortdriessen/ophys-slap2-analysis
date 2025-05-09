@@ -17,7 +17,7 @@ function summarizeTracing()
 % -A correspondence map between ROIs on each DMD (and for each recording, if there are multiple recordings) and nodes of the neuron tree above
 % -cable distance between each pair of ROIs
 
-import ScanImageTiffReader.*
+%import ScanImageTiffReader.*
 transformType = 'affine';
 
 xy_spacing_neurolucida = 0.25;
@@ -91,19 +91,27 @@ end
 
 %load tracing stack
 %tiff_fn = '\\allen\aind\scratch\ophys\Maedeh\V1_visual_stimuli\776270\slap2_776270_2025-01-28_13-31-36\Neuron3\stack1\largeStack_20250128_140833_DMD1-REFERENCE.tif';
-A = ScanImageTiffReader(tiff_fn);
-rIm = permute(A.data(), [2 1 3]);%matlab image has [Y,X] coordinates
+%A = ScanImageTiffReader(tiff_fn);
+localDr = 'C:\tmp_tiffIO'; %local directory for temporarily storing big tiff files
+[rIm, desc] = networkScanImageTiffReader(tiff_fn, localDr);
+rIm = permute(rIm, [2 1 3]);%matlab image has [Y,X] coordinates
 outputView_ref = affineOutputView([800 1280],reftform, 'BoundsStyle', "FollowOutput");
 outputView_ref.ImageSize = outputView_ref.ImageSize*4;
 rIm= imwarp(rIm,affinetform2d(reftform), 'OutputView',outputView_ref, 'FillValues',nan);
 rIm = max(0, rIm, "includemissing");
 rIm_lim = prctile(rIm(~isnan(rIm)),99.9);
 
-for imIx = 1:length(A.descriptions)
-    sliceMeta = jsondecode(A.descriptions{imIx});
+zSpacingStack = [];
+try
+for imIx = 1:length(desc)
+    sliceMeta = jsondecode(desc{imIx});
     zPlanes(imIx) = sliceMeta.z;
 end
 zSpacingStack = median(diff(unique(zPlanes)));
+catch ME
+    disp(ME)
+    warning('Error while trying to read Z spacing from metadata')
+end
 if isempty(zSpacingStack)
     zSpacingStack =1.5;
     warning(['Failed to extract Z spacing from refstack metadata, defaulting to ' num2str(zSpacingStack)])
@@ -215,8 +223,8 @@ for expt_ix = 1:nExpts
             aIm = imwarp(refPlane, DMDtform{DMDix},  'OutputView', outputView_ref,'FillValues',nan);
             aIm_lim = prctile(aIm(~isnan(aIm)),99.9);
 
-            figure,imshow3D(sqrt(max(0,rIm(:,:,:))/rIm_lim));
-            figure, imshow(sqrt(max(0, aIm./aIm_lim)));
+            figure('name', 'REF volume for matching'),imshow3D(sqrt(max(0,rIm(:,:,:))/rIm_lim));
+            figure('name', ['Activity plane for matching: DMD' int2str(DMDix)]), imshow(sqrt(max(0, aIm./aIm_lim)));
             annotations.refPlaneIx = input('Enter best matching plane>>');
 
             selPtsAct = []; selPtsRef = [];

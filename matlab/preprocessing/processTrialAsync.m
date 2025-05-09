@@ -8,7 +8,8 @@ switch params.microscope
         %load the high time resolution data
         S2data = slap2.Slap2DataFile([dr filesep fn]);
         meta = loadMetadata([dr filesep fn]);
-        numChannels = S2data.numChannels;
+        numChannels = params.numChannels;
+
         linerateHz = 1/meta.linePeriod_s;
         dt = linerateHz/params.analyzeHz;
         frameLines = ceil(startLine:dt:endLine);

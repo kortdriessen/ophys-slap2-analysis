@@ -3,7 +3,7 @@ function multiRoiRegSLAP2(fullPathToTrialTable, paramsIn)
 if ~nargin
     [fn, dr] = uigetfile('*trialTable*.mat');
 else
-    [dr, fn, ext] = fileparts(fullPathToTrialTable); fn = [fn ext]; 
+    [dr, fn, ext] = fileparts(fullPathToTrialTable); fn = [fn ext];
 end
 
 %PARAMETER SETTING
@@ -12,7 +12,7 @@ if nargin>1
 else
     params = setParams('multiRoiRegSLAP2');
 end
-    
+
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep fn], 'trialTable');
 
@@ -32,18 +32,27 @@ if poolsize<nWorkers
     parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
 end
 nDMDs = size(trialTable.filename,1);
-[dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
-fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
-fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
-firstLine = trialTable.firstLine;
-parfor p_ix = 1:numel(fixs)
-    f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
-    [fnRegDS{p_ix}, fnAdata{p_ix}, firstLine(p_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+nTrials = size(trialTable.trueTrialIx,2);
+
+for DMD_ix = 1:nDMDs
+    fnRegDS = cell(1,nTrials);
+    fnAdata = cell(1,nTrials);
+    firstLine = nan(1,nTrials);
+    parfor f_ix = 1:nTrials
+        [fnRegDS{f_ix}, fnAdata{f_ix}, firstLine(f_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+    end
+    if params.isReVolt && ~isfield(trialTable, 'firstLineOriginal')
+        trialTable.firstLineOriginal = trialTable.firstLine;
+        tOffset = firstLine - trialTable.firstLineOriginal(DMD_ix,:);
+        trialTable.firstLine = trialTable.firstLine + tOffset;
+    end
+    trialTable.fnRegDS(DMD_ix,:) = fnRegDS;
+    trialTable.fnAdata(DMD_ix,:) = fnAdata;
 end
-trialTable.firstLineOriginal = trialTable.firstLine; %during alignment of some data we discard initial frames
-trialTable.firstLine = firstLine;
-trialTable.fnRegDS = fnRegDS;
-trialTable.fnAdata = fnAdata;
+%during alignment of some data we discard initial frames
+
+
+
 trialTable.alignParams = params;
 save([dr filesep fn], "trialTable")
 
@@ -60,166 +69,173 @@ end
 
 fn = trialTable.filename{DMD_ix,f_ix};
 fnW = ['E' int2str(trialTable.epoch(f_ix)) 'T' int2str(f_ix) 'DMD' int2str(DMD_ix)];
-if isfield(trialTable,'firstLineOriginal')
-    firstLine = trialTable.firstLineOriginal(DMD_ix,f_ix);
-else
-    firstLine = trialTable.firstLine(DMD_ix,f_ix);
-end
+firstLine = trialTable.firstLine(DMD_ix,f_ix);
 lastLine = trialTable.lastLine(DMD_ix, f_ix);
 aData = params;
 
 disp(['Aligning: ' [dr filesep fn]])
-    fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
-    fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
+fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
+fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
 
-    if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
-        disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
-        return
+if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
+    disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
+    return
+end
+
+retry=0;
+while retry<10
+    try
+        S2data = slap2.Slap2DataFile([dr filesep fn]);
+        retry = 10;
+    catch
+        retry = retry+1
+        continue
     end
+end
+meta = loadMetadata([dr filesep fn]);
+linerateHz = 1/meta.linePeriod_s;
+dt = linerateHz/aData.alignHz;
+numChannels = S2data.numChannels;
 
-    retry=0;
-    while retry<10
-        try
-            S2data = slap2.Slap2DataFile([dr filesep fn]);
-            retry = 10;
-        catch
-            retry = retry+1
-            continue
-        end
-    end
-    meta = loadMetadata([dr filesep fn]);
-    linerateHz = 1/meta.linePeriod_s;
-    dt = linerateHz/aData.alignHz;
-    numChannels = S2data.numChannels;
-    if params.isReVolt
-        numChannels = 1;
-        redChannel =2;
 
+if params.isReVolt
+    numChannels = 1;
+    redChannel =2;
+    if isfield(trialTable,'firstLineOriginal') &&  ~isnan(trialTable.firstLineOriginal(DMD_ix,f_ix))
+        %first line already adjusted
+    else
         % load frames until you see the light turn on on channel 2
-        f0 = firstLine; minI = []; maxI = [];
+        f0 = firstLine+1000; minI = []; maxI = [];
         fEnd = round(0.8*firstLine + 0.2*lastLine);
         nSamps = 10;
+        span = fEnd-f0;
         while (fEnd-f0)>(nSamps*dt)
             frames = round(linspace(f0,fEnd,nSamps));
             ii = nan(1,nSamps);
             for fix = 1:nSamps
-                    ii(fix) = mean(getImageWrapper(S2data, redChannel, frames(fix), ceil(dt), 1, spTypeFlag), 'all', 'omitnan'); %moving image Ch1
+                ii(fix) = mean(getImageWrapper(S2data, redChannel, frames(fix), ceil(dt), 1, spTypeFlag), 'all', 'omitnan'); %moving image Ch1
             end
             if isempty(minI)
                 minI = min(ii, [], 'omitnan');
                 maxI = max(ii, [], 'omitnan');
             end
-            ixEnd = find(ii>(0.1*minI + 0.9*maxI), 1,'first');
-            ix0 = find(ii(1:ixEnd)<(0.9*minI + 0.1*maxI), 1, 'last');
+            ixEnd = find(ii>(0.35*minI + 0.65*maxI), 1,'first');
+            ix0 = find(ii(1:ixEnd)<(0.65*minI + 0.35*maxI), 1, 'last');
+            if (frames(ixEnd)-frames(ix0)) >=span
+                warning('trouble zooming in on time of light turn on.')
+                break %stop zooming in
+            else
+                span = (frames(ixEnd)-frames(ix0));
+            end
             if isempty(ix0) || isempty(ixEnd)
                 warning(['isReVolt flag was set but laser on time could not be detected for file:' fn '. skipping...'])
                 return
             end
             fEnd = frames(ixEnd); f0 = frames(ix0);
-            
         end
         firstLine = round(interp1(ii, frames, (minI+maxI)/2));
     end
-    
-    %numLines = lastLine-firstLine+1;
-    %sanity checks
-    assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
-    metaZ = S2data.hDataFile.fastZs;
+end
 
-    %%%%%Make an initial template
-    %crosscorrelate each initial frame to each other
-    disp('generating template')
-    initFrames =   round(linspace(firstLine, lastLine, 40));%ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
-    nInitFrames = length(initFrames);
+%numLines = lastLine-firstLine+1;
+%sanity checks
+assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
+metaZ = S2data.hDataFile.fastZs;
 
-    if nInitFrames==0
-        disp(['File ' fn ' was very short! Skipping alignment']);
-        return
+%%%%%Make an initial template
+%crosscorrelate each initial frame to each other
+disp('generating template')
+initFrames =   round(linspace(firstLine, lastLine, 40));%ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
+nInitFrames = length(initFrames);
+
+if nInitFrames==0
+    disp(['File ' fn ' was very short! Skipping alignment']);
+    return
+end
+for fix = nInitFrames:-1:1
+    for cix = numChannels:-1:1
+        Y(:,:,cix,fix) = getImageWrapper(S2data, cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
     end
-    for fix = nInitFrames:-1:1
-        for cix = numChannels:-1:1
-                Y(:,:,cix,fix) = getImageWrapper(S2data, cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
-        end
-    end
+end
 
+if params.isReVolt
+    Y = squeeze(Y(:,:,1,:));
+else
+    Y = squeeze(sum(Y,3)); %use both channels;
+end
+
+%make data smaller for alignment
+trimRows = find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last');
+trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last');
+Y = Y(trimRows, trimCols,:);
+sz = size(Y);
+
+R = ones(nInitFrames);
+motion = zeros(2,nInitFrames,nInitFrames);
+for f1 = 1:nInitFrames
+    for f2 = (f1+1):nInitFrames
+        [motion(:,f1,f2), R(f1,f2)] = xcorr2_nans(Y(:,:,f2), Y(:,:,f1), [0 ; 0], 3);
+        motion(:,f2,f1) = -motion(:,f1,f2);
+        R(f2,f1) = R(f1,f2);
+    end
+end
+[bestR, maxind] = max(median(R));
+frameInds = find(R(:,maxind)>=bestR);
+
+[viewR, viewC] = ndgrid((1:(sz(1)+2*aData.maxshift))-aData.maxshift, (1:(sz(2)+2*aData.maxshift))-aData.maxshift); %view matrices for interpolation
+template = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2));
+for fix = 1:length(frameInds)
+    template(:,:,fix) = interp2(1:sz(2), 1:sz(1), Y(:,:,frameInds(fix)),viewC-motion(2,frameInds(fix), maxind), viewR-motion(1,frameInds(fix), maxind), 'linear', nan);
+end
+template = mean(template, 3);
+
+if params.refStackTemplate
     if params.isReVolt
-        Y = squeeze(Y(:,:,1,:));
+        error('refStack alignment not implemented for reVolt imaging')
+    end
+    fullTemplate = nan(size(trialTable.refStack{DMD_ix}.IM,[2 1]));
+    fullTemplate((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift)) = template;
+
+    if numel(trialTable.refStack{DMD_ix}.channels) == 2
+        refStack = (trialTable.refStack{DMD_ix}.IM(:,:,1:2:end) + trialTable.refStack{DMD_ix}.IM(:,:,2:2:end))/2;
     else
-        Y = squeeze(sum(Y,3)); %use both channels;
+        refStack = trialTable.refStack{DMD_ix}.IM;
     end
+    templateShifts = xcorr2_nans(fullTemplate,refStack(:,:,floor(end/2)+1)',[0;0],aData.maxshift);
+    T0 = imtranslate(permute(refStack,[2 1 3]),[templateShifts(2:-1:1),0]);
+    T0 = T0((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift),:);
+    disp('template generated from reference stack')
+else
+    T0 = template;
+end
 
-    %make data smaller for alignment 
-    trimRows = find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last'); 
-    trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last'); 
-    Y = Y(trimRows, trimCols,:);
-    sz = size(Y);
+clear Y Yhp;
 
-    R = ones(nInitFrames);
-    motion = zeros(2,nInitFrames,nInitFrames);
-    for f1 = 1:nInitFrames
-        for f2 = (f1+1):nInitFrames
-            [motion(:,f1,f2), R(f1,f2)] = xcorr2_nans(Y(:,:,f2), Y(:,:,f1), [0 ; 0], 3);
-            motion(:,f2,f1) = -motion(:,f1,f2);
-            R(f2,f1) = R(f1,f2);
-        end
-    end
-    [bestR, maxind] = max(median(R));
-    frameInds = find(R(:,maxind)>=bestR);
-    
-    [viewR, viewC] = ndgrid((1:(sz(1)+2*aData.maxshift))-aData.maxshift, (1:(sz(2)+2*aData.maxshift))-aData.maxshift); %view matrices for interpolation
-    template = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2));
-    for fix = 1:length(frameInds)
-        template(:,:,fix) = interp2(1:sz(2), 1:sz(1), Y(:,:,frameInds(fix)),viewC-motion(2,frameInds(fix), maxind), viewR-motion(1,frameInds(fix), maxind), 'linear', nan);
-    end
-    template = mean(template, 3); 
-    
-    if params.refStackTemplate
-        if params.isReVolt
-            error('refStack alignment not implemented for reVolt imaging')
-        end
-        fullTemplate = nan(size(trialTable.refStack{DMD_ix}.IM,[2 1]));
-        fullTemplate((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift)) = template;
-    
-        if numel(trialTable.refStack{DMD_ix}.channels) == 2
-            refStack = (trialTable.refStack{DMD_ix}.IM(:,:,1:2:end) + trialTable.refStack{DMD_ix}.IM(:,:,2:2:end))/2;
-        else
-            refStack = trialTable.refStack{DMD_ix}.IM;
-        end
-        templateShifts = xcorr2_nans(fullTemplate,refStack(:,:,floor(end/2)+1)',[0;0],aData.maxshift);
-        T0 = imtranslate(permute(refStack,[2 1 3]),[templateShifts(2:-1:1),0]);
-        T0 = T0((min(trimRows)-aData.maxshift):(max(trimRows)+aData.maxshift),(min(trimCols)-aData.maxshift):(max(trimCols)+aData.maxshift),:);
-        disp('template generated from reference stack')
-    else
-        T0 = template;
-    end
-    
-    clear Y Yhp;
+initR = 0; initC = 0;
+DSframes = ceil(firstLine:dt:lastLine);
+nDSframes= length(DSframes); %number of downsampled frames
 
-    initR = 0; initC = 0;
-    DSframes = ceil(firstLine:dt:lastLine);
-    nDSframes= length(DSframes); %number of downsampled frames
-    
-    %for spatial downsampling, used to calculate alignment quality and for quicker visualization
-    dsTimes = 2;
-    dsSz = floor(size(template)./(2^dsTimes));
-    A_ds = nan([dsSz nDSframes]);
+%for spatial downsampling, used to calculate alignment quality and for quicker visualization
+dsTimes = 2;
+dsSz = floor(size(template)./(2^dsTimes));
+A_ds = nan([dsSz nDSframes]);
 
-    motionDSr = nan(1,nDSframes); 
-    motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
-    if params.refStackTemplate
-        motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
-    end
-    aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
-    %aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
-    %recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
+motionDSr = nan(1,nDSframes);
+motionDSc = nan(1,nDSframes); %matrices to store the inferred motion
+if params.refStackTemplate
+    motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
+end
+aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
+%aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
+%recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
 
-    %output TIF
-    pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
-    fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+%output TIF
+pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
+fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
 
-    registrationFailed = false;
-    disp('Registering:');
-    try
+registrationFailed = false;
+disp('Registering:');
+try
     for DSframeIx = 1:nDSframes
         M1 = getImageWrapper(S2data, 1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
         M1 = M1(trimRows, trimCols);
@@ -230,14 +246,14 @@ disp(['Aligning: ' [dr filesep fn]])
         else
             M = M1;
         end
-          
+
         if ~mod(DSframeIx, 1000)
             disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
         end
-        
+
         % Ttmp = mean(cat(3, T0,template),3, 'omitnan');
         % T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
-        
+
         if params.refStackTemplate
             T = T0(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)),:);
             [motOutput, corrCoeff] = xcorr2_nans3d(M, T, [0 ; 0], aData.clipShift);
@@ -278,79 +294,79 @@ disp(['Aligning: ' [dr filesep fn]])
         nantmp = sel & isnan(template);
         template(nantmp) = A(nantmp);
         template(sel) = (1-aData.alpha)*template(sel) + aData.alpha*(A(sel));
-        
+
         initR = round(motionDSr(DSframeIx));
         initC = round(motionDSc(DSframeIx));
     end
-    catch ME
-        disp(ME);
-        registrationFailed = true;
-    end
+catch ME
+    disp(ME);
+    registrationFailed = true;
+end
 
-    fTIF.close;
+fTIF.close;
 
-    %Compute alignment error
-    offset = 10;
-    recNegErr = nan(1,nDSframes);
-    nChunks = ceil(nDSframes./(aData.alignHz*10)); %align 10 seconds at a time
-    chunkEdges = round(linspace(1, nDSframes+1, nChunks));
-    for chunkIx = 1:length(chunkEdges)-1
-        t_ixs = chunkEdges(chunkIx):chunkEdges(chunkIx+1)-1;
-        template = median(A_ds(:,:,t_ixs), 3, 'omitmissing');
-        nanFrac = mean(isnan(A_ds(:,:,t_ixs)), 3);
-        template(nanFrac>0.2) = nan;
-        template_gamma = sqrt(max(0,template)+offset);
-        template = repmat(template, 1,1,length(t_ixs));
-        template(isnan(A_ds(:,:,t_ixs))) = nan;
-        recNegErr(1,t_ixs) = sqrt(squeeze(mean((max(0, (template-A_ds(:,:,t_ixs))./template_gamma).^2), [1 2], 'omitnan')./mean(max(0,(template./template_gamma).^2, 'includenan'), [1 2], 'omitnan')));
-    end
+%Compute alignment error
+offset = 10;
+recNegErr = nan(1,nDSframes);
+nChunks = ceil(nDSframes./(aData.alignHz*10)); %align 10 seconds at a time
+chunkEdges = round(linspace(1, nDSframes+1, nChunks));
+for chunkIx = 1:length(chunkEdges)-1
+    t_ixs = chunkEdges(chunkIx):chunkEdges(chunkIx+1)-1;
+    template = median(A_ds(:,:,t_ixs), 3, 'omitmissing');
+    nanFrac = mean(isnan(A_ds(:,:,t_ixs)), 3);
+    template(nanFrac>0.2) = nan;
+    template_gamma = sqrt(max(0,template)+offset);
+    template = repmat(template, 1,1,length(t_ixs));
+    template(isnan(A_ds(:,:,t_ixs))) = nan;
+    recNegErr(1,t_ixs) = sqrt(squeeze(mean((max(0, (template-A_ds(:,:,t_ixs))./template_gamma).^2), [1 2], 'omitnan')./mean(max(0,(template./template_gamma).^2, 'includenan'), [1 2], 'omitnan')));
+end
 
-    if std(motionDSc)>1.5 || std(motionDSr)>1.5
-        registrationFailed = true;
-        warning(['Too much motion in file: ' fn]);
-    end
-    if registrationFailed
-        disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
-        return
-    end
+if std(motionDSc)>1.5 || std(motionDSr)>1.5
+    registrationFailed = true;
+    warning(['Too much motion in file: ' fn]);
+end
+if registrationFailed
+    disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
+    return
+end
 
-    %save alignment metadata
-    aData.numChannels = numChannels;
-    aData.frametime = 1/aData.alignHz;
-    aData.DSframes = DSframes;
-    aData.motionDSc = motionDSc;
-    aData.motionDSr = motionDSr;
-    if params.refStackTemplate
-        aData.motionDSz = motionDSz;
-    end
-    aData.aError = aErrorDS;
-    aData.Z = metaZ;
-    %aData.aRankCorrDS = aRankCorrDS;
-    aData.recNegErr = recNegErr;
-    aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
-    aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
+%save alignment metadata
+aData.numChannels = numChannels;
+aData.frametime = 1/aData.alignHz;
+aData.DSframes = DSframes;
+aData.motionDSc = motionDSc;
+aData.motionDSr = motionDSr;
+if params.refStackTemplate
+    aData.motionDSz = motionDSz;
+end
+aData.aError = aErrorDS;
+aData.Z = metaZ;
+%aData.aRankCorrDS = aRankCorrDS;
+aData.recNegErr = recNegErr;
+aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into original recording
+aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
-    disp('Getting online motion correction offsets')
-    [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
+disp('Getting online motion correction offsets')
+[aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
 
-    %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
-    aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
-    aData.trimCols = trimCols;%used to remap images from the datafile into the space of the saved tiffs
-    aData.viewC = viewC;%used to remap images from the datafile into the space of the saved tiffs
-    aData.viewR = viewR;%used to remap images from the datafile into the space of the saved tiffs
-    %EXAMPLE CODE
-    %  Y = S2data.getImage(channel, lineTime, deltaTime, zPos);
-    %  Ytrimmed = Y(aData.trimRows, aData.trimCols);
-    %  sz = size(Ytrimmed);
-    %  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
+%CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
+aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
+aData.trimCols = trimCols;%used to remap images from the datafile into the space of the saved tiffs
+aData.viewC = viewC;%used to remap images from the datafile into the space of the saved tiffs
+aData.viewR = viewR;%used to remap images from the datafile into the space of the saved tiffs
+%EXAMPLE CODE
+%  Y = S2data.getImage(channel, lineTime, deltaTime, zPos);
+%  Ytrimmed = Y(aData.trimRows, aData.trimCols);
+%  sz = size(Ytrimmed);
+%  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
 
-    save(fnAdata, 'aData');
+save(fnAdata, 'aData');
 end
 
 function meta = loadMetadata(datFilename)
-    ix = strfind(datFilename, 'DMD'+digitsPattern(1));
-    metaFilename = [datFilename(1:ix+3) '.meta'];
-    meta = load(metaFilename, '-mat');
+ix = strfind(datFilename, 'DMD'+digitsPattern(1));
+metaFilename = [datFilename(1:ix+3) '.meta'];
+meta = load(metaFilename, '-mat');
 end
 
 function IM = getImageWrapper(S2data, channel, frames, dt, zPlane, spTypeFlag)

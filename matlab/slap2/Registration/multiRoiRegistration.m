@@ -40,7 +40,8 @@ disp(['Aligning: ' [dr filesep fn]])
     dt = linerateHz/aData.alignHz;
     numChannels = S2data.numChannels;
     numLines = S2data.totalNumLines;
-    
+    metaZ = meta.AcquisitionContainer.ParsePlan.zs;
+
     %sanity checks
     assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
 
