@@ -27,7 +27,7 @@ for sourceIx = k:-1:1
     vResid = sum(sum(resid(selPx,:),1).^2,2);
     SNR(sourceIx) = vD1./vResid;
 end
-SNRcut = 1;
+SNRcut = 0.75;
 is_gui_mode = usejava('desktop') && usejava('awt');
 if ~any(SNR>SNRcut) && is_gui_mode
     figure('name', 'This recording yielded no sources above SNR cutoff'),
@@ -86,11 +86,12 @@ for sourceIx1 = 1:k-1
         %compute AIC
         sigma = std(resid(selPx, :),1,2);
 
+        penalty = 1.2; %a number between 1 and 2 to penalize the AIC of the 2-source model, larger number favors merging. 1 is the original AIC.
         resid_1source=  D-W1*H1;
         logL_1source = sum(log(normpdf(resid_1source./sigma)), 'all');%sum(log(1/(sigma.*sqrt(2*pi))) -(((resid_1source./sigma).^2)/2), 1) %gaussian log likelihood
         logL_2sources = sum(log(normpdf(resid(selPx,:)./sigma)), 'all');
         k_1source = sum(W1(:)>0) + numel(H1);
-        k_2sources = sum(W(:, [sourceIx1 sourceIx2])>0, 'all') + 2*numel(H1);
+        k_2sources = sum(W(:, [sourceIx1 sourceIx2])>0, 'all') + penalty*numel(H1);
         AIC1 = 2.*k_1source - 2*logL_1source;
         AIC2 = 2.*k_2sources - 2*logL_2sources;
         
