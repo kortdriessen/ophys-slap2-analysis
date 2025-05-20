@@ -93,7 +93,12 @@ for DMDix = nDMDs:-1:1
     if ~strcmpi(params.microscope, 'SLAP2')
         params.analyzeHz = 1/aData.frametime; %analyze conventional recordings at the acquisitoin framerate
     end
-    exptSummary.Z(DMDix) = aData.Z;
+    if isfield(aData, 'Z')
+        exptSummary.Z(DMDix) = aData.Z;
+    else
+        exptSummary.Z(DMDix) = nan;
+        warning('Alignment data missing Z-plane, likely out of date!!')
+    end
     clear aData
 
     %set up parallelization

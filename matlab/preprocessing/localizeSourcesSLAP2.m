@@ -35,7 +35,7 @@ nanFrac = mean(isnan(IMf),2);
 incomplete = nanFrac>0 & nanFrac<1;
 IMs = nan(size(IMf));
 IMs(incomplete,:) = smoothdata(IMf(incomplete,:), 2, 'movmean', baselineWindow, 'omitnan');
-IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf)));
+IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf))); clear IMs
 IMf = reshape(IMf, sz(1),sz(2), []);
 
 %time match filter
@@ -71,6 +71,7 @@ IMf(nans) = 0;
 IMf = imgaussfilt(IMf, [sigma sigma]);
 IMf = IMf - imgaussfilt(IMf, 5*[sigma sigma]);
 IMf(nans) = nan;
+clear nans
 
 %we performed filtering in the log space to perform multiplicatoins; return to non-log space
 IMf = exp(IMf); 

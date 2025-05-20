@@ -1,4 +1,4 @@
-function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTrialAsync(dr, fn, numChannels, params)
+function  [IM, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTrialAsync(dr, fn, numChannels, params)
      %load the tiff
     IM = copyReadDeleteScanImageTiff([dr filesep fn]);
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
@@ -7,8 +7,7 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTria
     nanPx = repmat(mean(isnan(IM), [3 4])>params.nanThresh, 1,1,size(IM,3));
     meanIM(nanPx) = nan;
 
-    rawIMs = squeeze(IM(:,:,params.activityChannel,:));
-    clear IM
+    IM = squeeze(IM(:,:,params.activityChannel,:));
 
     %load alignment data
     fnStemEnd = strfind(fn, '_REGISTERED') -1;
@@ -25,13 +24,13 @@ function  [rawIMs, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTria
     window = 2*ceil(0.1*params.alignHz)+1;% a window in time to censor aronud motion events, ~0.2 seconds;
     discardFrames = imclose(imdilate(tmp>thresh, ones(window,1)) | (tmp>(thresh/2) & imdilate(tmp>thresh, ones(2*window+1,1))), ones(window,1));
     discardFrames(1:nInitFrames) = true;
-    rawIMs(:,:,discardFrames) = nan;
+    IM(:,:,discardFrames) = nan;
     
     try
-        [IMc, peaks] = localizeSourcesSLAP2(rawIMs, aData, params);
+        [IMc, peaks] = localizeSourcesSLAP2(IM, [], params);
     catch ME
-        rawIMs([1 end],:,:) = nan;
-        rawIMs(:,[1 end],:) = nan;
-        [IMc, peaks] = localizeSourcesSLAP2(rawIMs, aData, params);
+        IM([1 end],:,:) = nan;
+        IM(:,[1 end],:) = nan;
+        [IMc, peaks] = localizeSourcesSLAP2(IM, [], params);
     end
 end
