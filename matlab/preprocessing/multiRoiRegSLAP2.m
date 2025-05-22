@@ -107,9 +107,9 @@ if params.isReVolt
         % load frames until you see the light turn on on channel 2
         f0 = firstLine+1000; minI = []; maxI = [];
         fEnd = round(0.8*firstLine + 0.2*lastLine);
-        nSamps = 10;
+        nSamps = 15;
         span = fEnd-f0;
-        while (fEnd-f0)>(nSamps*dt)
+        while (fEnd-f0)>(0.4*nSamps*dt)
             frames = round(linspace(f0,fEnd,nSamps));
             ii = nan(1,nSamps);
             for fix = 1:nSamps
@@ -119,8 +119,8 @@ if params.isReVolt
                 minI = min(ii, [], 'omitnan');
                 maxI = max(ii, [], 'omitnan');
             end
-            ixEnd = find(ii>(0.35*minI + 0.65*maxI), 1,'first');
-            ix0 = find(ii(1:ixEnd)<(0.65*minI + 0.35*maxI), 1, 'last');
+            ixEnd = min(numel(ii), find(ii>(0.2*minI + 0.8*maxI), 1,'first')+1);
+            ix0 = max(1,find(ii(1:ixEnd)<(0.65*minI + 0.35*maxI), 1, 'last')-2);
             if (frames(ixEnd)-frames(ix0)) >=span
                 warning('trouble zooming in on time of light turn on.')
                 break %stop zooming in
@@ -133,7 +133,8 @@ if params.isReVolt
             end
             fEnd = frames(ixEnd); f0 = frames(ix0);
         end
-        firstLine = round(interp1(ii, frames, (minI+maxI)/2));
+        iMid = find(ii>(min(ii)+max(ii))/2, 1, 'first');
+        firstLine = round(interp1(ii(iMid + [-1 0]), frames(iMid+[-1 0]), (min(ii)+max(ii))/2));
     end
 end
 
