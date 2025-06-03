@@ -423,11 +423,11 @@ def main():
             trialTable=trialTable
         )
 
-        if params.get('parallel', True):
-            with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
-                results = list(pool.imap(get_trial_data_partial, trial_info))
-        else:
-            results = [get_trial_data_partial(t) for t in trial_info]
+        # if params.get('parallel', True):
+        with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
+            results = list(pool.imap(get_trial_data_partial, trial_info))
+        # else:
+        #     results = [get_trial_data_partial(t) for t in trial_info]
 
         lowResData = np.concatenate([r[0] for r in results], axis=1)
         lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
@@ -438,6 +438,7 @@ def main():
         lowResBrightness = np.concatenate([r[3]['brightnessDS'] for r in results], axis=0)
 
         uniqueMotion, motInds = np.unique(np.round(np.concatenate((lowResMotionR,lowResMotionC,lowResMotionZ),axis=1)),axis=0,return_inverse=True)
+        motIndsToKeep = (np.bincount(motInds) > 100).nonzero()[0]
 
         uniqueMotionYX = np.unique(uniqueMotion[:,:2],axis=0)
 
@@ -493,13 +494,14 @@ def main():
         motion_mode_idx = np.bincount(motInds).argmax()
 
         # Extract data for the most common motion mode
-        motion_mode_frames = np.where(motInds == motion_mode_idx)[0]
+        motion_mode_frames = (motInds == motion_mode_idx).nonzero()[0]
         
         decayTau_frames = params['decayTau_s']*params['alignHz']
         decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
         data_for_nmf = lowResData / lowResDataCt # - lowResDataCt[:, motion_mode_frames] * lowResBaseline[:, motion_mode_frames]
-        data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
         data_tensor = torch.from_numpy(data_for_nmf[:, motion_mode_frames].astype(np.float32))
+        # data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
+        # data_tensor = torch.from_numpy(data_for_nmf[:, motion_mode_frames].astype(np.float32))
 
         sparseHIndsShifted = sparseHInds.copy()
         sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_mode_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_mode_idx,1].astype(int)
@@ -525,7 +527,7 @@ def main():
         X = torch.concat((X,background_spatial_component.unsqueeze(-1)),dim=1)
 
         # Initialize phi_lowRes for NMF
-        phi_lowRes = torch.rand(len(motion_mode_frames), nSources, dtype=torch.float32) * 0.1
+        # phi_lowRes = torch.rand(len(motion_mode_frames), nSources, dtype=torch.float32) * 0.1
         
         # initialize spatial components
         X_tensor = X.clone().detach() / torch.norm(X,dim=0,keepdim=True)
@@ -850,11 +852,12 @@ def main():
 
 
         phi_lowRes = torch.zeros(lowResData.shape[1], nSources+1, dtype=torch.float32)
+        phi_lowRes[:] = np.nan
         
-        for motion_idx in np.unique(motInds):
+        for motion_idx in motIndsToKeep:
 
             # Extract data for the most common motion mode
-            motion_frames = np.where(motInds == motion_idx)[0]
+            motion_frames = (motInds == motion_idx).nonzero()[0]
             
             data_tensor = torch.from_numpy(data_for_nmf[:, motion_frames].astype(np.float32))
 
@@ -930,6 +933,16 @@ def main():
                     
                 prev_reconstruction_error = current_error
 
+        # Save all peak data to a single file
+        source_extraction_data = {
+            'phi_lowRes': phi_lowRes,
+            'source_params': source_params,
+            'A_final': A_final,
+            'selPixIdxs': selPixIdxs,
+        }
+        output_filename = os.path.join(params['savedr'], f'source_extraction_data_DMD{DMDix+1}.npz')
+        np.savez(output_filename, **source_extraction_data)
+        print(f"Saved source extraction data to {output_filename}")
 
 
 
@@ -943,152 +956,153 @@ def main():
 
 
 
-        # Update A matrix based on the NMF results
+
+        # # Update A matrix based on the NMF results
         
-        # Convert sparse matrix X back to dense A without converting H to dense
-        # and without using a loop
+        # # Convert sparse matrix X back to dense A without converting H to dense
+        # # and without using a loop
 
-        sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
-        sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
-        H = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
+        # sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
+        # sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
+        # H = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
         
-        # Use sparse matrix operations to solve the system H*A = X_tensor
-        # First compute H^T * X_tensor for all sources at once
-        HtX = torch.sparse.mm(H.t(), X_tensor)
+        # # Use sparse matrix operations to solve the system H*A = X_tensor
+        # # First compute H^T * X_tensor for all sources at once
+        # HtX = torch.sparse.mm(H.t(), X_tensor)
         
-        # Then compute H^T * H (still sparse)
-        HtH = torch.sparse.mm(H.t(), H)
+        # # Then compute H^T * H (still sparse)
+        # HtH = torch.sparse.mm(H.t(), H)
 
-        # Add small regularization to ensure stability
-        HtH_reg = 1 * torch.eye(HtH.shape[0]) + HtH
+        # # Add small regularization to ensure stability
+        # HtH_reg = 1 * torch.eye(HtH.shape[0]) + HtH
 
-        # Solve the normal equations (H^T * H) * A = H^T * X for all sources at once
-        # using a direct solver that works with dense matrices
-        A_final[selPixIdxs,:] = torch.linalg.solve(HtH_reg, HtX)
+        # # Solve the normal equations (H^T * H) * A = H^T * X for all sources at once
+        # # using a direct solver that works with dense matrices
+        # A_final[selPixIdxs,:] = torch.linalg.solve(HtH_reg, HtX)
         
-        # Ensure non-negativity
-        A_final = torch.clamp(A_final, min=0)
+        # # Ensure non-negativity
+        # A_final = torch.clamp(A_final, min=0)
 
-        X_error_values = []
-        for iter_idx in tqdm(range(100)):
-            numerator = torch.sparse.mm(H.t(), X_tensor)
-            denominator = torch.sparse.mm(H.t(), H) @ A_final[selPixIdxs,:] + 1e-10
-            A_update = A_final[selPixIdxs,:] * (numerator / denominator)
-            A_final[selPixIdxs,:] = A_update
+        # X_error_values = []
+        # for iter_idx in tqdm(range(100)):
+        #     numerator = torch.sparse.mm(H.t(), X_tensor)
+        #     denominator = torch.sparse.mm(H.t(), H) @ A_final[selPixIdxs,:] + 1e-10
+        #     A_update = A_final[selPixIdxs,:] * (numerator / denominator)
+        #     A_final[selPixIdxs,:] = A_update
 
-            reconstruction = torch.sparse.mm(H, A_final[selPixIdxs,:])
-            X_error_values.append(torch.mean((X_tensor - reconstruction)**2).item())
-
-
+        #     reconstruction = torch.sparse.mm(H, A_final[selPixIdxs,:])
+        #     X_error_values.append(torch.mean((X_tensor - reconstruction)**2).item())
 
 
 
-        refPixs = torch.from_numpy(subsampleMatrixInds[0])
-
-        d = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
-        c = torch.div((refPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor').int()
-        r = (refPixs % dmdPixelsPerColumn).int()
-        d = torch.from_numpy(fastZ2RefZ[d.numpy()].flatten()-1)
-
-        mIdxs = motInds[framesToUse]
-
-        for m in np.unique(mIdxs):
-            i = np.where(mIdxs == m)[0]
-            t = framesToUse[i]
-
-            newR = r+uniqueMotion[m,0].astype(int)
-            newC = c+uniqueMotion[m,1].astype(int)
-            newD = d+uniqueMotion[m,2].astype(int)
-
-            sparseHIndsShifted = sparseHInds.copy()
-            sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[m,0].astype(int) * dmdPixelsPerRow + uniqueMotion[m,1].astype(int)
-
-            H = torch.sparse_coo_tensor(sparseHIndsShifted,sparseHVals,(numSuperPixels,nPixels),dtype=torch.float32)
-
-            X = torch.sparse.mm(H, A)
 
 
+        # refPixs = torch.from_numpy(subsampleMatrixInds[0])
 
-        phi_lowRes = torch.rand(lowResData.shape[1], nSources) * 0.1  # Initialize random traces
-        bg_brightness = torch.from_numpy(lowResBrightness)
+        # d = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
+        # c = torch.div((refPixs - d * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor').int()
+        # r = (refPixs % dmdPixelsPerColumn).int()
+        # d = torch.from_numpy(fastZ2RefZ[d.numpy()].flatten()-1)
 
-        # Create parameters to optimize
-        source_params.requires_grad = True
-        phi_lowRes.requires_grad = True
-        bg_brightness.requires_grad = True
+        # mIdxs = motInds[framesToUse]
+
+        # for m in np.unique(mIdxs):
+        #     i = np.where(mIdxs == m)[0]
+        #     t = framesToUse[i]
+
+        #     newR = r+uniqueMotion[m,0].astype(int)
+        #     newC = c+uniqueMotion[m,1].astype(int)
+        #     newD = d+uniqueMotion[m,2].astype(int)
+
+        #     sparseHIndsShifted = sparseHInds.copy()
+        #     sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[m,0].astype(int) * dmdPixelsPerRow + uniqueMotion[m,1].astype(int)
+
+        #     H = torch.sparse_coo_tensor(sparseHIndsShifted,sparseHVals,(numSuperPixels,nPixels),dtype=torch.float32)
+
+        #     X = torch.sparse.mm(H, A)
+
+
+
+        # phi_lowRes = torch.rand(lowResData.shape[1], nSources) * 0.1  # Initialize random traces
+        # bg_brightness = torch.from_numpy(lowResBrightness)
+
+        # # Create parameters to optimize
+        # source_params.requires_grad = True
+        # phi_lowRes.requires_grad = True
+        # bg_brightness.requires_grad = True
         
-        # Set up optimizer with all parameters to be optimized
-        lr = 0.01  # Learning rate
-        optimizer = torch.optim.Adam([source_params, phi_lowRes, bg_brightness], lr=lr)
+        # # Set up optimizer with all parameters to be optimized
+        # lr = 0.01  # Learning rate
+        # optimizer = torch.optim.Adam([source_params, phi_lowRes, bg_brightness], lr=lr)
         
-        prev_error = float('inf')
+        # prev_error = float('inf')
 
-        max_iter = 1000
-        tol = 1e-5
-        for i in range(max_iter):
-            # Create A matrix based on source parameters (x, y, x_sigma, y_sigma)
-            A = torch.zeros((nPixels, nSources))
-            for i in range(nSources):
-                # Extract parameters for each source
-                y_pos, x_pos = source_params[i, 0], source_params[i, 1]  # x,y positions
-                y_sigma, x_sigma = source_params[i, 2], source_params[i, 3]  # x,y sigmas
-                amplitude = source_params[i, 4]
+        # max_iter = 1000
+        # tol = 1e-5
+        # for i in range(max_iter):
+        #     # Create A matrix based on source parameters (x, y, x_sigma, y_sigma)
+        #     A = torch.zeros((nPixels, nSources))
+        #     for i in range(nSources):
+        #         # Extract parameters for each source
+        #         y_pos, x_pos = source_params[i, 0], source_params[i, 1]  # x,y positions
+        #         y_sigma, x_sigma = source_params[i, 2], source_params[i, 3]  # x,y sigmas
+        #         amplitude = source_params[i, 4]
                 
-                # Define patch bounds (3 sigma radius)
-                patch_radius = 3
-                r_min = max(0, int(y_pos.detach().item() - patch_radius * y_sigma.detach().item()))
-                r_max = min(dmdPixelsPerColumn, int(y_pos.detach().item() + patch_radius * y_sigma.detach().item()) + 1)
-                c_min = max(0, int(x_pos.detach().item() - patch_radius * x_sigma.detach().item()))
-                c_max = min(dmdPixelsPerRow, int(x_pos.detach().item() + patch_radius * x_sigma.detach().item()) + 1)
+        #         # Define patch bounds (3 sigma radius)
+        #         patch_radius = 3
+        #         r_min = max(0, int(y_pos.detach().item() - patch_radius * y_sigma.detach().item()))
+        #         r_max = min(dmdPixelsPerColumn, int(y_pos.detach().item() + patch_radius * y_sigma.detach().item()) + 1)
+        #         c_min = max(0, int(x_pos.detach().item() - patch_radius * x_sigma.detach().item()))
+        #         c_max = min(dmdPixelsPerRow, int(x_pos.detach().item() + patch_radius * x_sigma.detach().item()) + 1)
                 
-                # Create grid for the Gaussian using PyTorch
-                y = torch.arange(r_min, r_max, dtype=torch.float32)
-                x = torch.arange(c_min, c_max, dtype=torch.float32)
-                Y, X = torch.meshgrid(y, x, indexing='ij')
+        #         # Create grid for the Gaussian using PyTorch
+        #         y = torch.arange(r_min, r_max, dtype=torch.float32)
+        #         x = torch.arange(c_min, c_max, dtype=torch.float32)
+        #         Y, X = torch.meshgrid(y, x, indexing='ij')
 
-                # Calculate Gaussian values using PyTorch operations
-                x_diff = X - x_pos
-                y_diff = Y - y_pos
+        #         # Calculate Gaussian values using PyTorch operations
+        #         x_diff = X - x_pos
+        #         y_diff = Y - y_pos
 
-                # Compute the Gaussian using PyTorch operations
-                gaussian_patch = torch.exp(
-                    -0.5 * (
-                        (x_diff ** 2) / (x_sigma ** 2) +
-                        (y_diff ** 2) / (y_sigma ** 2)
-                    )
-                )
+        #         # Compute the Gaussian using PyTorch operations
+        #         gaussian_patch = torch.exp(
+        #             -0.5 * (
+        #                 (x_diff ** 2) / (x_sigma ** 2) +
+        #                 (y_diff ** 2) / (y_sigma ** 2)
+        #             )
+        #         )
                 
-                # Normalize the Gaussian
-                if gaussian_patch.sum() > 0:
-                    gaussian_patch = gaussian_patch / gaussian_patch.sum() * amplitude
+        #         # Normalize the Gaussian
+        #         if gaussian_patch.sum() > 0:
+        #             gaussian_patch = gaussian_patch / gaussian_patch.sum() * amplitude
                 
-                # Place the Gaussian in the A matrix
-                for z in range(numFastZs):
-                    for r_idx, r in enumerate(range(r_min, r_max)):
-                        for c_idx, c in enumerate(range(c_min, c_max)):
-                            pixel_idx = z * dmdPixelsPerColumn * dmdPixelsPerRow + r * dmdPixelsPerRow + c
-                            if 0 <= pixel_idx < nPixels:
-                                A[pixel_idx, i] = gaussian_patch[r_idx, c_idx]
+        #         # Place the Gaussian in the A matrix
+        #         for z in range(numFastZs):
+        #             for r_idx, r in enumerate(range(r_min, r_max)):
+        #                 for c_idx, c in enumerate(range(c_min, c_max)):
+        #                     pixel_idx = z * dmdPixelsPerColumn * dmdPixelsPerRow + r * dmdPixelsPerRow + c
+        #                     if 0 <= pixel_idx < nPixels:
+        #                         A[pixel_idx, i] = gaussian_patch[r_idx, c_idx]
 
-            # Reconstruct the low-resolution data
-            dataEst_lowRes = reconstruct.reconstruct(A, phi_lowRes, refStack[f'DMD{DMDix+1}'][0], bg_brightness,subsampleMatrixInds.T,fastZ2RefZ[f'DMD{DMDix+1}'],sparseHInds,sparseHVals,uniqueMotion,motInds)
+        #     # Reconstruct the low-resolution data
+        #     dataEst_lowRes = reconstruct.reconstruct(A, phi_lowRes, refStack[f'DMD{DMDix+1}'][0], bg_brightness,subsampleMatrixInds.T,fastZ2RefZ[f'DMD{DMDix+1}'],sparseHInds,sparseHVals,uniqueMotion,motInds)
 
-            loss = torch.mean((dataEst_lowRes - torch.from_numpy(lowResData))**2)
+        #     loss = torch.mean((dataEst_lowRes - torch.from_numpy(lowResData))**2)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        #     optimizer.zero_grad()
+        #     loss.backward()
+        #     optimizer.step()
 
-            error = loss.item()
-            if abs(prev_error - error) < tol:
-                break
+        #     error = loss.item()
+        #     if abs(prev_error - error) < tol:
+        #         break
 
-            prev_error = error
+        #     prev_error = error
 
-            if i % 10 == 0:
-                print(f"Iteration {i}, Error: {error:.6f}")
+        #     if i % 10 == 0:
+        #         print(f"Iteration {i}, Error: {error:.6f}")
 
-        print(f"Converged in {i} iterations")
+        # print(f"Converged in {i} iterations")
         
 
 if __name__ == '__main__':
