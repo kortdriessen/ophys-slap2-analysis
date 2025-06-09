@@ -59,7 +59,7 @@ if numel(mf)~=1
 else
     meta_fn = [mf.folder filesep mf.name];
 end
-if ~any(fn_meta) || ~any(dr_meta)
+if ~any(meta_fn)
     disp('Canceled. Aborting summarizeTracing.')
     return
 end
