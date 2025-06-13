@@ -2,20 +2,6 @@ function params = setParams(fnName, paramsIn, forceGUI)
 %A shared parameter-setting function
 
 switch fnName
-
-    case 'summarizeBergamo_NoLoCo'  %DEPRECATED, DELETE?
-        params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
-        params.sparseFac = 0.05;         tooltips.sparseFac = 'sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser';
-        params.nmfIter = 5;              tooltips.nmfIter = 'number of iterations of NMF refinement';
-        params.dXY = 4;                  tooltips.dXY = 'how large sources can be (radius), pixels';
-        params.denoiseWindow_s = 0.25;   tooltips.denoiseWindow_s= 'the timescale on which signals can be smoothed when denoising, seconds';
-        params.baselineWindow_Glu_s = 4; tooltips.baselineWindow_Glu_s= 'timescale for calculating F0 in glutamate channel, seconds';
-        params.baselineWindow_Ca_s = 4;  tooltips.baselineWindow_Ca_s= 'timescale for calculating F0 in calcium channel, seconds';
-        params.activityChannel = 1;      tooltips.activityChannel = 'which channel index in the tiff image contains the glutamate signal (ch1 is the first channel recorded, etc regardless of the scanimage digitizer channel)';
-        params.tau_s = 0.05;             tooltips.tau_s = 'decay time constant of glutamate signal';
-        params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
-        params.motionThresh = 2;         tooltips.motionThresh = 'decrease thresh to be more stringent on motion correction when censoring frames';
-        params.nanThresh = 0.25;        tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
     case 'summarize_NoLoCo'
         params.microscope = { '"bergamo"', '"SLAP2"'};          tooltips.scope = 'SLAP2 or bergamo';
         params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
@@ -33,20 +19,7 @@ switch fnName
         params.motionThresh = 2;         tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
         params.nanThresh = 0.25;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
-    case 'summarizeSLAP2' %DEPRECATED, DELETE?
-        params.tau_s = 0.05;            tooltips.tau_s = 'decay time constant of glutamate signal';
-        params.analyzeHz = 200; %frame rate used for analysis
-        params.discardInitial_s = 0.1; %discard the first short period of each trial as the beam stabilization locks on and the imaging system warms up
-        params.sigma_px = 1.5; tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
-        params.denoiseWindow_s = 0.25; %number of samples to average together for denoising
-        params.baselineWindow_Glu_s = 4; %timescale for calculating F0 in glutamate channel, seconds
-        params.baselineWindow_Ca_s = 4; %timescale for calculating F0 in calcium channel, seconds
-        params.sparseFac = 0.05; %sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser
-        params.nmfIter = 4; %number of iterations of NMF refinement
-        params.dXY = 5; %how large sources can be (radius), pixels
-        params.exptType = {'"V1 Gratings"', '"BCI"', '"other"'};  tooltips.exptType ='Experiment type';
-        params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
-        params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease thresh to be more stringent on motion correction when censoring frames';
+        params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
