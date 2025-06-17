@@ -23,131 +23,7 @@ sys.path.append('C:/Users/michael.xie/Documents/ophys-slap2-analysis/python')
 # sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
 
-def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
-                allSuperPixelIDs, dr, trialTable):
-    trialIx, keepTrial = trial_info
-    
-    if not keepTrial:
-        return [], [], []
-
-    dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
-    dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
-    numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[1]
-    numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
-    numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
-
-    nPixels = dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs
-
-    aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
-
-    numCycles = aData['motionDSr'].shape[0]
-    uniqueMotion, motInds = np.unique(np.round(np.concatenate((aData['motionDSr'],aData['motionDSc'],aData['motionDSz']),axis=1)),axis=0,return_inverse=True)
-
-    Afinal = torch.empty((nPixels,0))
-    phiFinal = torch.empty((numCycles,0))
-
-    importlib.reload(reconstruct)
-
-    startTime = time.time()
-    # baseline = getBaseline(Afinal,phiFinal,refStack[f'DMD{DMDix+1}'][0],torch.from_numpy(aData['brightnessDS']),subsampleMatrixInds.T,fastZ2RefZ[f'DMD{DMDix+1}'],sparseHInds,sparseHVals,uniqueMotion,motInds)
-    baseline = reconstruct.reconstruct(Afinal,phiFinal,refStack[f'DMD{DMDix+1}'][0],torch.from_numpy(aData['brightnessDS']),subsampleMatrixInds.T,fastZ2RefZ[f'DMD{DMDix+1}'],sparseHInds,sparseHVals,uniqueMotion,motInds).detach().numpy()
-    endTime = time.time()
-
-    # print(f"Elapsed Time: {endTime - startTime} sec")
-
-    # plt.imshow(baseline)
-    # plt.colorbar()
-    # plt.show()
-
-    source_fn = trialTable['filename'][DMDix,trialIx][0]
-    firstLine = trialTable['firstLine'][DMDix,trialIx]
-    lastLine = trialTable['lastLine'][DMDix,trialIx]
-
-    importlib.reload(slap2_utils)
-    hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
-
-    dt = 1/aData['alignHz'].item()/hDataFile.metaData.linePeriod_s
-
-    DSframes = aData['DSframes'][0]
-    nDSframes= len(DSframes)
-    
-    # Pre-compute time windows for all frames
-    timeWindows = [np.arange(max(1,np.floor(DSframes[i]-2*dt)), 
-                            min(np.ceil(DSframes[i]+2*dt),hDataFile.numCycles*hDataFile.header['linesPerCycle'])+1) 
-                    for i in range(nDSframes)]
-    
-    # Pre-compute line and cycle indices for all time windows
-    lineIndices_all = [(tw - 1) % hDataFile.header['linesPerCycle'] + 1 for tw in timeWindows]
-    cycleIndices_all = [np.floor((tw - 1) / hDataFile.header['linesPerCycle']) + 1 for tw in timeWindows]
-    
-    # Collect all unique line-cycle combinations across all frames
-    all_line_cycles = set()
-    for DSframeIx in range(nDSframes):
-        for li, ci in zip(lineIndices_all[DSframeIx], cycleIndices_all[DSframeIx]):
-            all_line_cycles.add((int(li), int(ci)))
-    
-    # Get all line data at once
-    all_lines = np.array([lc[0] for lc in all_line_cycles])
-    all_cycles = np.array([lc[1] for lc in all_line_cycles])
-    
-    # Create a mapping from (line, cycle) to index in the cache
-    line_cycle_to_idx = {(int(li), int(ci)): i for i, (li, ci) in enumerate(zip(all_lines, all_cycles))}
-
-    start_line_data_time = time.time()
-    print(f"Getting line data for {len(all_lines)} lines", end="")
-    # Get all line data at once
-    all_line_data = hDataFile.getLineData(all_lines, all_cycles, params['activityChannel'])
-    print(f" - completed in {time.time() - start_line_data_time:.3f} sec")
-
-    data = np.zeros((numSuperPixels,nDSframes))
-    dataCt = np.zeros((numSuperPixels,nDSframes))
-    # Initialize timing variables
-    start_time = time.time()
-    
-    # Process each frame
-    for DSframeIx in range(nDSframes):
-        if DSframeIx % 100 == 0:
-            avg_time = (time.time() - start_time) / DSframeIx if DSframeIx > 0 else 0
-            print(f"{DSframeIx} of {nDSframes}, Average time per frame: {avg_time:.3f} sec")
-        
-        # Get the line and cycle indices for this frame
-        frame_line_indices = lineIndices_all[DSframeIx]
-        frame_cycle_indices = cycleIndices_all[DSframeIx]
-        
-        # Process only valid lines
-        valid_lines = [i for i, li in enumerate(frame_line_indices) 
-                      if hDataFile.lineDataNumElements[int(li)-1] != 0]
-        
-        for i in valid_lines:
-            line_idx = int(frame_line_indices[i])
-            cycle_idx = int(frame_cycle_indices[i])
-            
-            # Get the cached line data
-            cache_idx = line_cycle_to_idx[(line_idx, cycle_idx)]
-            line_data = all_line_data[cache_idx]
-            
-            # Get positions and z-index
-            positions = hDataFile.lineSuperPixelIDs[line_idx-1]
-            zIdx = hDataFile.lineFastZIdxs[line_idx-1]
-            
-            # Compute lookup values and matches
-            lookup_values = positions * 100 + zIdx
-            matching_mask = np.isin(allSuperPixelIDs[f'DMD{DMDix+1}'], lookup_values)
-            matching_indices = np.where(matching_mask)[0]
-            
-            if len(matching_indices) > 0:
-                # Create a mapping from lookup values to their indices
-                value_to_pos = dict(zip(lookup_values.astype(np.uint32), range(len(lookup_values))))
-                # Get the positions in lineData for each matching index
-                matched_positions = [value_to_pos[int(allSuperPixelIDs[f'DMD{DMDix+1}'][idx])] for idx in matching_indices]
-                
-                data[matching_indices, DSframeIx] += line_data[matched_positions, 0]
-                dataCt[matching_indices, DSframeIx] += 1
-    
-    return data/100, dataCt, baseline, aData
-
-def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
-                allSuperPixelIDs, dr, trialTable, A_final, psf):
+def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable):
     trialIx, keepTrial = trial_info
     
     if not keepTrial:
@@ -170,31 +46,31 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     linesPerCycle = hDataFile.header['linesPerCycle']
 
-    dt = np.ceil(1/sampFreq/hDataFile.metaData.linePeriod_s)
+    dt = 1/sampFreq/hDataFile.metaData.linePeriod_s
 
     DSframes = np.ceil(np.arange(firstLine, lastLine+1, dt))
     nDSframes= len(DSframes)
-    
+
     # Pre-compute time windows for all frames
     dtRead = max(3 * dt, linesPerCycle)
-    timeWindows = [np.arange(max(1,np.floor(DSframes[i]-3*dt)), 
-                            min(np.ceil(DSframes[i]+3*dt),hDataFile.numCycles*linesPerCycle)+1) 
+    timeWindows = [np.arange(max(1,np.floor(DSframes[i]-dtRead)), 
+                            min(np.ceil(DSframes[i]+dtRead),hDataFile.numCycles*linesPerCycle)+1) 
                     for i in range(nDSframes)]
-    
+
     # Pre-compute line and cycle indices for all time windows
     lineIndices_all = [(tw - 1) % linesPerCycle + 1 for tw in timeWindows]
     cycleIndices_all = [np.floor((tw - 1) / linesPerCycle) + 1 for tw in timeWindows]
-    
+
     # Collect all unique line-cycle combinations across all frames
     all_line_cycles = set()
     for DSframeIx in range(nDSframes):
         for li, ci in zip(lineIndices_all[DSframeIx], cycleIndices_all[DSframeIx]):
             all_line_cycles.add((int(li), int(ci)))
-    
+
     # Get all line data at once
     all_lines = np.array([lc[0] for lc in all_line_cycles])
     all_cycles = np.array([lc[1] for lc in all_line_cycles])
-    
+
     # Create a mapping from (line, cycle) to index in the cache
     line_cycle_to_idx = {(int(li), int(ci)): i for i, (li, ci) in enumerate(zip(all_lines, all_cycles))}
 
@@ -208,7 +84,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     dataCt = np.zeros((numSuperPixels,nDSframes))
     # Initialize timing variables
     start_time = time.time()
-    
+
     # Process each frame
     for DSframeIx in range(nDSframes):
         if DSframeIx % 100 == 0:
@@ -251,11 +127,28 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
                 weight = weights[i]
                 data[matching_indices, DSframeIx] += line_data[matched_positions, 0] * weight
                 dataCt[matching_indices, DSframeIx] += weight
-    
-    dataNonNorm = data / 100
-    data = data / dataCt / 100
 
     aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
+    aData['DSframes'] = aData['DSframes'] * hDataFile.metaData.linePeriod_s
+    
+    return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s
+
+def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
+                allSuperPixelIDs, dr, trialTable, A_final, psf):
+    trialIx, keepTrial = trial_info
+    
+    if not keepTrial:
+        return [], [], []
+
+    dataNonNorm, dataCt, aData, DSframes = get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
+    
+    dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
+    dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
+    numRefStackZs = refStack[f'DMD{DMDix+1}'].shape[1]
+    numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
+    numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
+
+    data = dataNonNorm / dataCt
 
     motionR = np.interp(DSframes, aData['DSframes'].squeeze(), aData['motionDSr'].squeeze())
     motionC = np.interp(DSframes, aData['DSframes'].squeeze(), aData['motionDSc'].squeeze())
@@ -324,7 +217,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
             Xtd
         ).T
 
-    return phi.numpy(), DSframes * hDataFile.metaData.linePeriod_s, selPixIdxs
+    return phi.numpy(), DSframes, selPixIdxs
 
 def main():
     # load SLAP2 data folder
@@ -592,11 +485,9 @@ def main():
             get_trial_data,
             DMDix=DMDix,
             params=params,
+            sampFreq=params['alignHz'],
             refStack=refStack,
-            subsampleMatrixInds=subsampleMatrixInds,
             fastZ2RefZ=fastZ2RefZ,
-            sparseHInds=sparseHInds,
-            sparseHVals=sparseHVals,
             allSuperPixelIDs=allSuperPixelIDs,
             dr=dr,
             trialTable=trialTable
@@ -610,11 +501,11 @@ def main():
 
         lowResData = np.concatenate([r[0] for r in results], axis=1)
         lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
-        lowResBaseline = np.concatenate([r[2] for r in results], axis=1)
-        lowResMotionR = np.concatenate([r[3]['motionDSr'] for r in results], axis=0)
-        lowResMotionC = np.concatenate([r[3]['motionDSc'] for r in results], axis=0)
-        lowResMotionZ = np.concatenate([r[3]['motionDSz'] for r in results], axis=0)
-        lowResBrightness = np.concatenate([r[3]['brightnessDS'] for r in results], axis=0)
+        # lowResBaseline = np.concatenate([r[2] for r in results], axis=1)
+        lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results], axis=0)
+        lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results], axis=0)
+        lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results], axis=0)
+        lowResBrightness = np.concatenate([r[2]['brightnessDS'] for r in results], axis=0)
 
         uniqueMotion, motInds = np.unique(np.round(np.concatenate((lowResMotionR,lowResMotionC,lowResMotionZ),axis=1)),axis=0,return_inverse=True)
         motIndsToKeep = (np.bincount(motInds) > 100).nonzero()[0]
@@ -652,7 +543,6 @@ def main():
         nSources = source_seeds.shape[0]
 
         source_params = torch.cat([
-            torch.ones(nSources, 1, dtype=torch.float32),
             torch.tensor(source_seeds, dtype=torch.float32),
             torch.ones(nSources, 2, dtype=torch.float32) * 2
         ], dim=1)
@@ -660,15 +550,14 @@ def main():
         A = torch.zeros((nPixels, nSources))
 
         y, x = pixel_coords_tensor[:, 1], pixel_coords_tensor[:, 2]
-        y_means = source_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
-        x_means = source_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
-        y_sigmas = source_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
-        x_sigmas = source_params[:, 4].unsqueeze(0)  # Shape: [1, nSources]
-        amplitudes = source_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
+        y_means = source_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
+        x_means = source_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
+        y_sigmas = source_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
+        x_sigmas = source_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
 
         y_term = -0.5 * ((y.unsqueeze(1) - y_means) / y_sigmas) ** 2  # Shape: [nPixels, nSources]
         x_term = -0.5 * ((x.unsqueeze(1) - x_means) / x_sigmas) ** 2  # Shape: [nPixels, nSources]
-        A[selPixIdxs,:] = (amplitudes * torch.exp(y_term + x_term))
+        A[selPixIdxs,:] = (torch.exp(y_term + x_term))
 
         motion_mode_idx = np.bincount(motInds).argmax()
 
@@ -678,9 +567,8 @@ def main():
         decayTau_frames = params['decayTau_s']*params['alignHz']
         decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
         data_for_nmf = lowResData / lowResDataCt # - lowResDataCt[:, motion_mode_frames] * lowResBaseline[:, motion_mode_frames]
+        data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
         data_tensor = torch.from_numpy(data_for_nmf[:, motion_mode_frames].astype(np.float32))
-        # data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
-        # data_tensor = torch.from_numpy(data_for_nmf[:, motion_mode_frames].astype(np.float32))
 
         sparseHIndsShifted = sparseHInds.copy()
         sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_mode_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_mode_idx,1].astype(int)
@@ -919,15 +807,15 @@ def main():
 
                 # Use the position of maximum value as initial mean
                 # source_params[s, 0] = torch.tensor(max_val) # amplitude
-                source_params[s, 1] = centroid_r / 10
-                source_params[s, 2] = centroid_c / 10
-                source_params[s,3:] = source_params[s,3:] / 10
+                source_params[s, 0] = centroid_r / 10
+                source_params[s, 1] = centroid_c / 10
+                source_params[s,2:] = source_params[s,2:] / 10
             
             # Optimization loop for all sources together
             print("Fitting all Gaussian sources simultaneously")
             
             # Make parameters require gradients
-            optim_params = source_params[:,1:].clone().requires_grad_(True)
+            optim_params = source_params.clone().requires_grad_(True)
             
             # Initialize Adam optimizer
             optimizer = torch.optim.Adam([optim_params], lr=learning_rate)
@@ -945,7 +833,6 @@ def main():
                 x_means = optim_params[:, 1].unsqueeze(0) * 10  # Shape: [1, nSources] 
                 y_sigmas = optim_params[:, 2].unsqueeze(0) * 10  # Shape: [1, nSources]
                 x_sigmas = optim_params[:, 3].unsqueeze(0) * 10 # Shape: [1, nSources]
-                # amplitudes = optim_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
                 
                 # Compute terms for all sources at once
                 y_term = -0.5 * ((y.unsqueeze(1) - y_means) / y_sigmas) ** 2  # Shape: [nPixels, nSources]
@@ -994,14 +881,14 @@ def main():
                 #     print(f"Epoch {epoch+1}/{num_epochs}, Loss: {loss.item():.8f}")
             
             # Update parameters
-            source_params[:,1:] = optim_params.detach()
+            source_params = optim_params.detach()
             
             # Update A_final with the fitted Gaussians using vectorized operations
             y, x = pixel_coords_tensor[:, 1], pixel_coords_tensor[:, 2]
-            y_means = source_params[:, 1].unsqueeze(0) * 10  # Shape: [1, nSources]
-            x_means = source_params[:, 2].unsqueeze(0) * 10  # Shape: [1, nSources]
-            y_sigmas = source_params[:, 3].unsqueeze(0) * 10  # Shape: [1, nSources]
-            x_sigmas = source_params[:, 4].unsqueeze(0) * 10  # Shape: [1, nSources]
+            y_means = source_params[:, 0].unsqueeze(0) * 10  # Shape: [1, nSources]
+            x_means = source_params[:, 1].unsqueeze(0) * 10  # Shape: [1, nSources]
+            y_sigmas = source_params[:, 2].unsqueeze(0) * 10  # Shape: [1, nSources]
+            x_sigmas = source_params[:, 3].unsqueeze(0) * 10  # Shape: [1, nSources]
             # amplitudes = source_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
 
             # Compute terms for all sources at once
