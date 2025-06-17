@@ -66,6 +66,7 @@ switch params.microscope
         if ~isempty(roiData) %if any of the rois is labeled 'soma'
             if params.roiHz==params.analyzeHz
                 exptSummary.ROIs.F = exptSummary.ROIs.F_fullSpeed(rix, fix,cix);
+                somaLines =frameLines;
             else
                 Fpx = {};
                 dtSoma = linerateHz/params.roiHz;
@@ -106,7 +107,7 @@ switch params.microscope
                 roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
                 [~,selPC] = max(roiLikeness);
                 Fsvd = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
-                %upsample to desired framerate
+                %upsample to desired framerate if necessary
                 exptSummary.ROIs.Fsvd(rix,:,cix) = interp1(somaLines, Fsvd, frameLines);
             end
         end
