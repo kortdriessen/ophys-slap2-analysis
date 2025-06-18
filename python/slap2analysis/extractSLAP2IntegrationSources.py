@@ -140,7 +140,27 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     if not keepTrial:
         return [], [], []
 
-    dataNonNorm, dataCt, aData, DSframes = get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
+    data_file = os.path.join(params['savedr'], f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
+    if os.path.exists(data_file):
+        print(f'Loading existing trial data from {data_file}')
+        data_arrays = np.load(data_file)
+        dataNonNorm = data_arrays['dataNonNorm']
+        dataCt = data_arrays['dataCt']
+        DSframes = data_arrays['DSframes']
+        
+        aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
+        aData['DSframes'] = data_arrays['aData_DSframes']
+    else:
+        dataNonNorm, dataCt, aData, DSframes = get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
+        # Save data arrays
+        data_arrays = {
+            'dataNonNorm': dataNonNorm,
+            'dataCt': dataCt,
+            'DSframes': DSframes,
+            'aData_DSframes': aData['DSframes']
+        }
+        np.savez(data_file, **data_arrays)
+        print(f'Saved trial data to {data_file}')
     
     dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
     dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
@@ -217,7 +237,9 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
             Xtd
         ).T
 
-    return phi.numpy(), DSframes, selPixIdxs
+    globalF = np.sum(data, axis=0)
+
+    return phi.numpy(), DSframes, selPixIdxs, globalF
 
 def main():
     # load SLAP2 data folder
@@ -493,19 +515,38 @@ def main():
             trialTable=trialTable
         )
 
-        # if params.get('parallel', True):
-        with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
-            results = list(pool.imap(get_trial_data_partial, trial_info))
-        # else:
-        #     results = [get_trial_data_partial(t) for t in trial_info]
+        data_file = os.path.join(params['savedr'], f'lowres_data_DMD{DMDix+1}.npz')
+        
+        if os.path.exists(data_file):
+            print(f'Loading existing low resolution data from {data_file}')
+            data_arrays = np.load(data_file)
+            lowResData = data_arrays['lowResData']
+            lowResDataCt = data_arrays['lowResDataCt'] 
+            lowResMotionR = data_arrays['lowResMotionR']
+            lowResMotionC = data_arrays['lowResMotionC']
+            lowResMotionZ = data_arrays['lowResMotionZ']
+        else:
+            with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
+                results = list(pool.imap(get_trial_data_partial, trial_info))
 
-        lowResData = np.concatenate([r[0] for r in results], axis=1)
-        lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
-        # lowResBaseline = np.concatenate([r[2] for r in results], axis=1)
-        lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results], axis=0)
-        lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results], axis=0)
-        lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results], axis=0)
-        lowResBrightness = np.concatenate([r[2]['brightnessDS'] for r in results], axis=0)
+            lowResData = np.concatenate([r[0] for r in results], axis=1)
+            lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
+            # lowResBaseline = np.concatenate([r[2] for r in results], axis=1)
+            lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results], axis=0)
+            lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results], axis=0)
+            lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results], axis=0)
+            # lowResBrightness = np.concatenate([r[2]['brightnessDS'] for r in results], axis=0)
+
+            # Save data arrays
+            data_arrays = {
+                'lowResData': lowResData,
+                'lowResDataCt': lowResDataCt,
+                'lowResMotionR': lowResMotionR,
+                'lowResMotionC': lowResMotionC,
+                'lowResMotionZ': lowResMotionZ
+            }
+            np.savez(data_file, **data_arrays)
+            print(f'Saved low resolution data to {data_file}')
 
         uniqueMotion, motInds = np.unique(np.round(np.concatenate((lowResMotionR,lowResMotionC,lowResMotionZ),axis=1)),axis=0,return_inverse=True)
         motIndsToKeep = (np.bincount(motInds) > 100).nonzero()[0]
@@ -558,22 +599,19 @@ def main():
         y_term = -0.5 * ((y.unsqueeze(1) - y_means) / y_sigmas) ** 2  # Shape: [nPixels, nSources]
         x_term = -0.5 * ((x.unsqueeze(1) - x_means) / x_sigmas) ** 2  # Shape: [nPixels, nSources]
         A[selPixIdxs,:] = (torch.exp(y_term + x_term))
-
-        motion_mode_idx = np.bincount(motInds).argmax()
-
-        # Extract data for the most common motion mode
-        motion_mode_frames = (motInds == motion_mode_idx).nonzero()[0]
         
         decayTau_frames = params['decayTau_s']*params['alignHz']
         decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
         data_for_nmf = lowResData / lowResDataCt # - lowResDataCt[:, motion_mode_frames] * lowResBaseline[:, motion_mode_frames]
         data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
+        
+        motion_mode_idx = np.bincount(motInds).argmax()
+        # Extract data for the most common motion mode
+        motion_mode_frames = (motInds == motion_mode_idx).nonzero()[0]
         data_tensor = torch.from_numpy(data_for_nmf[:, motion_mode_frames].astype(np.float32))
 
         sparseHIndsShifted = sparseHInds.copy()
         sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_mode_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_mode_idx,1].astype(int)
-
-        # H = torch.sparse_coo_tensor(sparseHIndsShifted,sparseHVals,(numSuperPixels,nPixels),dtype=torch.float32)
 
         sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
         sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
@@ -593,9 +631,6 @@ def main():
         background_spatial_component = background_spatial_component / torch.norm(background_spatial_component)
         X = torch.concat((X,background_spatial_component.unsqueeze(-1)),dim=1)
 
-        # Initialize phi_lowRes for NMF
-        # phi_lowRes = torch.rand(len(motion_mode_frames), nSources, dtype=torch.float32) * 0.1
-        
         # initialize spatial components
         X_tensor = X.clone().detach() / torch.norm(X,dim=0,keepdim=True)
 
@@ -1018,16 +1053,51 @@ def main():
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
         
         # Save all peak data to a single file
-        source_extraction_data = {
-            'phi': [r[0] for r in results],
-            'timePts': [r[1] for r in results],
-            'source_params': source_params,
-            'A_final': A_final,
-            'selPixIdxs': [r[2] for r in results],
-        }
-        output_filename = os.path.join(params['savedr'], f'source_extraction_data_DMD{DMDix+1}.npz')
-        np.savez(output_filename, **source_extraction_data)
-        print(f"Saved source extraction data to {output_filename}")
+        # source_extraction_data = {
+        #     'phi': [r[0] for r in results],
+        #     'timePts': [r[1] for r in results],
+        #     'source_params': source_params,
+        #     'A_final': A_final,
+        #     'selPixIdxs': [r[2] for r in results],
+        # }
+        # output_filename = os.path.join(params['savedr'], f'source_extraction_data_DMD{DMDix+1}.npz')
+        # np.savez(output_filename, **source_extraction_data)
+        # print(f"Saved source extraction data to {output_filename}")
+
+        # Save data to HDF5 file
+        output_h5_filename = os.path.join(params['savedr'], f'experiment_summary.h5')
+        with h5py.File(output_h5_filename, 'a') as f:
+            # Delete group if it exists
+            group_name = f'DMD{DMDix+1}'
+            if group_name in f:
+                del f[group_name]
+            
+            # Create group and add datasets
+            dmd_group = f.create_group(group_name)
+            
+            # Create subgroups for trial data
+            source_group = dmd_group.create_group('sources')
+
+            spatial_group = source_group.create_group('spatial')
+            temporal_group = source_group.create_group('temporal')
+
+            spatial_group.create_dataset('source_params', data=source_params.numpy())
+            spatial_group.create_dataset('footprints', data=A_final.numpy())
+
+            dF = np.concatenate([r[0] for r in results], axis=0)
+            trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[1]) for r in results])[:-1]])
+            temporal_group.create_dataset('dF', data=dF)
+
+            frame_group = dmd_group.create_group('frame_info')
+            frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
+            frame_group.create_dataset('discard_frames', data=np.nonzero(np.any(np.isnan(dF), axis=1))[0])
+            # frame_group.create_dataset('selPixIdxs', data=[r[2] for r in results])
+
+            globalF = np.concatenate([r[3] for r in results], axis=0)
+            global_group = dmd_group.create_group('global')
+            global_group.create_dataset('F', data=globalF)
+
+        print(f"Added DMD{DMDix+1} data to {output_h5_filename}")
 
 if __name__ == '__main__':
     main()
