@@ -147,7 +147,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
         dataNonNorm = data_arrays['dataNonNorm']
         dataCt = data_arrays['dataCt']
         DSframes = data_arrays['DSframes']
-        
+
         aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
         aData['DSframes'] = data_arrays['aData_DSframes']
     else:
@@ -1090,7 +1090,7 @@ def main():
 
             frame_group = dmd_group.create_group('frame_info')
             frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
-            frame_group.create_dataset('discard_frames', data=np.nonzero(np.any(np.isnan(dF), axis=1))[0])
+            frame_group.create_dataset('discard_frames', data=np.any(np.isnan(dF), axis=1))
             # frame_group.create_dataset('selPixIdxs', data=[r[2] for r in results])
 
             globalF = np.concatenate([r[3] for r in results], axis=0)
