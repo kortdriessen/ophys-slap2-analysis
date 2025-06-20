@@ -235,40 +235,4 @@ for fileIx = 1:length(fns)
     'VariableNames', {'pix1','pix2','fileIx','file','HP_freqs','distance','xval_cov','xval_cor'});
 
     results = [results; results_movie];
-
-
-    % for idx = 1:numel(labeledPix)
-    %     for jdx = (idx+1):numel(labeledPix)
-    % 
-    %         [r1,c1] = ind2sub([nRow,nCol],labeledPix(idx));
-    %         [r2,c2] = ind2sub([nRow,nCol],labeledPix(jdx));
-    % 
-    %         if sqrt((r1-r2)^2+(c1-c2)^2)/4 > 15
-    %             continue;
-    %         end
-    % 
-    %         if mod(size(results,1),100) == 0
-    %             fprintf('Processed %d pairs\n', size(results,1))
-    %         end
-    % 
-    %         results.pix1(end+1) = labeledPix(idx);
-    %         results.pix2(end) = labeledPix(jdx);
-    %         results.fileIx(end) = fileIx;
-    %         results.file(end) = fn;
-    % 
-    %         results.distance(end) = sqrt((r1-r2)^2+(c1-c2)^2)/4;
-    % 
-    %         covs = nan(nXVals,1);
-    %         corrs = nan(nXVals,1);
-    %         for xvalIx = 1:nXVals
-    %             pix1resp = squeeze(mean(trialTraces(idx,xval_splits(:,1,xvalIx),:,:),2,'omitnan'));
-    %             pix2resp = squeeze(mean(trialTraces(jdx,xval_splits(:,2,xvalIx),:,:),2,'omitnan'));
-    %             tmp = cov(pix1resp(:),pix2resp(:));
-    %             covs(xvalIx) = tmp(1,2);
-    %             corrs(xvalIx) = corr(pix1resp(:),pix2resp(:));
-    %         end
-    %         results.xval_cov(end) = mean(covs);
-    %         results.xval_cor(end) = mean(corrs);
-    %     end
-    % end
 end
