@@ -65,7 +65,7 @@ switch params.microscope
         %extract downsampled soma data
         if ~isempty(roiData) %if any of the rois is labeled 'soma'
             if params.roiHz==params.analyzeHz
-                exptSummary.ROIs.F = exptSummary.ROIs.F_fullSpeed(rix, fix,cix);
+                exptSummary.ROIs.F = exptSummary.ROIs.F_fullSpeed;
                 somaLines =frameLines;
             else
                 Fpx = {};
@@ -148,6 +148,7 @@ end
 discard = interp1(1:numel(discardFrames), double(discardFrames(:)), linspace(1, numel(discardFrames), size(IMsel,2)))>0; %upsample the discard frames
 IMsel(:,discard) = nan;     %throw away movement frames as above
 exptSummary.global.F(discard,:) = nan;
+exptSummary.ROIs.F_fullSpeed(:,discard,:) = nan;
 exptSummary.ROIs.F(:, discard,:) = nan;
 exptSummary.ROIs.Fsvd(:,discard,:) = nan;
 if numChannels ==2
