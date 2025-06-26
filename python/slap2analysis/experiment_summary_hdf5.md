@@ -3,9 +3,12 @@
  ┗ 📂/
    ┣ 📂DMD1/
    ┃ ┣ 📂frame_info/
-   ┃ ┃ ┣ 📜*motionR (total frames x 1)*
-   ┃ ┃ ┣ 📜*motionC (total frames x 1)*
-   ┃ ┃ ┣ 📜*motionZ (total frames x 1)*
+   ┃ ┃ ┣ 📜*offlineXshift (total frames x 1)*
+   ┃ ┃ ┣ 📜*offlineYshift (total frames x 1)*
+   ┃ ┃ ┣ 📜*offlineZshift (total frames x 1)*
+   ┃ ┃ ┣ 📜*onlineXshift (total frames x 1)*
+   ┃ ┃ ┣ 📜*onlineYshift (total frames x 1)*
+   ┃ ┃ ┣ 📜*onlineZshift (total frames x 1)*
    ┃ ┃ ┣ 📜trial_start_idxs (trials x 1)
    ┃ ┃ ┗ 📜discard_frames (total frames x 1)
    ┃ ┣ 📂visualizations/
