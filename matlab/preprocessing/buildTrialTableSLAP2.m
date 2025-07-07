@@ -125,7 +125,7 @@ for eIx = 1:epoch %for each epoch
         hDat = slap2.Slap2DataFile([dr filesep files(fIx).name]);
         numLines(fIx) = hDat.totalNumLines;
     end
-    linePeriod_s = hDat.hDataFile.metaData.linePeriod_s;
+    linePeriod_s = hDat.hMultiDataFiles.metaData.linePeriod_s;
     disp('done loading ')
     isDMD1 = cellfun(@(x)(~isempty(x)), strfind({files.name}, 'DMD1'));
 

@@ -140,8 +140,8 @@ end
 
 %numLines = lastLine-firstLine+1;
 %sanity checks
-assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
-metaZ = S2data.hDataFile.fastZs;
+assert(length(S2data.hMultiDataFiles.fastZs)==1); %single plane acquisitions only
+metaZ = S2data.hMultiDataFiles.fastZs;
 
 %%%%%Make an initial template
 %crosscorrelate each initial frame to each other
@@ -348,7 +348,7 @@ aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into
 aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
 disp('Getting online motion correction offsets')
-[aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
+[aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hMultiDataFiles, DSframes);
 
 %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
 aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
