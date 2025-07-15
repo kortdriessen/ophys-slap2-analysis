@@ -24,8 +24,8 @@
    ┃ ┃ ┗ 📜F (total frames x rois)
    ┃ ┗ 📂sources/
    ┃   ┣ 📂spatial/
-   ┃   ┃ ┣ 📜footprints (pixels x sources)
-   ┃   ┃ ┗ 📜*source_params (sources x 4 [x_loc, y_loc, x_sigma, y_sigma])*
+   ┃   ┃ ┣ 📜fp_masks (sources x rows x cols)
+   ┃   ┃ ┗ 📜fp_coords (sources x 2 [x_loc, y_loc])*
    ┃   ┗ 📂temporal/
    ┃     ┣ 📜dF (total frames x sources)
    ┃     ┣ 📜dFF (total frames x sources)
