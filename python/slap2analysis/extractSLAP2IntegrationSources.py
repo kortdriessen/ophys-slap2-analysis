@@ -593,8 +593,148 @@ def main():
         # data_viewer.add_image(lowResBaseline * lowResDataCt)
 
 
-        # read in source seeds
-        source_seeds = np.load(os.path.join(params['savedr'], f'roi_seeds_DMD{DMDix+1}.npy'))
+        # seed sources
+        psf_shape = psf[f'DMD{DMDix+1}'].shape
+        psf_center = (psf_shape[0] // 2, psf_shape[1] // 2)
+
+        # Convert selected pixel indices to 2D coordinates (vectorized)
+        sel_pixels_2d = np.column_stack([
+            (selPixIdxs % (dmdPixelsPerColumn * dmdPixelsPerRow)) // dmdPixelsPerRow,  # rows
+            (selPixIdxs % (dmdPixelsPerColumn * dmdPixelsPerRow)) % dmdPixelsPerRow    # cols
+        ])
+
+        # Pre-allocate result matrix
+        D = torch.zeros((len(selPixIdxs), len(selPixIdxs)), dtype=torch.float32)
+
+        # Vectorized computation using broadcasting
+        src_rows = sel_pixels_2d[:, 0][np.newaxis, :]  # Shape: (1, n_sources)
+        src_cols = sel_pixels_2d[:, 1][np.newaxis, :]  # Shape: (1, n_sources)
+        tgt_rows = sel_pixels_2d[:, 0][:, np.newaxis]  # Shape: (n_targets, 1)
+        tgt_cols = sel_pixels_2d[:, 1][:, np.newaxis]  # Shape: (n_targets, 1)
+
+        # Calculate relative positions
+        rel_rows = tgt_rows - src_rows + psf_center[0]  # Shape: (n_targets, n_sources)
+        rel_cols = tgt_cols - src_cols + psf_center[1]  # Shape: (n_targets, n_sources)
+
+        # Create mask for valid PSF indices
+        valid_mask = ((rel_rows >= 0) & (rel_rows < psf_shape[0]) & 
+                    (rel_cols >= 0) & (rel_cols < psf_shape[1]))
+
+        # Convert PSF to torch tensor and extract values where valid
+        psf_tensor = torch.from_numpy(psf[f'DMD{DMDix+1}']).float()
+        psf_tensor = psf_tensor / torch.sum(psf_tensor)
+        D[valid_mask] = psf_tensor[rel_rows[valid_mask], rel_cols[valid_mask]]
+        
+        data_for_nmf = lowResData / lowResDataCt
+        decayTau_frames = params['decayTau_s']*params['alignHz']
+        decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
+        data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
+        data_for_nmf = torch.from_numpy(data_for_nmf.astype(np.float32))
+
+        background_spatial_components = torch.zeros((numSuperPixels,len(motIndsToKeep)))
+        for i in range(len(motIndsToKeep)):
+            motion_idx = motIndsToKeep[i]
+            motion_frames = (motInds == motion_idx).nonzero()[0]
+            background_spatial_components[:,i] = torch.median(data_for_nmf[:, motion_frames],dim=1)[0]
+            background_spatial_components[:,i] = background_spatial_components[:,i] / torch.norm(background_spatial_components[:,i])
+
+        # precompute H matrices
+        H_mots = [None] * len(motIndsToKeep)
+        for i, motion_idx in enumerate(motIndsToKeep):
+            sparseHIndsShifted = sparseHInds.copy()
+            sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_idx,1].astype(int)
+
+            sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
+            sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
+            H_mots[i] = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
+        
+        # Pre-compute sparse matrix multiplications with D for all motion indices
+        HD_mots = [torch.sparse.mm(H_mot, D) for H_mot in H_mots]
+
+        for i in range(len(HD_mots)):
+            HD_mots[i] = HD_mots[i] / torch.sum(HD_mots[i],dim=0,keepdim=True)
+
+            validPixMask = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), dtype=bool)
+            validPixMask[refD,refR + int(uniqueMotion[motIndsToKeep[i],0]),refC + int(uniqueMotion[motIndsToKeep[i],1])] = True
+            validPixMask = ndimage.binary_dilation(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]), dtype=bool))
+            validPixMask = ndimage.binary_erosion(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]*2-1), dtype=bool))
+            validPixIdxs = np.flatnonzero(validPixMask)
+
+            HD_mots[i][:,~np.isin(selPixIdxs,validPixIdxs)] = 0
+
+        residual = torch.zeros_like(data_for_nmf)
+        residual[:] = torch.nan
+        background = torch.zeros_like(data_for_nmf)
+        background[:] = torch.nan
+        rho = torch.zeros((lowResData.shape[1],len(selPixIdxs)))
+        rho[:] = torch.nan
+        for i, motion_idx in enumerate(motIndsToKeep):
+            motion_frames = (motInds == motion_idx).nonzero()[0]
+            
+            # Get background component as contiguous vector
+            bg_comp = background_spatial_components[:,i]
+            
+            # Compute background trace more efficiently
+            bg_norm_sq = torch.sum(bg_comp * bg_comp)
+            bg_trace = (bg_comp @ data_for_nmf[:,motion_frames]) / bg_norm_sq
+
+            background[:,motion_frames] = torch.outer(bg_comp, bg_trace)
+            
+            # Compute residual in-place
+            residual[:,motion_frames] = data_for_nmf[:,motion_frames] - background[:,motion_frames]
+            
+            # Use pre-computed HD matrix
+            rho[motion_frames,:] = (HD_mots[i].T @ residual[:,motion_frames]).T
+
+        rho = rho.numpy()
+
+        print("Computing skewness without intermediate tensors...")
+        
+        rho_centered = rho - np.nanmean(rho,axis=0,keepdims=True)
+        cubed_values = rho_centered**3
+        
+        # Sum along the axis
+        rho_skew = np.nansum(cubed_values, axis=0)
+        
+        # Clean up the intermediate tensor
+        del cubed_values
+
+        print(f"Skewness computed, shape: {rho_skew.shape}")
+
+        skew_im = np.zeros((dmdPixelsPerColumn*dmdPixelsPerRow,))
+        skew_im[selPixIdxs] = rho_skew
+        skew_im = skew_im.reshape((dmdPixelsPerColumn,dmdPixelsPerRow))
+        skew_im[skew_im == 0] = np.nan
+
+        # Create a local maximum filter with a footprint of 3x3 pixels
+        local_max = ndimage.maximum_filter(skew_im, size=3)
+
+        maxima_mask = (skew_im == local_max) & ~np.isnan(skew_im)
+
+        # Get coordinates and values of local maxima
+        maxima_coords = np.where(maxima_mask)
+        maxima_values = skew_im[maxima_mask]
+
+        # Sort maxima by value in descending order
+        sort_idx = np.argsort(-maxima_values)
+        maxima_coords = (maxima_coords[0][sort_idx], maxima_coords[1][sort_idx])
+        maxima_values = maxima_values[sort_idx]
+
+        # Create a mask of nan values
+        nan_mask = np.isnan(skew_im)
+
+        # Dilate the nan mask to cover 3 pixel radius
+        dilated_nan_mask = ndimage.binary_dilation(nan_mask, structure=np.ones((7,7)))
+
+        # Calculate threshold for top 5% of values
+        top_5_threshold = np.nanpercentile(skew_im, 95)
+
+        # Remove maxima that are within 3 pixels of nan values, unless they are in top 5%
+        valid_maxima = (~dilated_nan_mask[maxima_coords]) | (maxima_values > top_5_threshold)
+        maxima_coords = (maxima_coords[0][valid_maxima], maxima_coords[1][valid_maxima])
+        maxima_values = maxima_values[valid_maxima]
+        source_seeds = np.array(maxima_coords).T
+
         nSources = source_seeds.shape[0]
 
         source_params = torch.cat([
@@ -631,12 +771,6 @@ def main():
 
         A = torch.zeros((nPixels, nSources))
         A[selPixIdxs,:] = sel_pix_gaussian_2d(source_params * torch.tensor([1, 1, 1, 1, 1]))
-        
-        data_for_nmf = lowResData / lowResDataCt # - lowResDataCt[:, motion_mode_frames] * lowResBaseline[:, motion_mode_frames]
-        decayTau_frames = params['decayTau_s']*params['alignHz']
-        decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
-        data_for_nmf = signal.convolve2d(data_for_nmf,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
-        data_for_nmf = torch.from_numpy(data_for_nmf.astype(np.float32))
 
         # NMF parameters
         als_nmf_iters = 4
@@ -647,23 +781,6 @@ def main():
         learning_rate = 0.1
         num_epochs = 200
         gd_tol = 1e-8
-
-        background_spatial_components = torch.zeros((numSuperPixels,len(motIndsToKeep)))
-        for i in range(len(motIndsToKeep)):
-            motion_idx = motIndsToKeep[i]
-            motion_frames = (motInds == motion_idx).nonzero()[0]
-            background_spatial_components[:,i] = torch.median(data_for_nmf[:, motion_frames],dim=1)[0]
-            background_spatial_components[:,i] = background_spatial_components[:,i] / torch.norm(background_spatial_components[:,i])
-
-        # precompute H matrices
-        H_mots = [None] * len(motIndsToKeep)
-        for i, motion_idx in enumerate(motIndsToKeep):
-            sparseHIndsShifted = sparseHInds.copy()
-            sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_idx,1].astype(int)
-
-            sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
-            sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
-            H_mots[i] = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
         
         phi_lowRes = torch.zeros(lowResData.shape[1], nSources+1, dtype=torch.float32)
         phi_lowRes[:] = np.nan
@@ -961,7 +1078,7 @@ def main():
                                               sparseHInds=sparseHInds,
                                               sparseHVals=sparseHVals,
                                               allSuperPixelIDs=allSuperPixelIDs,
-                                              dr=dr, trialTable=trialTable, A_final=A_final, psf=psf)
+                                              dr=dr, trialTable=trialTable, A_final=A, psf=psf)
 
         with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
@@ -996,7 +1113,8 @@ def main():
             temporal_group = source_group.create_group('temporal')
 
             spatial_group.create_dataset('source_params', data=source_params.numpy())
-            spatial_group.create_dataset('footprints', data=A_final.numpy().reshape(dmdPixelsPerRow,dmdPixelsPerCol,-1))
+            spatial_group.create_dataset('fp_masks', data=A.numpy().reshape(dmdPixelsPerRow,dmdPixelsPerColumn,-1).transpose(2,0,1))
+            spatial_group.create_dataset('fp_coords', data=source_params[:,:2].numpy())
 
             dF = np.concatenate([r[0] for r in results], axis=0)
             trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[1]) for r in results])[:-1]])
@@ -1010,6 +1128,9 @@ def main():
             globalF = np.concatenate([r[3] for r in results], axis=0)
             global_group = dmd_group.create_group('global')
             global_group.create_dataset('F', data=globalF)
+
+            visualizations = dmd_group.create_group('visualizations')
+            visualizations.create_dataset('act_im', data=skew_im)
 
         print(f"Added DMD{DMDix+1} data to {output_h5_filename}")
 
