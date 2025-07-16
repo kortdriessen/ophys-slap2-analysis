@@ -139,10 +139,6 @@ end
 
 %numLines = lastLine-firstLine+1;
 %sanity checks
-%<<<<<<< HEAD
-assert(length(S2data.hMultiDataFiles.fastZs)==1); %single plane acquisitions only
-metaZ = S2data.hMultiDataFiles.fastZs;
-%=======
 if isprop(S2data, 'hDataFile')
     assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
     metaZ = S2data.hDataFile.fastZs;
@@ -150,8 +146,6 @@ else
     assert(length(S2data.hMultiDataFiles.fastZs)==1)
     metaZ = S2data.hMultiDataFiles.fastZs;
 end
-
-%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
 
 %%%%%Make an initial template
 %crosscorrelate each initial frame to each other
@@ -370,16 +364,11 @@ aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into
 aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
 disp('Getting online motion correction offsets')
-%<<<<<<< HEAD
-[aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hMultiDataFiles, DSframes);
-
-%=======
 if isprop(S2data, 'hDataFile')
     [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
 else
     [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hMultiDataFiles, DSframes);
 end
-%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
 %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
 aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
 aData.trimCols = trimCols;%used to remap images from the datafile into the space of the saved tiffs

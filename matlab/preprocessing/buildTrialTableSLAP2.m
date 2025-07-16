@@ -138,9 +138,7 @@ for eIx = 1:epoch %for each epoch
         hDat = slap2.Slap2DataFile([dr filesep files(fIx).name]);
         numLines(fIx) = hDat.totalNumLines;
     end
-%<<<<<<< HEAD
-    linePeriod_s = hDat.hMultiDataFiles.metaData.linePeriod_s;
-%=======
+
     if isprop(hDat, 'hDataFile')
         linePeriod_s = hDat.hDataFile.metaData.linePeriod_s;
     elseif isprop(hDat, 'hMultiDataFiles')
@@ -148,7 +146,7 @@ for eIx = 1:epoch %for each epoch
     else
         error('Could not read data file metaData')
     end
-%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
+
     disp('done loading ')
     isDMD1 = cellfun(@(x)(~isempty(x)), strfind({files.name}, 'DMD1'));
 
