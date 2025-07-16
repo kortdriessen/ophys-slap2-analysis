@@ -97,7 +97,6 @@ linerateHz = 1/meta.linePeriod_s;
 dt = linerateHz/aData.alignHz;
 numChannels = S2data.numChannels;
 
-
 if params.isReVolt
     numChannels = 1;
     redChannel =2;
@@ -140,8 +139,19 @@ end
 
 %numLines = lastLine-firstLine+1;
 %sanity checks
+%<<<<<<< HEAD
 assert(length(S2data.hMultiDataFiles.fastZs)==1); %single plane acquisitions only
 metaZ = S2data.hMultiDataFiles.fastZs;
+%=======
+if isprop(S2data, 'hDataFile')
+    assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
+    metaZ = S2data.hDataFile.fastZs;
+else
+    assert(length(S2data.hMultiDataFiles.fastZs)==1)
+    metaZ = S2data.hMultiDataFiles.fastZs;
+end
+
+%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
 
 %%%%%Make an initial template
 %crosscorrelate each initial frame to each other
@@ -171,6 +181,13 @@ trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1
 Y = Y(trimRows, trimCols,:);
 sz = size(Y);
 
+%keep track of how many samples are averaged together to make images; this
+%is relevant for noise statistics
+nVisitsPerCycle = getVisitsPerCycle(meta);
+nVisitsPerCycle = nVisitsPerCycle(trimRows,trimCols);
+assert(max(nVisitsPerCycle,[],'all')<256);
+nVisitsPerCycle = single(nVisitsPerCycle);
+
 R = ones(nInitFrames);
 motion = zeros(2,nInitFrames,nInitFrames);
 for f1 = 1:nInitFrames
@@ -183,6 +200,7 @@ end
 [bestR, maxind] = max(median(R));
 frameInds = find(R(:,maxind)>=bestR);
 
+assert(aData.maxshift==round(aData.maxshift), 'params.maxshift must be an integer');
 [viewR, viewC] = ndgrid((1:(sz(1)+2*aData.maxshift))-aData.maxshift, (1:(sz(2)+2*aData.maxshift))-aData.maxshift); %view matrices for interpolation
 template = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2));
 for fix = 1:length(frameInds)
@@ -270,6 +288,10 @@ try
         aErrorDS(DSframeIx) = 1-corrCoeff^2;
 
         A1 = interp2(1:sz(2), 1:sz(1), M1,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
+        
+        %compute uncertainty of each pixel
+        %[A1,N1] = interpFrame(M1, viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), nVisitsPerCycle);
+
         fTIF.WriteIMG(single(A1));
         if numChannels==2
             A2 = interp2(1:sz(2), 1:sz(1), M2,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
@@ -348,8 +370,16 @@ aData.cropRow = trimRows(1)-aData.maxshift; %offset to add to ROIs to index into
 aData.cropCol = trimCols(1)-aData.maxshift; %offset to add to ROIs to index into original recording
 
 disp('Getting online motion correction offsets')
+%<<<<<<< HEAD
 [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hMultiDataFiles, DSframes);
 
+%=======
+if isprop(S2data, 'hDataFile')
+    [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hDataFile, DSframes);
+else
+    [aData.onlineXshift, aData.onlineYshift, aData.onlineZshift] = getOnlineMotion(S2data.hMultiDataFiles, DSframes);
+end
+%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
 %CONVERTING DATAFILE IMAGES INTO THE SAVED TIFF IMAGE SPACE:
 aData.trimRows = trimRows; %used to remap images from the datafile into the space of the saved tiffs
 aData.trimCols = trimCols;%used to remap images from the datafile into the space of the saved tiffs

@@ -57,7 +57,43 @@ switch params.microscope
                     nans= isnan(tmp1);
                     Fpx{rix}(:,fix,cix) = tmp1;
                     FF = (sum(tmp1(~nans))./sum(tmp2(~nans))).*sum(tmp2);
-                    exptSummary.ROIs.F(rix, fix,cix) = FF;
+                    exptSummary.ROIs.F_fullSpeed(rix, fix,cix) = FF;
+                end
+            end
+        end
+
+        %extract downsampled soma data
+        if ~isempty(roiData) %if any of the rois is labeled 'soma'
+            if params.roiHz==params.analyzeHz
+                exptSummary.ROIs.F = exptSummary.ROIs.F_fullSpeed;
+                somaLines =frameLines;
+            else
+                Fpx = {};
+                dtSoma = linerateHz/params.roiHz;
+                somaLines = ceil(startLine:dtSoma:endLine);
+                nFramesSoma= length(somaLines);
+                roiFtmp = nan(length(roiData),nFramesSoma,numel(orderedChannels));
+                exptSummary.ROIs.F = nan(length(roiData),nFrames,numel(orderedChannels));
+                for fix = nFramesSoma:-1:1
+                    for cix = 1:numel(orderedChannels)
+                        Y = S2data.getImage(orderedChannels(cix), somaLines(fix), ceil(dtSoma), 1);
+                        Y = Y(alignData.trimRows, alignData.trimCols);
+                        Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData.viewC+motionC(fix), alignData.viewR+motionR(fix), 'linear', nan);
+                        mIM = meanIM(:,:,orderedChannels(cix));
+                        for rix = 1:length(roiData)
+                            mask = roiData{rix}.mask;
+                            tmp1 = Y(mask); tmp2 = mIM(mask);   tmp2(isnan(tmp2)) = 0;
+                            nans= isnan(tmp1);
+                            Fpx{rix}(:,fix,cix) = tmp1;
+                            FF = (sum(tmp1(~nans))./sum(tmp2(~nans))).*sum(tmp2);
+                            roiFtmp(rix, fix,cix) = FF;
+                        end
+                    end
+                end
+                for cix = 1:numel(orderedChannels)
+                    for rix = 1:length(roiData)
+                        exptSummary.ROIs.F(rix,:,cix) = interp1(somaLines, roiFtmp(rix, :,cix), frameLines);
+                    end
                 end
             end
         end
@@ -71,7 +107,8 @@ switch params.microscope
                 roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
                 [~,selPC] = max(roiLikeness);
                 Fsvd = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
-                exptSummary.ROIs.Fsvd(rix,:,cix) =Fsvd;
+                %upsample to desired framerate if necessary
+                exptSummary.ROIs.Fsvd(rix,:,cix) = interp1(somaLines, Fsvd, frameLines);
             end
         end
         clear Fpx;
@@ -104,17 +141,18 @@ switch params.microscope
         else %1 channel
             clear IM;
         end
-        
+
 end
 
 
 discard = interp1(1:numel(discardFrames), double(discardFrames(:)), linspace(1, numel(discardFrames), size(IMsel,2)))>0; %upsample the discard frames
 IMsel(:,discard) = nan;     %throw away movement frames as above
 exptSummary.global.F(discard,:) = nan;
+exptSummary.ROIs.F_fullSpeed(:,discard,:) = nan;
 exptSummary.ROIs.F(:, discard,:) = nan;
 exptSummary.ROIs.Fsvd(:,discard,:) = nan;
 if numChannels ==2
-     IM2sel(:,discard) = nan;
+    IM2sel(:,discard) = nan;
 end
 
 [IMselFilt, IMselRaw, F0sel, W, selNans] = prepareNMFproblem(IMsel, W0, F0selDS, params);

@@ -10,12 +10,25 @@ import ScanImageTiffReader.ScanImageTiffReader
 
 %parameters
 lineDiffThresh = 2000; %difference threshold for calling two recordings the same length, in lines. ~0.2 seconds
+multiCycleLinesPerTrial = 300000; % Break up continuous acquisitoins into blocks of this many lines
 
 %get a list of dat files in a given folder
 if ~nargin
     dr = uigetdir;
 end
 unpickedfiles = dir([dr filesep '*.dat']);
+
+%remove extra 'multicycle' files from list; they will be represented by first file
+pattern = 'CYCLE-(\d+)'; 
+removeFiles = false(1,numel(unpickedfiles));
+for ix = 1:length(unpickedfiles)
+        % Use regexp to find matches and extract the number part
+        tokens = regexp(unpickedfiles(ix).name, pattern, 'tokens');      
+        if ~isempty(tokens) && str2double(tokens{1}{1})>0
+            removeFiles(ix) = true;
+        end
+end
+unpickedfiles = unpickedfiles(~removeFiles);
 
 epoch = 0;
 while ~isempty(unpickedfiles)
@@ -125,7 +138,17 @@ for eIx = 1:epoch %for each epoch
         hDat = slap2.Slap2DataFile([dr filesep files(fIx).name]);
         numLines(fIx) = hDat.totalNumLines;
     end
+%<<<<<<< HEAD
     linePeriod_s = hDat.hMultiDataFiles.metaData.linePeriod_s;
+%=======
+    if isprop(hDat, 'hDataFile')
+        linePeriod_s = hDat.hDataFile.metaData.linePeriod_s;
+    elseif isprop(hDat, 'hMultiDataFiles')
+        linePeriod_s = hDat.hMultiDataFiles.metaData.linePeriod_s;
+    else
+        error('Could not read data file metaData')
+    end
+%>>>>>>> d484a5610009441e458ff189d48b641482fe902e
     disp('done loading ')
     isDMD1 = cellfun(@(x)(~isempty(x)), strfind({files.name}, 'DMD1'));
 
@@ -139,6 +162,31 @@ for eIx = 1:epoch %for each epoch
     DMD2files = DMD2files(sortorder);
     numLinesDMD2 = numLines(~isDMD1); numLinesDMD2 = numLinesDMD2(sortorder);
 
+    %Each epoch should consist of only continuous or only triggered
+    %acquisitions
+    if contains(DMD1files(1).name, 'CYCLE-') %Continuous acquisition mode
+        assert(numel(DMD1files)==numel(DMD2files), 'There was an unequal amount of DMD1 and DMD2 files for an epoch using continuous acquisitions');
+        for fileIx = 1:numel(DMD1files)
+            nLinesTot = min(numLinesDMD1(fileIx), numLinesDMD2(fileIx));
+            nTrialsInFile = ceil(nLinesTot/multiCycleLinesPerTrial);
+            trialEdges = linspace(1,nLinesTot+1, nTrialsInFile+1);
+            
+            for trialIx = 1:nTrialsInFile
+                trueTrialIx = trueTrialIx+1;
+                trialTable.filename{1,trueTrialIx} = DMD1files(fileIx).name;
+                trialTable.filename{2,trueTrialIx} = DMD2files(fileIx).name;
+                trialTable.firstLine(1,trueTrialIx) = trialEdges(trialIx);
+                trialTable.firstLine(2,trueTrialIx) = trialEdges(trialIx);
+                trialTable.lastLine(1,trueTrialIx) = trialEdges(trialIx+1);
+                trialTable.lastLine(2,trueTrialIx) = trialEdges(trialIx+1);
+                trialTable.trueTrialIx(trueTrialIx) = trueTrialIx;
+                trialTable.epoch(trueTrialIx) = eIx;
+                
+                trialTable.trialEndTimeFromPC(trueTrialIx) = DMD1files(fileIx).datenum - datenum(duration(0,0,(numLinesDMD1(fileIx)-trialEdges(trialIx+1)).*linePeriod_s)); 
+                trialTable.trialStartTimeInferred(trueTrialIx) = DMD1files(fileIx).datenum - datenum(duration(0,0,(numLinesDMD1(fileIx)-trialEdges(trialIx)).*linePeriod_s));
+            end
+        end
+    else %triggered acquisition more+
     lastDMD1fIx = 0;
     lastDMD2fIx = 0;
     accumLines = [0 0];
@@ -183,6 +231,7 @@ for eIx = 1:epoch %for each epoch
             accumLines(1) = accumLines(1) + nLines;
             accumLines(2) = 0;
         end
+    end
     end
 end
 

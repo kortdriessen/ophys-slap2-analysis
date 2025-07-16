@@ -10,7 +10,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import torch
 import scipy.io as spio
-from scipy import sparse, signal, stats
+from scipy import sparse, signal, stats, ndimage
+from scipy.interpolate import RegularGridInterpolator
 from scipy.optimize import curve_fit
 import h5py
 import napari
@@ -85,9 +86,6 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, fas
 
     DSframes = aData['DSframes'][0]
     nDSframes= len(DSframes)
-
-    data = np.zeros((numSuperPixels,nDSframes))
-    dataCt = np.zeros((numSuperPixels,nDSframes))
     
     # Pre-compute time windows for all frames
     timeWindows = [np.arange(max(1,np.floor(DSframes[i]-2*dt)), 
@@ -98,27 +96,57 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, fas
     lineIndices_all = [(tw - 1) % hDataFile.header['linesPerCycle'] + 1 for tw in timeWindows]
     cycleIndices_all = [np.floor((tw - 1) / hDataFile.header['linesPerCycle']) + 1 for tw in timeWindows]
     
+    # Collect all unique line-cycle combinations across all frames
+    all_line_cycles = set()
+    for DSframeIx in range(nDSframes):
+        for li, ci in zip(lineIndices_all[DSframeIx], cycleIndices_all[DSframeIx]):
+            all_line_cycles.add((int(li), int(ci)))
+    
+    # Get all line data at once
+    all_lines = np.array([lc[0] for lc in all_line_cycles])
+    all_cycles = np.array([lc[1] for lc in all_line_cycles])
+    
+    # Create a mapping from (line, cycle) to index in the cache
+    line_cycle_to_idx = {(int(li), int(ci)): i for i, (li, ci) in enumerate(zip(all_lines, all_cycles))}
+
+    start_line_data_time = time.time()
+    print(f"Getting line data for {len(all_lines)} lines", end="")
+    # Get all line data at once
+    all_line_data = hDataFile.getLineData(all_lines, all_cycles, params['activityChannel'])
+    print(f" - completed in {time.time() - start_line_data_time:.3f} sec")
+
+    data = np.zeros((numSuperPixels,nDSframes))
+    dataCt = np.zeros((numSuperPixels,nDSframes))
     # Initialize timing variables
     start_time = time.time()
     
+    # Process each frame
     for DSframeIx in range(nDSframes):
         if DSframeIx % 100 == 0:
             avg_time = (time.time() - start_time) / DSframeIx if DSframeIx > 0 else 0
             print(f"{DSframeIx} of {nDSframes}, Average time per frame: {avg_time:.3f} sec")
+        
+        # Get the line and cycle indices for this frame
+        frame_line_indices = lineIndices_all[DSframeIx]
+        frame_cycle_indices = cycleIndices_all[DSframeIx]
+        
+        # Process only valid lines
+        valid_lines = [i for i, li in enumerate(frame_line_indices) 
+                      if hDataFile.lineDataNumElements[int(li)-1] != 0]
+        
+        for i in valid_lines:
+            line_idx = int(frame_line_indices[i])
+            cycle_idx = int(frame_cycle_indices[i])
             
-        lineIndices = lineIndices_all[DSframeIx]
-        cycleIndices = cycleIndices_all[DSframeIx]
-        
-        allLineData = hDataFile.getLineData(lineIndices, cycleIndices, params['activityChannel'])
-        
-        # Vectorize line processing
-        valid_lines = np.where([hDataFile.lineDataNumElements[int(li)-1] != 0 for li in lineIndices])[0]
-        
-        for lineIdx in valid_lines:
-            positions = hDataFile.lineSuperPixelIDs[int(lineIndices[lineIdx])-1]
-            zIdx = hDataFile.lineFastZIdxs[int(lineIndices[lineIdx])-1]
+            # Get the cached line data
+            cache_idx = line_cycle_to_idx[(line_idx, cycle_idx)]
+            line_data = all_line_data[cache_idx]
             
-            # Compute lookup values and matches in one go
+            # Get positions and z-index
+            positions = hDataFile.lineSuperPixelIDs[line_idx-1]
+            zIdx = hDataFile.lineFastZIdxs[line_idx-1]
+            
+            # Compute lookup values and matches
             lookup_values = positions * 100 + zIdx
             matching_mask = np.isin(allSuperPixelIDs[f'DMD{DMDix+1}'], lookup_values)
             matching_indices = np.where(matching_mask)[0]
@@ -129,7 +157,7 @@ def get_trial_data(trial_info, DMDix, params, refStack, subsampleMatrixInds, fas
                 # Get the positions in lineData for each matching index
                 matched_positions = [value_to_pos[int(allSuperPixelIDs[f'DMD{DMDix+1}'][idx])] for idx in matching_indices]
                 
-                data[matching_indices, DSframeIx] += allLineData[lineIdx][matched_positions,0]
+                data[matching_indices, DSframeIx] += line_data[matched_positions, 0]
                 dataCt[matching_indices, DSframeIx] += 1
     
     return data/100, dataCt, baseline, aData
@@ -195,7 +223,7 @@ def getRowNeighbors(image, pixel):
 
     return rowNeighbors
 
-def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, refD,params, DMDix, convMatrix, neighborMatrix_sparse):
+def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, refD, psf, params, DMDix, convMatrix, neighborMatrix_sparse):
     
     trial_ix, data, dataCt, baseline, (motionDSr, motionDSc, motionDSz) = trialData
 
@@ -313,6 +341,7 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     # finalPeakLocs = allPeakLocs[peakVals > (high + 2*(high - low))] # pick top 6 sigma peaks
     # print(f"{trial_ix} choose top peaks")
     finalPeakLocs = allPeakLocs[peakVals > peakVal_thresh]
+    finalPeaks_sp, finalPeaks_t = np.unravel_index(finalPeakLocs,(numSuperPixels,numCycles))
 
     finalPeaks = np.zeros((numSuperPixels,numCycles))
     finalPeaks[np.unravel_index(finalPeakLocs,(numSuperPixels,numCycles))] = 1
@@ -326,21 +355,84 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
     trial_peaks = []
     trial_original_peaks = []
     trial_peak_vals = []
+    trial_peak_mses = []
+    trial_peak_sigmas = []
 
-    for sp, t in zip(*np.where(finalPeaks)):
-        tmpR = refR[sp]
-        tmpC = refC[sp]
+    # Prepare PSF template and interpolator once before the function definition
+    psf_template = psf[f'DMD{DMDix+1}'] / max(psf[f'DMD{DMDix+1}'].flatten())
+    valid_mask_psf = ~np.isnan(psf_template)
+    psf_center_y, psf_center_x = psf_template.shape[0]//2, psf_template.shape[1]//2
+    
+    # Create interpolation function only once
+    if np.any(valid_mask_psf):
+        psf_interp = RegularGridInterpolator(
+            (np.arange(psf_template.shape[0]), np.arange(psf_template.shape[1])),
+            psf_template,
+            bounds_error=False,
+            fill_value=0
+        )
+    
+    # Define PSF fitting function with subpixel shifts
+    def psf_fit_func(coords, amplitude, x_shift, y_shift):
+        x, y = coords
+        
+        # Check if we have valid PSF data
+        if not np.any(valid_mask_psf):
+            return np.zeros_like(x)
+        
+        # Calculate shifted coordinates
+        points = np.column_stack((y - y_shift + psf_center_y, 
+                                  x - x_shift + psf_center_x))
+        
+        # Get interpolated values and scale by amplitude
+        return amplitude * psf_interp(points)
 
-        newR = int(tmpR + np.round(motionDSr[t]))
-        newC = int(tmpC + np.round(motionDSc[t]))
+    for t in np.unique(finalPeaks_t):
 
-        residual_filt_frame = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
-        residual_filt_frame[:] = np.nan
+        residual_frame = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
+        residual_frame[:] = np.nan
+        residual_frame_nans = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
+
+        data_frame = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
+        data_frame[:] = np.nan
+        data_frame_nans = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow,len(decay_kernel)))
 
         for ix in range(len(decay_kernel)):
             dt = ix - len(decay_kernel)//2
             if t+dt >= 0 and t+dt < numCycles:
-                residual_filt_frame[refD,refR + int(np.round(motionDSr[t+dt])), refC + int(np.round(motionDSc[t+dt])),ix] = residual[:,t+dt]
+                residual_frame[refD,refR + int(np.round(motionDSr[t+dt])), refC + int(np.round(motionDSc[t+dt])),ix] = residual[:,t+dt]
+                data_frame[refD,refR + int(np.round(motionDSr[t+dt])), refC + int(np.round(motionDSc[t+dt])),ix] = data[:,t+dt]  / dataCt[:,t+dt]
+
+            residual_frame_nans[:,:,:,ix] = np.isnan(residual_frame[:,:,:,ix])
+            data_frame_nans[:,:,:,ix] = np.isnan(data_frame[:,:,:,ix])
+            # Interpolate to fill in missing pixel values along axis 1 (rows)
+            for z in range(numFastZs):
+                for c in range(dmdPixelsPerRow):
+                    # Get the row values for this z, column, and frame
+                    row_values = residual_frame[z, :, c, ix]
+                    data_row_values = data_frame[z, :, c, ix]
+                    # Find indices where values are not NaN
+                    valid_indices = np.where(~np.isnan(row_values))[0]
+                    
+                    if len(valid_indices) > 1:  # Need at least 2 points for interpolation
+                        # Create interpolation function for this row
+                        interp_func = np.interp(
+                            np.arange(dmdPixelsPerColumn),  # All row indices
+                            valid_indices,                  # Valid row indices
+                            row_values[valid_indices],      # Valid values
+                            left=np.nan, right=np.nan       # Keep NaN at boundaries
+                        )
+                        # Update the row with interpolated values
+                        residual_frame[z, :, c, ix] = interp_func
+
+                        interp_func = np.interp(
+                            np.arange(dmdPixelsPerColumn),  # All row indices
+                            valid_indices,                  # Valid row indices
+                            data_row_values[valid_indices],      # Valid values
+                            left=np.nan, right=np.nan       # Keep NaN at boundaries
+                        )
+                        # Update the row with interpolated values
+                        data_frame[z, :, c, ix] = interp_func   
 
         # residual_filt_frame[refR.int() + int(np.round(motionDSr[t])), refC.int() + int(np.round(motionDSc[t])),0] = residual_filt[:,t]
         # if t < numCycles-1:
@@ -350,71 +442,92 @@ def find_trial_peaks(trialData,dmdPixelsPerColumn, dmdPixelsPerRow, refR, refC, 
 
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
-            residual_filt_frame = np.nanmean(residual_filt_frame,axis=3)
+            mean_residual_frame = np.nanmean(residual_frame,axis=3)
+            mean_residual_frame[np.all(residual_frame_nans,axis=3)] = np.nan
 
-        patchWidth = 21
-        peakPatch = residual_filt_frame[refD[sp],np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
-        
-        # Create x and y coordinates
-        y, x = np.indices(peakPatch.shape)
-        xy = np.column_stack((x.ravel(), y.ravel()))
-        
-        # Initial guess for parameters
-        initial_guess = [np.nanmax(peakPatch), patchWidth//2, patchWidth//2, 2, 2]
-        # Fit the 2D Gaussian
-        try:
-            # Ignore NaNs in peakPatch
-            valid_mask = ~np.isnan(peakPatch.ravel())
-            x_valid = x.ravel()[valid_mask]
-            y_valid = y.ravel()[valid_mask]
-            peakPatch_valid = peakPatch.ravel()[valid_mask]
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", category=UserWarning)
-                popt, _ = curve_fit(gaussian_2d, (x_valid, y_valid), peakPatch_valid, p0=initial_guess)
-            amplitude, x0, y0, sigma_x, sigma_y = popt
+            mean_data_frame = np.nanmean(data_frame,axis=3)
+            mean_data_frame[np.all(data_frame_nans,axis=3)] = np.nan
+
+        for sp in finalPeaks_sp[finalPeaks_t == t]:
+
+            patchWidth = 41
             
-            # Update peak position based on the Gaussian fit
-            peakR = np.int64(newR) - patchWidth//2 + y0
-            peakC = np.int64(newC) - patchWidth//2 + x0
+            tmpR = refR[sp]
+            tmpC = refC[sp]
 
-            if amplitude <= 0 or sigma_x >= 5 or sigma_y >= 15 or sigma_x < 1 or sigma_y < 1 or y0 < 0 or y0 >= patchWidth or x0 < 0 or x0 >= patchWidth:
-                # trial_peaks.append((peakR,peakC,t))
-                # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
-                # trial_peak_vals.append(residual_filt[sp,t])
+            newR = int(tmpR) + int(np.round(motionDSr[t]))
+            newC = int(tmpC) + int(np.round(motionDSc[t]))
+
+            peakPatch = mean_residual_frame[refD[sp],np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
+            dataPatch = mean_data_frame[refD[sp],np.int64(newR)-patchWidth//2:np.int64(newR)+patchWidth//2+1,np.int64(newC)-patchWidth//2:np.int64(newC)+patchWidth//2+1]
+
+            # Initial guess for parameters
+            initial_guess = [np.nanmax(peakPatch), patchWidth//2, patchWidth//2]
+            
+            try:
+                # Ignore NaNs in peakPatch
+                y, x = np.indices(peakPatch.shape)
+                valid_mask = ~np.isnan(peakPatch.ravel())
+                x_valid = x.ravel()[valid_mask]
+                y_valid = y.ravel()[valid_mask]
+                peakPatch_valid = peakPatch.ravel()[valid_mask]
+                dataPatch_valid = dataPatch.ravel()[valid_mask]
+
+                with warnings.catch_warnings():
+                    warnings.filterwarnings("ignore", category=UserWarning)
+                    popt, pcov = curve_fit(psf_fit_func, (x_valid, y_valid), peakPatch_valid, p0=initial_guess, sigma=np.maximum(1e-3,dataPatch_valid), absolute_sigma=True)
+
+                amplitude, x0, y0 = popt
+                # Set sigma values to None since we're not using a Gaussian model
+                _, sigma_x, sigma_y = np.sqrt(np.diag(pcov))
+                
+                # Update peak position based on the Gaussian fit
+                peakR = np.int64(newR) - patchWidth//2 + y0
+                peakC = np.int64(newC) - patchWidth//2 + x0
+
+                if amplitude <= 0 or abs(psf_fit_func((patchWidth//2, patchWidth//2), *popt)) <= 1e-4 or np.sum(abs(psf_fit_func((x_valid, y_valid), *popt))) < 1e-4:  
+                    continue
+
+                # if amplitude <= 0 or sigma_x >= 5 or sigma_y >= 15 or sigma_x < 1 or sigma_y < 1 or y0 < 0 or y0 >= patchWidth or x0 < 0 or x0 >= patchWidth:
+                #     # trial_peaks.append((peakR,peakC,t))
+                #     # trial_original_peaks.append((np.int64(newR),np.int64(newC),t))
+                #     # trial_peak_vals.append(residual_filt[sp,t])
+                #     continue
+
+                trial_peaks.append((int(refD[sp]),peakR,peakC,t))
+                trial_peak_mses.append(np.mean((peakPatch_valid - psf_fit_func((x_valid, y_valid), *popt))**2))
+                trial_peak_sigmas.append((sigma_y,sigma_x))
+                trial_original_peaks.append((int(refD[sp]),int(newR),int(newC),t))
+                trial_peak_vals.append(amplitude)
+                # trial_peak_vals_gaussian.append(residual_filt[sp,t])
+
+                # trial_peak_sds.append((sigma_x,sigma_y))
+            except:
                 continue
+                # If fitting fails, use quadratic interpolation
+                # rowNeighbors = getRowNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
+                # colNeighbors = getColNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
 
-            trial_peaks.append((int(refD[sp]),peakR,peakC,t))
-            trial_original_peaks.append((int(refD[sp]),int(newR),int(newC),t))
-            trial_peak_vals.append(amplitude)
-            # trial_peak_vals_gaussian.append(residual_filt[sp,t])
+                # if len(rowNeighbors) >= 2:
+                #     # ratioC = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]]))
+                #     # dC = (1-ratioC)/(1+ratioC)/2
+                #     # peakC = np.int64(newC) - dC
 
-            # trial_peak_sds.append((sigma_x,sigma_y))
-        except:
-            continue
-            # If fitting fails, use quadratic interpolation
-            # rowNeighbors = getRowNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
-            # colNeighbors = getColNeighbors(residual_filt_frame,(np.int64(newR),np.int64(newC)))
+                #     peakC = (np.int64(newC)*residual_filt_frame[np.int64(newR),np.int64(newC)] + rowNeighbors[0][1]*residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + rowNeighbors[1][1]*residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])
+                # else:
+                #     continue
+                #     peakC = np.int64(newC)
 
-            # if len(rowNeighbors) >= 2:
-            #     # ratioC = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]]))
-            #     # dC = (1-ratioC)/(1+ratioC)/2
-            #     # peakC = np.int64(newC) - dC
+                # if len(colNeighbors) >= 2:
+                #     # ratioR = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[0][0],colNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[1][0],colNeighbors[1][1]]))
+                #     # dR = (1-ratioR)/(1+ratioR)/2 * 4.5
+                #     # peakR = np.int64(newR) - dR
 
-            #     peakC = (np.int64(newC)*residual_filt_frame[np.int64(newR),np.int64(newC)] + rowNeighbors[0][1]*residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + rowNeighbors[1][1]*residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[rowNeighbors[0][0],rowNeighbors[0][1]] + residual_filt_frame[rowNeighbors[1][0],rowNeighbors[1][1]])
-            # else:
-            #     continue
-            #     peakC = np.int64(newC)
-
-            # if len(colNeighbors) >= 2:
-            #     # ratioR = max(1e-6,(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[0][0],colNeighbors[0][1]])/(R_filt_frame[np.int64(newR),np.int64(newC)]-R_filt_frame[colNeighbors[1][0],colNeighbors[1][1]]))
-            #     # dR = (1-ratioR)/(1+ratioR)/2 * 4.5
-            #     # peakR = np.int64(newR) - dR
-
-            #     peakR = (np.int64(newR)*residual_filt_frame[np.int64(newR),np.int64(newC)] + colNeighbors[0][0]*residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + colNeighbors[1][0]*residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])
-            # else:
-            #     continue
-            #     peakR = np.int64(newR)
-    return trial_peaks, trial_original_peaks, trial_peak_vals
+                #     peakR = (np.int64(newR)*residual_filt_frame[np.int64(newR),np.int64(newC)] + colNeighbors[0][0]*residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + colNeighbors[1][0]*residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])/(residual_filt_frame[np.int64(newR),np.int64(newC)] + residual_filt_frame[colNeighbors[0][0],colNeighbors[0][1]] + residual_filt_frame[colNeighbors[1][0],colNeighbors[1][1]])
+                # else:
+                #     continue
+                #     peakR = np.int64(newR)
+    return trial_ix, trial_peaks, trial_peak_sigmas, trial_original_peaks, trial_peak_vals
 
 def get_traces(trial_ix, roi_masks, DMDix, trialTable):
     # print(f"Getting trial {trial_ix+1} traces")
@@ -605,47 +718,47 @@ def main():
         psf = {}
         for DMDix in range(nDMDs):
             print(f"Calculating PSF for DMD{DMDix+1}")
-            numChannels = len(trialTable['refStack'][0,DMDix]['channels'][0,0].T)
-            IM_dil5 = trialTable['refStack'][0,DMDix]['IM'][0,0].transpose(2,1,0)
-            IM_dil5 = IM_dil5.reshape(-1, numChannels, IM_dil5.shape[1], IM_dil5.shape[2]).transpose(1,0,2,3)
+            # numChannels = len(trialTable['refStack'][0,DMDix]['channels'][0,0].T)
+            # IM_dil5 = trialTable['refStack'][0,DMDix]['IM'][0,0].transpose(2,1,0)
+            # IM_dil5 = IM_dil5.reshape(-1, numChannels, IM_dil5.shape[1], IM_dil5.shape[2]).transpose(1,0,2,3)
 
-            tmp = deconvlucy.deconvlucy(refStack[f'DMD{DMDix+1}'][0], IM_dil5[0], num_iter=50)
-            tmp = tmp[np.argmax(np.sum(tmp, axis=(1,2)))]
+            # tmp = deconvlucy.deconvlucy(refStack[f'DMD{DMDix+1}'][0], IM_dil5[0], num_iter=50)
+            # tmp = tmp[np.argmax(np.sum(tmp, axis=(1,2)))]
 
-            # Fit elongated 2D Gaussian to the PSF
-            def gaussian2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
-                x, y = xy
-                x_centered = x - x0
-                y_centered = y - y0
+            # # Fit elongated 2D Gaussian to the PSF
+            # def gaussian2d(xy, amplitude, x0, y0, sigma_x, sigma_y):
+            #     x, y = xy
+            #     x_centered = x - x0
+            #     y_centered = y - y0
                 
-                # Calculate Gaussian without rotation
-                exp_term = (x_centered**2)/(2*sigma_x**2) + (y_centered**2)/(2*sigma_y**2)
-                return amplitude * np.exp(-exp_term)
+            #     # Calculate Gaussian without rotation
+            #     exp_term = (x_centered**2)/(2*sigma_x**2) + (y_centered**2)/(2*sigma_y**2)
+            #     return amplitude * np.exp(-exp_term)
 
-            # Create coordinate grid
-            y, x = np.indices(tmp.shape)
-            xy = (x, y)
+            # # Create coordinate grid
+            # y, x = np.indices(tmp.shape)
+            # xy = (x, y)
 
-            # Initial parameter guesses
-            amplitude_guess = np.max(tmp)
-            y0_guess, x0_guess = np.unravel_index(np.argmax(tmp), tmp.shape)
-            sigma_guess = 3
+            # # Initial parameter guesses
+            # amplitude_guess = np.max(tmp)
+            # y0_guess, x0_guess = np.unravel_index(np.argmax(tmp), tmp.shape)
+            # sigma_guess = 3
 
-            initial_guess = [amplitude_guess, x0_guess, y0_guess, sigma_guess, sigma_guess]
+            # initial_guess = [amplitude_guess, x0_guess, y0_guess, sigma_guess, sigma_guess]
 
-            # Flatten data for fitting
-            tmp_flat = tmp.ravel()
+            # # Flatten data for fitting
+            # tmp_flat = tmp.ravel()
 
-            # Fit the 2D Gaussian
-            popt, _ = curve_fit(lambda xy, *params: gaussian2d(xy, *params).ravel(),
-                                xy, tmp_flat, p0=initial_guess)
+            # # Fit the 2D Gaussian
+            # popt, _ = curve_fit(lambda xy, *params: gaussian2d(xy, *params).ravel(),
+            #                     xy, tmp_flat, p0=initial_guess)
 
-            # Store fitted parameters
-            amplitude, x0, y0, sigma_x, sigma_y = popt
-            tmp = tmp[round(y0)-round(2.5*sigma_y):round(y0)+round(2.5*sigma_y)+1, round(x0)-round(2.5*sigma_x):round(x0)+round(2.5*sigma_x)+1]
+            # # Store fitted parameters
+            # amplitude, x0, y0, sigma_x, sigma_y = popt
+            # tmp = tmp[round(y0)-round(2.5*sigma_y):round(y0)+round(2.5*sigma_y)+1, round(x0)-round(2.5*sigma_x):round(x0)+round(2.5*sigma_x)+1]
 
-            psf[f'DMD{DMDix+1}'] = (tmp+tmp[-1::-1,:]+tmp[:,::-1]+tmp[-1::-1,::-1])/4
-
+            # psf[f'DMD{DMDix+1}'] = (tmp+tmp[-1::-1,:]+tmp[:,::-1]+tmp[-1::-1,::-1])/4
+            psf[f'DMD{DMDix+1}'] = skimio.imread(os.path.join(str(Path(__file__).parent), 'psfs', 'dil-17.tif'))
         combined_dims = [0,0]
         for DMDix in range(nDMDs):
             combined_dims[0] = max(psf[f'DMD{DMDix+1}'].shape[0], combined_dims[0])
@@ -659,6 +772,9 @@ def main():
     else:
         psf_combined = skimio.imread(psf_path)
     
+    psf_combined[0][psf_combined[0] < np.max(psf_combined[0])*np.exp(-3)] = 0
+    psf_combined[1][psf_combined[1] < np.max(psf_combined[1])*np.exp(-3)] = 0
+
     psf = {
         'DMD1': psf_combined[0],
         'DMD2': psf_combined[1]
@@ -791,6 +907,7 @@ def main():
             refR = refR,
             refC = refC,
             refD = refD,
+            psf = psf,
             params = params,
             DMDix = DMDix,
             convMatrix = convMatrix,
@@ -801,12 +918,14 @@ def main():
             results = list(tqdm(pool.imap_unordered(find_trial_peaks_partial, trialInfo), total=len(trialInfo),desc="Fitting Peaks"))      
 
         peaks = []
+        peaks_sigmas = []
         original_peaks = []
         peak_vals = []
         peak_trials = []
 
-        for trial_ix, (peak, original_peak, peak_val) in enumerate(results):
+        for trial_ix, peak, peak_sigmas, original_peak, peak_val in results:
             peaks.extend(peak)
+            peaks_sigmas.extend(peak_sigmas)
             original_peaks.extend(original_peak) 
             peak_vals.extend(peak_val)
             peak_trials.extend([trial_ix]*len(peak))
@@ -814,6 +933,7 @@ def main():
         # Save all peak data to a single file
         peak_data = {
             'peaksPix': np.array(peaks),
+            'peaksSigmas': np.array(peaks_sigmas),
             'originalPeaks': np.array(original_peaks),
             'finalPeakVals': np.array(peak_vals),
             'peakTrials': np.array(peak_trials)
@@ -822,131 +942,131 @@ def main():
         np.savez(output_filename, **peak_data)
         print(f"Saved peak data to {output_filename}")
 
-        peaksPix = np.array(peaks)
-        originalPeaks = np.array(original_peaks)
-        finalPeakVals = np.array(peak_vals)
-        peakTrials = np.array(peak_trials)
+        # peaksPix = np.array(peaks)
+        # originalPeaks = np.array(original_peaks)
+        # finalPeakVals = np.array(peak_vals)
+        # peakTrials = np.array(peak_trials)
 
-        # peaks histogram
-        peaksHist = np.zeros((numRefStackZs,dmdPixelsPerColumn//2,dmdPixelsPerRow*1))
+        # # peaks histogram
+        # peaksHist = np.zeros((numRefStackZs,dmdPixelsPerColumn//2,dmdPixelsPerRow*1))
 
-        scaled_finalPeakVals = np.clip(finalPeakVals, None, np.percentile(finalPeakVals, 95))
-        # scaled_finalPeakVals = scaled_finalPeakVals - np.min(scaled_finalPeakVals)
-        # scaled_finalPeakVals = scaled_finalPeakVals / np.max(scaled_finalPeakVals)
+        # scaled_finalPeakVals = np.clip(finalPeakVals, None, np.percentile(finalPeakVals, 95))
+        # # scaled_finalPeakVals = scaled_finalPeakVals - np.min(scaled_finalPeakVals)
+        # # scaled_finalPeakVals = scaled_finalPeakVals / np.max(scaled_finalPeakVals)
 
-        for i in range(len(peaksPix)):
-            peaksHist[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(peaksPix[i][0])])-1,round(peaksPix[i][1]/2),round(peaksPix[i][2]*1)] += np.sqrt(scaled_finalPeakVals[i])
+        # for i in range(len(peaksPix)):
+        #     peaksHist[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(peaksPix[i][0])])-1,round(peaksPix[i][1]/2),round(peaksPix[i][2]*1)] += np.sqrt(scaled_finalPeakVals[i])
 
-        peaksHist[peaksHist == 0] = np.nan
+        # peaksHist[peaksHist == 0] = np.nan
 
-        roi_viewer = napari.view_image(refStack[f'DMD{DMDix+1}'][0], colormap='cyan')
+        # roi_viewer = napari.view_image(refStack[f'DMD{DMDix+1}'][0], colormap='cyan')
 
-        # Create a napari viewer with the correct aspect ratio
-        roi_viewer.add_image(
-            peaksHist,
-            name='Peaks Histogram',
-            colormap='red',
-            scale=(2, 1)
-        )
+        # # Create a napari viewer with the correct aspect ratio
+        # roi_viewer.add_image(
+        #     peaksHist,
+        #     name='Peaks Histogram',
+        #     colormap='red',
+        #     scale=(2, 1)
+        # )
         
-        roi_viewer.add_points(np.array([[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(x[0])])-1,x[1],x[2]] for x in peaksPix]), size=1, face_color='magenta', edge_color='magenta', opacity=0.3)
+        # roi_viewer.add_points(np.array([[int(fastZ2RefZ[f'DMD{DMDix+1}'][int(x[0])])-1,x[1],x[2]] for x in peaksPix]), size=1, face_color='magenta', edge_color='magenta', opacity=0.3)
 
-        roi_layer = roi_viewer.add_shapes(name='ROIs',face_color=[1,1,0,0.1],edge_color='yellow',edge_width=1)
-        roi_layer.mode = 'add_polygon'
+        # roi_layer = roi_viewer.add_shapes(name='ROIs',face_color=[1,1,0,0.1],edge_color='yellow',edge_width=1)
+        # roi_layer.mode = 'add_polygon'
 
-        # Use a list to store both ROIs and done status
-        result = {'roi_verts': None, 'roi_shapes': None, 'done': False}
+        # # Use a list to store both ROIs and done status
+        # result = {'roi_verts': None, 'roi_shapes': None, 'done': False}
 
-        # Check if saved ROIs exist
-        masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
-        if os.path.exists(masks_filename):
-            load_saved = QMessageBox.question(None, 'Question', 'Load saved ROIs?') == QMessageBox.Yes
-            if load_saved:
-                print('Loading saved ROIs')
-                # Load saved masks
-                result['roi_verts'], result['roi_shapes'] = np.load(masks_filename,allow_pickle=True)
+        # # Check if saved ROIs exist
+        # masks_filename = os.path.join(params['savedr'], f'roi_masks_DMD{DMDix+1}.npy')
+        # if os.path.exists(masks_filename):
+        #     load_saved = QMessageBox.question(None, 'Question', 'Load saved ROIs?') == QMessageBox.Yes
+        #     if load_saved:
+        #         print('Loading saved ROIs')
+        #         # Load saved masks
+        #         result['roi_verts'], result['roi_shapes'] = np.load(masks_filename,allow_pickle=True)
                 
-                # # Convert masks back to vertices
-                # roi_verts = []
-                # roi_shapes = []
-                # for mask in masks_array:
-                #     # Find contours of the mask
-                #     contours = measure.find_contours(mask, 0.5)
-                #     if len(contours) > 0:
-                #         # Take the largest contour
-                #         contour = contours[0]
-                #         roi_verts.append(contour)
-                #         roi_shapes.append('polygon')
+        #         # # Convert masks back to vertices
+        #         # roi_verts = []
+        #         # roi_shapes = []
+        #         # for mask in masks_array:
+        #         #     # Find contours of the mask
+        #         #     contours = measure.find_contours(mask, 0.5)
+        #         #     if len(contours) > 0:
+        #         #         # Take the largest contour
+        #         #         contour = contours[0]
+        #         #         roi_verts.append(contour)
+        #         #         roi_shapes.append('polygon')
                 
-                # Add shapes to viewer
-                # roi_layer.add_shapes(roi_verts, shape_type=roi_shapes)
+        #         # Add shapes to viewer
+        #         # roi_layer.add_shapes(roi_verts, shape_type=roi_shapes)
 
-                roi_layer.data = result['roi_verts']
-                roi_layer.shape_type = result['roi_shapes']
+        #         roi_layer.data = result['roi_verts']
+        #         roi_layer.shape_type = result['roi_shapes']
 
-                result['done'] = False
-                napari.utils.notifications.show_info('Loaded saved ROIs')
+        #         result['done'] = False
+        #         napari.utils.notifications.show_info('Loaded saved ROIs')
 
-        if not result['done']:
-            # Callback for Done button
-            def on_done():
-                if 'ROIs' in roi_viewer.layers:
-                    result['roi_verts'] = roi_layer.data
-                    result['roi_shapes'] = roi_layer.shape_type
-                    result['done'] = True
-                    napari.utils.notifications.show_info('ROIs captured!')
+        # if not result['done']:
+        #     # Callback for Done button
+        #     def on_done():
+        #         if 'ROIs' in roi_viewer.layers:
+        #             result['roi_verts'] = roi_layer.data
+        #             result['roi_shapes'] = roi_layer.shape_type
+        #             result['done'] = True
+        #             napari.utils.notifications.show_info('ROIs captured!')
 
-            # Add Done button
-            done_button = QPushButton("Done")
-            done_button.clicked.connect(on_done)
+        #     # Add Done button
+        #     done_button = QPushButton("Done")
+        #     done_button.clicked.connect(on_done)
 
-            roi_viewer.window.add_dock_widget(done_button, area='right')
-            napari.utils.notifications.show_info('Draw ROIs and click "Done" when ready.')
+        #     roi_viewer.window.add_dock_widget(done_button, area='right')
+        #     napari.utils.notifications.show_info('Draw ROIs and click "Done" when ready.')
 
-            # Keep checking until Done is clicked
-            while not result['done']:
-                QApplication.processEvents()
-                time.sleep(0.1)
+        #     # Keep checking until Done is clicked
+        #     while not result['done']:
+        #         QApplication.processEvents()
+        #         time.sleep(0.1)
 
-        if len(result['roi_verts']) > 0:
-            np.save(masks_filename, np.array([result['roi_verts'],result['roi_shapes']], dtype=object))
+        # if len(result['roi_verts']) > 0:
+        #     np.save(masks_filename, np.array([result['roi_verts'],result['roi_shapes']], dtype=object))
 
-            # Create masks for each ROI
-            masks = []
-            for i, roi_coords in enumerate(result['roi_verts']):
-                mask = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow), dtype=bool)
-                coords = np.round(roi_coords).astype(int)
+        #     # Create masks for each ROI
+        #     masks = []
+        #     for i, roi_coords in enumerate(result['roi_verts']):
+        #         mask = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow), dtype=bool)
+        #         coords = np.round(roi_coords).astype(int)
 
-                if result['roi_shapes'][i] in ['polygon', 'rectangle']:
-                    rr, cc = draw.polygon(coords[:,0], coords[:,1])
-                elif result['roi_shapes'][i] == 'ellipse':
-                    center_y = (coords[0][0] + coords[2][0]) / 2
-                    center_x = (coords[0][1] + coords[2][1]) / 2
-                    height = (coords[2][0] - coords[0][0]) / 2  # semi-major axis
-                    width = (coords[1][1] - coords[0][1]) / 2   # semi-minor axis
-                    rr, cc = draw.ellipse(center_y, center_x, height, width)
-                else:
-                    raise ValueError(f"Unknown ROI shape: {result['roi_shapes'][i]}")
+        #         if result['roi_shapes'][i] in ['polygon', 'rectangle']:
+        #             rr, cc = draw.polygon(coords[:,0], coords[:,1])
+        #         elif result['roi_shapes'][i] == 'ellipse':
+        #             center_y = (coords[0][0] + coords[2][0]) / 2
+        #             center_x = (coords[0][1] + coords[2][1]) / 2
+        #             height = (coords[2][0] - coords[0][0]) / 2  # semi-major axis
+        #             width = (coords[1][1] - coords[0][1]) / 2   # semi-minor axis
+        #             rr, cc = draw.ellipse(center_y, center_x, height, width)
+        #         else:
+        #             raise ValueError(f"Unknown ROI shape: {result['roi_shapes'][i]}")
                 
-                valid = (rr >= 0) & (rr < dmdPixelsPerColumn) & (cc >= 0) & (cc < dmdPixelsPerRow)
-                mask[rr[valid], cc[valid]] = True
-                masks.append(mask)
+        #         valid = (rr >= 0) & (rr < dmdPixelsPerColumn) & (cc >= 0) & (cc < dmdPixelsPerRow)
+        #         mask[rr[valid], cc[valid]] = True
+        #         masks.append(mask)
 
-            # Save masks to file
-            masks_array = np.array(masks)
-            print(f"Saved {len(masks)} ROI masks to {masks_filename}")
+        #     # Save masks to file
+        #     masks_array = np.array(masks)
+        #     print(f"Saved {len(masks)} ROI masks to {masks_filename}")
 
-            get_traces_partial = partial(
-                get_traces,
-                roi_masks = masks_array,
-                DMDix = DMDix,
-                trialTable = trialTable
-            )
+        #     get_traces_partial = partial(
+        #         get_traces,
+        #         roi_masks = masks_array,
+        #         DMDix = DMDix,
+        #         trialTable = trialTable
+        #     )
 
-            with mp.Pool(processes=4) as pool:
-                results = list(tqdm(pool.imap(get_traces_partial, range(nTrials)), total=nTrials, desc="Getting Traces"))
+        #     with mp.Pool(processes=4) as pool:
+        #         results = list(tqdm(pool.imap(get_traces_partial, range(nTrials)), total=nTrials, desc="Getting Traces"))
             
-            np.savez(os.path.join(params['savedr'], f'traces_DMD{DMDix+1}.npz'), *results)
+        #     np.savez(os.path.join(params['savedr'], f'traces_DMD{DMDix+1}.npz'), *results)
 
             # def plot_time_series(traces, time_points=None, title='Time Series'):
             #     """

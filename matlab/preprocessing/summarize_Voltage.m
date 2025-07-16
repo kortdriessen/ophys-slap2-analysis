@@ -80,7 +80,7 @@ for DMDix = 1:nDMDs
 
     %load reference image
     refFn = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*REFERENCE*.tif']);
-    assert(length(refFn)==1);
+    assert(length(refFn)==1, 'Found multiple reference images in the folder (possibly in nested folders!)');
     A = ScanImageTiffReader([refFn.folder filesep refFn.name]);
     IDs = A.descriptions;
     for im_ix = length(IDs):-1:1

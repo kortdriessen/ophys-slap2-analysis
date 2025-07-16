@@ -198,7 +198,7 @@ for expt_ix = 1:nExpts
 
     %find correspondence between activity recording and reference image
     for DMDix = [2 1]
-        firstValidTrial = find(~isempty(exptSummary.E(:,DMDix)),1, 'first');
+        firstValidTrial = find(~cellfun(@isempty, exptSummary.E(:,DMDix)),1,'first');
        
         %load activity metadata and get imaging z plane
         metaFn = dir(strcat(aFolder, filesep, '*DMD', int2str(DMDix), '*.meta'));
@@ -241,7 +241,6 @@ for expt_ix = 1:nExpts
         end
         
         %get activity ROI coordinates
-        firstValidTrial = find(~isempty(exptSummary.E(:,DMDix)),1,'first');
         footprints = exptSummary.E{firstValidTrial,DMDix}.footprints;
         nROIs = size(footprints,3);
         roiPosRaw = [];
