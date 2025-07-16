@@ -19,7 +19,7 @@ load([dr filesep fn], 'trialTable');
 %set up parallelization
 p = gcp('nocreate'); % If no pool, do not create new one.
 if isempty(p)
-    poolsize = 0;
+    poolsize = 1;
 else
     poolsize = p.NumWorkers;
 end
@@ -38,8 +38,14 @@ for DMD_ix = 1:nDMDs
     fnRegDS = cell(1,nTrials);
     fnAdata = cell(1,nTrials);
     firstLine = nan(1,nTrials);
-    parfor f_ix = 1:nTrials
-        [fnRegDS{f_ix}, fnAdata{f_ix}, firstLine(f_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+    if nWorkers>1
+        parfor f_ix = 1:nTrials
+            [fnRegDS{f_ix}, fnAdata{f_ix}, firstLine(f_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+        end
+    else
+        for f_ix = 1:nTrials
+            [fnRegDS{f_ix}, fnAdata{f_ix}, firstLine(f_ix)]= alignAsync(dr, trialTable, params, f_ix, DMD_ix);
+        end
     end
     if params.isReVolt && ~isfield(trialTable, 'firstLineOriginal')
         trialTable.firstLineOriginal = trialTable.firstLine;
@@ -60,7 +66,6 @@ disp('done multiRoiRegistration.')
 end
 
 function [fnwrite, fnAdata, firstLine] = alignAsync(dr, trialTable, params, f_ix, DMD_ix)
-
 if params.includeIntegrationROIs
     spTypeFlag = 0; %use all superpixel types
 else
@@ -96,6 +101,7 @@ meta = loadMetadata([dr filesep fn]);
 linerateHz = 1/meta.linePeriod_s;
 dt = linerateHz/aData.alignHz;
 numChannels = S2data.numChannels;
+minSamps = 10; %minimimum number of samples to include in template
 
 if params.isReVolt
     numChannels = 1;
@@ -137,7 +143,6 @@ if params.isReVolt
     end
 end
 
-%numLines = lastLine-firstLine+1;
 %sanity checks
 if isprop(S2data, 'hDataFile')
     assert(length(S2data.hDataFile.fastZs)==1); %single plane acquisitions only
@@ -150,7 +155,7 @@ end
 %%%%%Make an initial template
 %crosscorrelate each initial frame to each other
 disp('generating template')
-initFrames =   round(linspace(firstLine, lastLine, 40));%ceil(firstLine+dt : dt : min(lastLine-dt, firstLine+40*dt));
+initFrames =   round(linspace(firstLine, lastLine, 42)); initFrames = initFrames(2:end-1);
 nInitFrames = length(initFrames);
 
 if nInitFrames==0
@@ -159,7 +164,7 @@ if nInitFrames==0
 end
 for fix = nInitFrames:-1:1
     for cix = numChannels:-1:1
-        Y(:,:,cix,fix) = getImageWrapper(S2data, cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
+        [Y(:,:,cix,fix), freshness(:,:,fix)] = getImageWrapper(S2data, cix, initFrames(fix), ceil(dt), 1, spTypeFlag);
     end
 end
 
@@ -172,21 +177,14 @@ end
 %make data smaller for alignment
 trimRows = find(~all(isnan(Y(:,:,1)),2), 1, 'first'):find(~all(isnan(Y(:,:,1)),2), 1, 'last');
 trimCols = find(~all(isnan(Y(:,:,1)),1), 1, 'first'):find(~all(isnan(Y(:,:,1)),1), 1, 'last');
-Y = Y(trimRows, trimCols,:);
+Y = Y(trimRows, trimCols,:); freshness = freshness(trimRows, trimCols,:);
 sz = size(Y);
-
-%keep track of how many samples are averaged together to make images; this
-%is relevant for noise statistics
-nVisitsPerCycle = getVisitsPerCycle(meta);
-nVisitsPerCycle = nVisitsPerCycle(trimRows,trimCols);
-assert(max(nVisitsPerCycle,[],'all')<256);
-nVisitsPerCycle = single(nVisitsPerCycle);
 
 R = ones(nInitFrames);
 motion = zeros(2,nInitFrames,nInitFrames);
 for f1 = 1:nInitFrames
     for f2 = (f1+1):nInitFrames
-        [motion(:,f1,f2), R(f1,f2)] = xcorr2_nans(Y(:,:,f2), Y(:,:,f1), [0 ; 0], 3);
+        [motion(:,f1,f2), R(f1,f2)] = xcorr2_nans_weighted(Y(:,:,f2), freshness(:,:,f2), Y(:,:,f1), [0 ; 0], 3); 
         motion(:,f2,f1) = -motion(:,f1,f2);
         R(f2,f1) = R(f1,f2);
     end
@@ -196,11 +194,14 @@ frameInds = find(R(:,maxind)>=bestR);
 
 assert(aData.maxshift==round(aData.maxshift), 'params.maxshift must be an integer');
 [viewR, viewC] = ndgrid((1:(sz(1)+2*aData.maxshift))-aData.maxshift, (1:(sz(2)+2*aData.maxshift))-aData.maxshift); %view matrices for interpolation
-template = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2));
-for fix = 1:length(frameInds)
-    template(:,:,fix) = interp2(1:sz(2), 1:sz(1), Y(:,:,frameInds(fix)),viewC-motion(2,frameInds(fix), maxind), viewR-motion(1,frameInds(fix), maxind), 'linear', nan);
+tFrames = nan(2*aData.maxshift+sz(1), 2*aData.maxshift+sz(2), numel(frameInds));
+for fix = 1:numel(frameInds)
+    tFrames(:,:,fix) = interpFrame(Y(:,:,frameInds(fix)), viewC(1,:)-motion(2,frameInds(fix), maxind), viewR(:,1)-motion(1,frameInds(fix), maxind), freshness(:,:,frameInds(fix)));
 end
-template = mean(template, 3);
+tSum = sum(tFrames,3, 'omitnan');
+tN = sum(~isnan(tFrames),3);
+template = sqrt(tSum./tN);
+template(tN<minSamps) = nan;
 
 if params.refStackTemplate
     if params.isReVolt
@@ -239,33 +240,31 @@ if params.refStackTemplate
     motionDSz = nan(1,nDSframes); %matrices to store the inferred motion
 end
 aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
-%aRankCorrDS = nan(1,nDSframes); %rank correlation, a better measure of alignment quality
-%recNegErr = nan(1,nDSframes); %rectified negative error, a better measure of alignment quality
 
 %output TIF
 pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
 fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
 
+V1 = nan(size(viewC,1),size(viewC,2),nDSframes,'single'); %variance factor; multiply the image value by this to get variance
 registrationFailed = false;
+%T = T0(aData.maxshift + (1:sz(1)), aData.maxshift+(1:sz(2)));
 disp('Registering:');
 try
     for DSframeIx = 1:nDSframes
-        M1 = getImageWrapper(S2data, 1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
+        [M1, freshness] = getImageWrapper(S2data, 1, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch1
         M1 = M1(trimRows, trimCols);
+        freshness = freshness(trimRows, trimCols); %image freshness, the effective number of samples that contribute to the measurement
         if numChannels==2
             M2 =  getImageWrapper(S2data, 2, DSframes(DSframeIx), ceil(dt), 1, spTypeFlag); %moving image Ch2
             M2 = M2(trimRows, trimCols);
-            M = M1+M2;
+            M = sqrt(M1+M2);
         else
-            M = M1;
+            M = sqrt(M1);
         end
 
         if ~mod(DSframeIx, 1000)
             disp([int2str(DSframeIx) ' of ' int2str(nDSframes)]);
         end
-
-        % Ttmp = mean(cat(3, T0,template),3, 'omitnan');
-        % T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
 
         if params.refStackTemplate
             T = T0(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)),:);
@@ -274,21 +273,39 @@ try
         else
             Ttmp = mean(cat(3, T0,template),3, 'omitnan');
             T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
-            [motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
+            %[motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
+            [motOutput, corrCoeff] = xcorr2_nans_weighted(M, freshness, T, [0 ; 0], aData.clipShift);
         end
 
         motionDSr(DSframeIx) = initR+motOutput(1);
         motionDSc(DSframeIx) = initC+motOutput(2);
         aErrorDS(DSframeIx) = 1-corrCoeff^2;
 
-        A1 = interp2(1:sz(2), 1:sz(1), M1,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
+        %compute aligned image and variance factor
+        [A1,V1(:,:,DSframeIx)] = interpFrame(M1, viewC(1,:)+motionDSc(DSframeIx), viewR(:,1)+motionDSr(DSframeIx), freshness);
         
-        %compute uncertainty of each pixel
-        %[A1,N1] = interpFrame(M1, viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), nVisitsPerCycle);
+        % %check for regrets
+        % if numChannels==2
+        %     A2 = interpFrame(M2, viewC(1,:)+motionDSc(DSframeIx), viewR(:,1)+motionDSr(DSframeIx), freshness);
+        %     M = sqrt(A1+A2);
+        % else
+        %     M = sqrt(A1);
+        % end
+        % [motOutput2, corrCoeff2] = xcorr2_nans_weighted(M, 1./V1(:,:,DSframeIx), template, [0  ; 0], 3);
+        % %[motOutput2, corrCoeff2] = xcorr2_nans(A1, template, [0  ; 0], 3);
+        % if any(abs(motOutput2)>0.5)
+        %     motOutput
+        %     motOutput2
+        %     DSframeIx  
+        %     keyboard
+        %     motionDSr(DSframeIx) = motionDSr(DSframeIx)+motOutput2(1);
+        %     motionDSc(DSframeIx) = motionDSc(DSframeIx)+motOutput2(2);
+        %     [A1,V1(:,:,DSframeIx)] = interpFrame(M1, viewC(1,:)+motionDSc(DSframeIx), viewR(:,1)+motionDSr(DSframeIx), freshness);
+        % end
 
         fTIF.WriteIMG(single(A1));
         if numChannels==2
-            A2 = interp2(1:sz(2), 1:sz(1), M2,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
+            A2 = interpFrame(M2, viewC(1,:)+motionDSc(DSframeIx), viewR(:,1)+motionDSr(DSframeIx), freshness);%interp2(1:sz(2), 1:sz(1), M2,viewC+motionDSc(DSframeIx), viewR+motionDSr(DSframeIx), 'linear', nan);
             fTIF.WriteIMG(single(A2));
             A =A1+A2;
         else
@@ -302,15 +319,13 @@ try
         end
         A_ds(:,:,DSframeIx) = dsTmp;
 
-        % Asmooth = imgaussfilt(A, [0.66 0.66]); %smooth to reduce variance effects of subframe interpolation
-        % selCorr = sel & ~isnan(template);
-        % aRankCorrDS(DSframeIx) = corr(Asmooth(selCorr), template(selCorr), 'type', 'Spearman');
-        % recNegErr(DSframeIx) =  mean(min(0, Asmooth(selCorr)-template(selCorr)).^2)./mean(template(selCorr).^2);
-
         sel = ~isnan(A);
-        nantmp = sel & isnan(template);
-        template(nantmp) = A(nantmp);
-        template(sel) = (1-aData.alpha)*template(sel) + aData.alpha*(A(sel));
+        tSum(sel) = tSum(sel)+A(sel);
+        % tSum = tSum*(1-aData.alpha);
+        % tN = tN*(1-aData.alpha);
+        tN(sel) = tN(sel)+1;
+        template(sel) = sqrt(tSum(sel)./tN(sel));
+        template(tN<minSamps) = nan;
 
         initR = round(motionDSr(DSframeIx));
         initC = round(motionDSc(DSframeIx));
@@ -353,6 +368,7 @@ aData.frametime = 1/aData.alignHz;
 aData.DSframes = DSframes;
 aData.motionDSc = motionDSc;
 aData.motionDSr = motionDSr;
+aData.varFacDS = V1; %variance factor; multiply pixel intensity by this to get a number proportional to the pixel's variance
 if params.refStackTemplate
     aData.motionDSz = motionDSz;
 end
@@ -380,7 +396,7 @@ aData.viewR = viewR;%used to remap images from the datafile into the space of th
 %  sz = size(Ytrimmed);
 %  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
 
-save(fnAdata, 'aData');
+save(fnAdata, 'aData', '-v7.3');
 end
 
 function meta = loadMetadata(datFilename)
@@ -389,10 +405,10 @@ metaFilename = [datFilename(1:ix+3) '.meta'];
 meta = load(metaFilename, '-mat');
 end
 
-function IM = getImageWrapper(S2data, channel, frames, dt, zPlane, spTypeFlag)
+function [IM, freshness] = getImageWrapper(S2data, channel, frames, dt, zPlane, spTypeFlag)
 if spTypeFlag
-    IM = S2data.getImage(channel, frames, dt, zPlane, spTypeFlag);
+    [IM,~,freshness] = S2data.getImage(channel, frames, dt, zPlane, spTypeFlag);
 else
-    IM = S2data.getImage(channel, frames, dt, zPlane); %for backward compatibility
+    [IM,~,freshness] = S2data.getImage(channel, frames, dt, zPlane); %for backward compatibility
 end
 end

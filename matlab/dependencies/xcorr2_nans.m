@@ -24,6 +24,7 @@ tValid = circshift(fValid, -shiftsCenter);
 %mValid = circshift(fValid, shiftsCenter); %valid pixels of the moving image
 
 F = frame(fValid); %fixed data;
+
 ssF = sqrt(sum(F.^2));
 
 %correlation is sum(A.*B)./(sqrt(ssA)*sqrt(ssB)); ssB is constant though
