@@ -16,10 +16,11 @@ switch fnName
         params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
         params.nParallelWorkers = 6;     tooltips.nWorkers = 'number of parallel workers';
         params.drawUserRois = false;     tooltips.drawUserRois = 'pop up a GUI to annotate user ROIs?';  
-        params.motionThresh = 2;         tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
+        params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
-        params.nanThresh = 0.25;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
+        params.nanThresh = 0.33;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
         params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
+        params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
