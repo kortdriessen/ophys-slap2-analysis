@@ -86,7 +86,7 @@ for DMDix = DMDixs
     %     %     refStack{DMDix}.IM(:,:,:,cix) = A.data;
     %     % end
     otherwise
-        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG1-REFERENCE*']);
+        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '_CONFIG1-REFERENCE*.tif']);
         switch length(list)
             case 0
                 error('Too many reference stacks found in the specified directory!');
