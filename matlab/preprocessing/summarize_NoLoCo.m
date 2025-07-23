@@ -36,10 +36,8 @@ firstValidTrial = find(all(keepTrials,1),1,'first');
 %parameters that depend only on the microscope, hidden from GUI
 switch params.microscope
     case 'SLAP2'
-        params.discardInitial_s = 0.1;
         trialTable.fnRaw = trialTable.filename;
     case 'bergamo'
-        params.discardInitial_s = 0;
         params.analyzeHz = nan;
 end
 
@@ -202,7 +200,14 @@ for DMDix = nDMDs:-1:1
     actIM = mean(actAligned(:,:,:,validTrials), 4, 'includenan');
     medIM = nanmedfilt2(actIM, (2*ceil(1.5*params.dXY)+1).*[1 1]);
     actIM = actIM-medIM; %subtract a local baseline
-    pIM = actIM == ordfilt2(actIM, 9, ones(3));
+    explored = actIM; pTmp = explored>0 & explored == ordfilt2(explored, 9, ones(3));
+    pIM = false(size(actIM));
+    while any(pTmp(:))
+        pIM = pIM | pTmp;
+        explored(imdilate(pTmp, ones(5))) = 0;
+        pTmp = explored>0 & explored == ordfilt2(explored, 9, ones(3));
+    end
+
     %Mask out somata from activity image
     somaMask = false(size(actIM));
     if ~isempty(ROIs)
@@ -280,7 +285,7 @@ for DMDix = nDMDs:-1:1
         if size(W0, 2) > 0
             if strcmpi(params.microscope, 'SLAP2')
                 if params.nParallelWorkers>1
-                    newN = min(min(24,nWorkers*5), size(trialTable.filename,2)); %this step is not very memory-demanding for SLAP2; increase parallel workers
+                    newN = min(min(16,nWorkers*5), size(trialTable.filename,2)); %this step is not very memory-demanding for SLAP2; increase parallel workers
                     if nWorkers~=newN
                         delete(gcp('nocreate'));
                         parpool('processes',newN); %limit the number of workers to avoid running out of RAM
