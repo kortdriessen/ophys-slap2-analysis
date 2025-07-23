@@ -162,7 +162,7 @@ for eIx = 1:epoch %for each epoch
 
     %Each epoch should consist of only continuous or only triggered
     %acquisitions
-    if contains(DMD1files(1).name, 'CYCLE-') %Continuous acquisition mode
+    if contains(DMD1files(1).name, 'CYCLE-slap2') %Continuous acquisition mode
         assert(numel(DMD1files)==numel(DMD2files), 'There was an unequal amount of DMD1 and DMD2 files for an epoch using continuous acquisitions');
         for fileIx = 1:numel(DMD1files)
             nLinesTot = min(numLinesDMD1(fileIx), numLinesDMD2(fileIx));
