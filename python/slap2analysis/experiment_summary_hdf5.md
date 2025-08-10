@@ -12,7 +12,7 @@
    ┃ ┃ ┣ 📜trial_start_idxs (trials x 1)
    ┃ ┃ ┗ 📜discard_frames (total frames x 1)
    ┃ ┣ 📂visualizations/
-   ┃ ┃ ┣ 📜mean_im (rows x cols)
+   ┃ ┃ ┣ 📜mean_im (channels x rows x cols)
    ┃ ┃ ┣ 📜act_im (rows x cols)
    ┃ ┃ ┣ 📜per_trial_mean_im (trials x rows x cols)
    ┃ ┃ ┗ 📜per_trial_act_im (trials x rows x cols)

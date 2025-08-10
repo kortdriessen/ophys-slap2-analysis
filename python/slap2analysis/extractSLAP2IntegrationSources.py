@@ -4,6 +4,7 @@ import numpy as np
 import torch
 import scipy.io as spio
 import scipy.ndimage as ndimage
+from scipy.interpolate import RectBivariateSpline
 import os
 import time
 import multiprocessing as mp
@@ -22,6 +23,19 @@ from tqdm import tqdm
 sys.path.append('C:/Users/michael.xie/Documents/ophys-slap2-analysis/python')
 # sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
+
+import cv2
+
+def fast_dilation(mask, kernel, iterations=1):
+    if kernel is None:
+        kernel = np.ones((7, 7), np.uint8)  # Structuring element for XY dilation
+    out = np.empty_like(mask)
+    
+    # Iterate over Z slices (first dimension)
+    for z in range(mask.shape[0]):
+        out[z] = cv2.dilate(mask[z].astype(np.uint8), kernel, iterations=iterations)
+    
+    return out.astype(bool)
 
 def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable):
     trialIx, keepTrial = trial_info
@@ -333,7 +347,7 @@ def main():
     params['analyzeHz'] = 100
     params['activityChannel'] = 1
     params['savedr'] = savedr
-    params['decayTau_s'] = 0.03
+    params['decayTau_s'] = 0.05
 
     # Get the lookup file path
     lookupFile = trialTable['lookupFile'][0]
@@ -625,6 +639,46 @@ def main():
         psf_tensor = psf_tensor / torch.sum(psf_tensor)
         D[valid_mask] = psf_tensor[rel_rows[valid_mask], rel_cols[valid_mask]]
         
+        # Create expanded PSF with 5x resolution, maintaining center alignment
+        ex_fac = 5
+        psf_tensor_expanded = torch.zeros((psf_shape[0]*ex_fac, psf_shape[1]*ex_fac), dtype=torch.float32)
+
+        # Calculate center points
+        orig_center_y = (psf_shape[0] - 1) / 2
+        orig_center_x = (psf_shape[1] - 1) / 2
+        expanded_center_y = (psf_shape[0]*ex_fac - 1) / 2
+        expanded_center_x = (psf_shape[1]*ex_fac - 1) / 2
+
+        # Create coordinate grids centered around zero
+        orig_y = torch.linspace(-expanded_center_y, expanded_center_y, psf_shape[0])
+        orig_x = torch.linspace(-expanded_center_x, expanded_center_x, psf_shape[1])
+        expanded_y = torch.linspace(-expanded_center_y, expanded_center_y, psf_shape[0]*ex_fac)
+        expanded_x = torch.linspace(-expanded_center_x, expanded_center_x, psf_shape[1]*ex_fac)
+
+        # Create meshgrids
+        orig_Y, orig_X = torch.meshgrid(orig_y, orig_x, indexing='ij')
+        expanded_Y, expanded_X = torch.meshgrid(expanded_y, expanded_x, indexing='ij')
+
+        # Interpolate PSF values while maintaining center alignment
+        interp_spline = RectBivariateSpline(orig_y.numpy(), orig_x.numpy(), psf_tensor.numpy())
+        psf_tensor_expanded = torch.from_numpy(interp_spline(expanded_y.numpy(), expanded_x.numpy())).float()
+
+        # Normalize expanded PSF
+        psf_tensor_expanded = psf_tensor_expanded / torch.sum(psf_tensor_expanded)
+
+        D_expanded = torch.zeros_like(D)
+
+        psf_shape_expanded = psf_tensor_expanded.shape
+        psf_center_expanded = (psf_shape_expanded[0] // 2, psf_shape_expanded[1] // 2)
+
+        rel_rows_expanded = tgt_rows - src_rows + psf_center_expanded[0]
+        rel_cols_expanded = tgt_cols - src_cols + psf_center_expanded[1]
+
+        valid_mask_expanded = ((rel_rows_expanded >= 0) & (rel_rows_expanded < psf_shape_expanded[0]) & 
+                            (rel_cols_expanded >= 0) & (rel_cols_expanded < psf_shape_expanded[1]))
+
+        D_expanded[valid_mask_expanded] = psf_tensor_expanded[rel_rows_expanded[valid_mask_expanded], rel_cols_expanded[valid_mask_expanded]]
+
         data_for_nmf = lowResData / lowResDataCt
         decayTau_frames = params['decayTau_s']*params['alignHz']
         decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
@@ -649,10 +703,15 @@ def main():
             H_mots[i] = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
         
         # Pre-compute sparse matrix multiplications with D for all motion indices
-        HD_mots = [torch.sparse.mm(H_mot, D) for H_mot in H_mots]
+        HD_mots = [None] * len(H_mots)
+        for i in range(len(H_mots)):
+            HD = torch.sparse.mm(H_mots[i], D)
+            HD = HD / torch.sum(HD,dim=0,keepdim=True)
 
-        for i in range(len(HD_mots)):
-            HD_mots[i] = HD_mots[i] / torch.sum(HD_mots[i],dim=0,keepdim=True)
+            HD_expanded = torch.sparse.mm(H_mots[i], D_expanded)
+            HD_expanded = HD_expanded / torch.sum(HD_expanded,dim=0,keepdim=True)
+
+            HD_mots[i] = HD - HD_expanded
 
             validPixMask = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), dtype=bool)
             validPixMask[refD,refR + int(uniqueMotion[motIndsToKeep[i],0]),refC + int(uniqueMotion[motIndsToKeep[i],1])] = True
@@ -688,49 +747,312 @@ def main():
 
         rho = rho.numpy()
 
-        print("Computing skewness without intermediate tensors...")
+        # Process frames more efficiently by avoiding unnecessary allocations
+        n_frames = rho.shape[0]
+        batch_size = min(1000, n_frames)  # Smaller batch size to reduce memory
+        num_batches = int(np.ceil(n_frames / batch_size))
         
-        rho_centered = rho - np.nanmean(rho,axis=0,keepdims=True)
-        cubed_values = rho_centered**3
+        # Pre-compute 2D coordinates once
+        spatial_coords = np.unravel_index(selPixIdxs, (dmdPixelsPerColumn, dmdPixelsPerRow))
+        row_indices = spatial_coords[0][None, :]  # Shape: (1, len(selPixIdxs))
+        col_indices = spatial_coords[1][None, :]  # Shape: (1, len(selPixIdxs))
         
-        # Sum along the axis
-        rho_skew = np.nansum(cubed_values, axis=0)
+        # Pre-compute dilation structure
+        dilation_struct = np.ones((1,7,7))
         
-        # Clean up the intermediate tensor
-        del cubed_values
+        # Initialize output array
+        rho_activity = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow))
+        temporal_pad = 1
+        
+        for batch_idx in tqdm(range(num_batches), desc="Creating activity map"):
+            # Calculate batch bounds
+            batch_start = batch_idx * batch_size 
+            batch_end = min(batch_start + batch_size, n_frames)
+            padded_start = max(0, batch_start - temporal_pad)
+            padded_end = min(n_frames, batch_end + temporal_pad)
+            curr_size = padded_end - padded_start
+            
+            # Allocate batch arrays - use float32 for memory efficiency
+            batch_rho = np.zeros((curr_size, dmdPixelsPerColumn, dmdPixelsPerRow), dtype=np.float32)
+            
+            # Fill batch data more efficiently using advanced indexing
+            time_indices = np.arange(curr_size)[:, None]
+            batch_rho[time_indices, row_indices, col_indices] = rho[padded_start:padded_end, :].astype(np.float32)
+            batch_rho[batch_rho == 0] = np.nan
 
-        print(f"Skewness computed, shape: {rho_skew.shape}")
+            # Handle NaN values
+            nan_mask = np.isnan(batch_rho)
+            batch_rho[nan_mask] = 0
+            # dilated_nan_mask = ndimage.binary_dilation(nan_mask, structure=dilation_struct)
+            dilated_nan_mask = fast_dilation(nan_mask, dilation_struct[0])
 
-        skew_im = np.zeros((dmdPixelsPerColumn*dmdPixelsPerRow,))
-        skew_im[selPixIdxs] = rho_skew
-        skew_im = skew_im.reshape((dmdPixelsPerColumn,dmdPixelsPerRow))
-        skew_im[skew_im == 0] = np.nan
+            # Calculate local maxima directly without intermediate mask array
+            local_maxima = np.zeros_like(batch_rho, dtype=bool)
+            local_maxima[1:-1,1:-1,1:-1] = (batch_rho[1:-1,1:-1,1:-1] > batch_rho[:-2,1:-1,1:-1]) & \
+                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[2:,1:-1,1:-1]) & \
+                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,:-2,1:-1]) & \
+                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,2:,1:-1]) & \
+                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,1:-1,:-2]) & \
+                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,1:-1,2:])
+            
+            # Combine conditions and compute activity in one step
+            # valid_maxima = (batch_rho > 0) & local_maxima & ~dilated_nan_mask
+            valid_maxima = local_maxima & ~dilated_nan_mask
+            # Add squared values for valid time points
+            start_offset = batch_start - padded_start
+            end_offset = start_offset + (batch_end - batch_start)
+            # rho_activity += np.sum(np.where(valid_maxima[start_offset:end_offset], 
+            #                               batch_rho[start_offset:end_offset]**2, 0), 
+            #                      axis=0)
+            rho_activity += np.sum(np.where(valid_maxima[start_offset:end_offset], 
+                                          batch_rho[start_offset:end_offset]**3, 0), 
+                                 axis=0)
+        
+        
+
+        # lam = 0.05 * np.nanpercentile(rho,99,axis=0)
+        # rho_clip = np.clip(rho - lam, 0, None)
+
+        # rho_energy = np.nansum(rho_clip**2,axis=0)
+
+        # energy_im = np.zeros((dmdPixelsPerColumn*dmdPixelsPerRow,))
+        # energy_im[selPixIdxs] = rho_energy
+        # energy_im = energy_im.reshape((dmdPixelsPerColumn,dmdPixelsPerRow))
+        # energy_im[energy_im == 0] = np.nan
+
+        # print("Computing skewness without intermediate tensors...")
+        
+        # rho_centered = rho - np.nanmean(rho,axis=0,keepdims=True)
+        # cubed_values = rho_centered**3
+        
+        # # Sum along the axis
+        # rho_skew = np.nansum(cubed_values, axis=0)
+        
+        # # Clean up the intermediate tensor
+        # del cubed_values
+
+        # print(f"Skewness computed, shape: {rho_skew.shape}")
+
+        # skew_im = np.zeros((dmdPixelsPerColumn*dmdPixelsPerRow,))
+        # skew_im[selPixIdxs] = rho_skew
+        # skew_im = skew_im.reshape((dmdPixelsPerColumn,dmdPixelsPerRow))
+        # skew_im[skew_im == 0] = np.nan
+
+        act_im = rho_activity.copy()
+        nan_mask = (act_im == 0) | (np.isnan(act_im))
+        act_im[nan_mask] = np.nan
+
+        med_act_im = ndimage.generic_filter(act_im, np.nanmedian, size=(15,15))
+        act_im = act_im - med_act_im
+        act_im[nan_mask] = np.nan
+        # act_im[nan_mask] = np.median(act_im[~nan_mask])
+
+        
+        act_im[nan_mask] = np.nanmedian(act_im.flatten())
+        act_im_filt = ndimage.gaussian_filter(act_im, sigma=[0.75, 0.75])
+        act_im_filt[nan_mask] = np.nan
+        act_im[nan_mask] = np.nan
+
+        act_im = act_im_filt
+
+        # act_im_hp = act_im - ndimage.gaussian_filter(act_im, sigma=[10*i for i in psf_shape])
 
         # Create a local maximum filter with a footprint of 3x3 pixels
-        local_max = ndimage.maximum_filter(skew_im, size=3)
+        local_max = ndimage.maximum_filter(act_im, size=3)
 
-        maxima_mask = (skew_im == local_max) & ~np.isnan(skew_im)
+        maxima_mask = (act_im == local_max) & ~np.isnan(act_im)
 
         # Get coordinates and values of local maxima
         maxima_coords = np.where(maxima_mask)
-        maxima_values = skew_im[maxima_mask]
+        maxima_values = act_im[maxima_mask]
 
         # Sort maxima by value in descending order
         sort_idx = np.argsort(-maxima_values)
         maxima_coords = (maxima_coords[0][sort_idx], maxima_coords[1][sort_idx])
         maxima_values = maxima_values[sort_idx]
 
-        # Create a mask of nan values
-        nan_mask = np.isnan(skew_im)
+        # def compute_topological_prominence(act_im, maxima_coords, connectivity=8):
+        #     # maxima_coords: either (rows, cols) tuple of arrays or Nx2 array
+        #     if isinstance(maxima_coords, tuple):
+        #         peak_rows, peak_cols = maxima_coords
+        #         peaks_rc = np.column_stack([peak_rows, peak_cols])
+        #     else:
+        #         peaks_rc = np.asarray(maxima_coords)
+        #         if peaks_rc.ndim != 2 or peaks_rc.shape[1] != 2:
+        #             raise ValueError("maxima_coords must be (rows, cols) or Nx2 array")
 
-        # Dilate the nan mask to cover 3 pixel radius
-        dilated_nan_mask = ndimage.binary_dilation(nan_mask, structure=np.ones((7,7)))
+        #     H, W = act_im.shape
+        #     N = H * W
+
+        #     img = np.asarray(act_im, dtype=float).copy()
+        #     img[~np.isfinite(img)] = -np.inf  # exclude NaNs
+
+        #     # Map each peak to a unique id
+        #     peak_ids = -np.ones((H, W), dtype=int)
+        #     for pid, (r, c) in enumerate(peaks_rc):
+        #         peak_ids[r, c] = pid
+
+        #     # Union-Find structures
+        #     parent = np.arange(N, dtype=np.int32)
+        #     rank = np.zeros(N, dtype=np.int8)
+        #     active = np.zeros(N, dtype=bool)
+
+        #     comp_peak_id = -np.ones(N, dtype=np.int32)        # valid only at roots
+        #     comp_peak_height = np.full(N, -np.inf, dtype=float)
+        #     prominences = np.full(len(peaks_rc), np.nan, dtype=float)
+
+        #     # Helpers
+        #     def idx_rc_to_flat(r, c):
+        #         return r * W + c
+
+        #     def find(x):
+        #         while parent[x] != x:
+        #             parent[x] = parent[parent[x]]
+        #             x = parent[x]
+        #         return x
+
+        #     def union(a, b, level):
+        #         ra, rb = find(a), find(b)
+        #         if ra == rb:
+        #             return ra
+
+        #         # union by rank
+        #         if rank[ra] < rank[rb]:
+        #             ra, rb = rb, ra
+        #         parent[rb] = ra
+        #         if rank[ra] == rank[rb]:
+        #             rank[ra] += 1
+
+        #         ida, idb = comp_peak_id[ra], comp_peak_id[rb]
+        #         ha, hb = comp_peak_height[ra], comp_peak_height[rb]
+
+        #         if ida != -1 and idb != -1:
+        #             # both components have peaks; lower peak dies at saddle "level"
+        #             if ha >= hb:
+        #                 prominences[idb] = hb - level
+        #                 comp_peak_id[ra], comp_peak_height[ra] = ida, ha
+        #             else:
+        #                 prominences[ida] = ha - level
+        #                 comp_peak_id[ra], comp_peak_height[ra] = idb, hb
+        #         elif ida != -1:
+        #             comp_peak_id[ra], comp_peak_height[ra] = ida, ha
+        #         else:
+        #             comp_peak_id[ra], comp_peak_height[ra] = idb, hb
+
+        #         return ra
+
+        #     # Neighbor offsets
+        #     if connectivity == 4:
+        #         nbrs = [(-1,0), (1,0), (0,-1), (0,1)]
+        #     else:
+        #         nbrs = [(-1,-1),(-1,0),(-1,1),(0,-1),(0,1),(1,-1),(1,0),(1,1)]
+
+        #     vals = img.ravel()
+        #     order = np.flatnonzero(np.isfinite(vals))
+        #     order = order[np.argsort(vals[order])[::-1]]  # process high to low
+
+        #     # Fast row/col access
+        #     rows = np.arange(H)[:, None] * np.ones(W, dtype=int)
+        #     cols = np.ones((H, 1), dtype=int) * np.arange(W)
+        #     rows = rows.ravel()
+        #     cols = cols.ravel()
+
+        #     for p in order:
+        #         r, c = rows[p], cols[p]
+        #         if vals[p] == -np.inf:
+        #             continue
+
+        #         active[p] = True
+        #         parent[p] = p
+        #         rank[p] = 0
+
+        #         # seed peak if this pixel is a detected maximum
+        #         pid = peak_ids[r, c]
+        #         if pid != -1:
+        #             comp_peak_id[p] = pid
+        #             comp_peak_height[p] = vals[p]
+        #         else:
+        #             comp_peak_id[p] = -1
+        #             comp_peak_height[p] = -np.inf
+
+        #         # merge with active neighbors
+        #         for dr, dc in nbrs:
+        #             rr, cc = r + dr, c + dc
+        #             if 0 <= rr < H and 0 <= cc < W:
+        #                 q = idx_rc_to_flat(rr, cc)
+        #                 if active[q]:
+        #                     union(p, q, level=vals[p])
+
+        #     # Peaks that never merged into a higher peak: use base level
+        #     base = np.nanmin(act_im)
+        #     for pid, (r, c) in enumerate(peaks_rc):
+        #         if np.isnan(prominences[pid]):
+        #             prominences[pid] = act_im[r, c] - base
+
+        #     return prominences
+        
+        # def peak_widths_at_half_prominence(act_im, maxima_coords, prominence, connectivity=8):
+        #     # maxima_coords: (rows, cols) tuple or Nx2 array
+        #     if isinstance(maxima_coords, tuple):
+        #         rows, cols = maxima_coords
+        #         peaks = np.column_stack([rows, cols])
+        #     else:
+        #         peaks = np.asarray(maxima_coords)
+
+        #     H, W = act_im.shape
+        #     act = np.asarray(act_im, float)
+        #     act[~np.isfinite(act)] = np.nan
+
+        #     peak_vals = act[peaks[:,0], peaks[:,1]]
+        #     saddle = peak_vals - prominence
+        #     half_level = saddle + 0.5 * prominence
+
+        #     # 8-conn or 4-conn structuring element
+        #     structure = np.ones((3,3), bool) if connectivity == 8 else np.array([[0,1,0],[1,1,1],[0,1,0]], bool)
+
+        #     widths = np.full(len(peaks), np.nan)
+        #     areas = np.full(len(peaks), np.nan)
+
+        #     finite_mask = np.isfinite(act)
+        #     for i, (r, c) in enumerate(peaks):
+        #         thr = half_level[i]
+        #         if not np.isfinite(thr):
+        #             continue
+
+        #         mask = (act >= thr) & finite_mask
+        #         labels, nlab = ndimage.label(mask, structure=structure)
+        #         lab = labels[r, c]
+        #         if lab == 0:
+        #             continue
+
+        #         comp_area = np.count_nonzero(labels == lab)
+        #         areas[i] = comp_area
+        #         # Equivalent diameter (2 * sqrt(area/pi)) as a width estimate
+        #         widths[i] = 2.0 * np.sqrt(comp_area / np.pi)
+
+        #     return widths, areas, half_level
+            
+        # # Calculate prominences
+        # peak_prominences = compute_topological_prominence(act_im, maxima_coords)
+        # widths, areas, _ = peak_widths_at_half_prominence(act_im,maxima_coords,peak_prominences)
+
+        mad = np.median(np.abs(act_im[~np.isnan(act_im)] - np.median(act_im[~np.isnan(act_im)])))
+        thresh = 3 * 1.4826 * mad
+        # thresh = 1.75 * maxima_values[min(len(maxima_values)-1,int(numSuperPixels*9 * 0.01))]
+
+        # # Create a mask of nan values
+        # nan_mask = np.isnan(act_im)
+
+        # # Dilate the nan mask to cover 3 pixel radius
+        # dilated_nan_mask = ndimage.binary_dilation(nan_mask, structure=np.ones((7,7)))
 
         # Calculate threshold for top 5% of values
-        top_5_threshold = np.nanpercentile(skew_im, 95)
+        # top_5_threshold = np.nanpercentile(act_im, 95)
 
         # Remove maxima that are within 3 pixels of nan values, unless they are in top 5%
-        valid_maxima = (~dilated_nan_mask[maxima_coords]) | (maxima_values > top_5_threshold)
+        # valid_maxima = (~dilated_nan_mask[maxima_coords]) | (maxima_values > top_5_threshold)
+        valid_maxima = maxima_values > thresh
+        # valid_maxima = peak_prominences > thresh
         maxima_coords = (maxima_coords[0][valid_maxima], maxima_coords[1][valid_maxima])
         maxima_values = maxima_values[valid_maxima]
         source_seeds = np.array(maxima_coords).T
@@ -1096,7 +1418,7 @@ def main():
         # print(f"Saved source extraction data to {output_filename}")
 
         # Save data to HDF5 file
-        output_h5_filename = os.path.join(params['savedr'], f'experiment_summary.h5')
+        output_h5_filename = os.path.join(params['savedr'], f'experiment_summary_nonmax_supp_updated_DoG.h5')
         with h5py.File(output_h5_filename, 'a') as f:
             # Delete group if it exists
             group_name = f'DMD{DMDix+1}'
@@ -1117,8 +1439,9 @@ def main():
             spatial_group.create_dataset('fp_coords', data=source_params[:,:2].numpy())
 
             dF = np.concatenate([r[0] for r in results], axis=0)
-            trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[1]) for r in results])[:-1]])
             temporal_group.create_dataset('dF', data=dF)
+
+            trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[1]) for r in results])[:-1]])
 
             frame_group = dmd_group.create_group('frame_info')
             frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
@@ -1130,7 +1453,7 @@ def main():
             global_group.create_dataset('F', data=globalF)
 
             visualizations = dmd_group.create_group('visualizations')
-            visualizations.create_dataset('act_im', data=skew_im)
+            visualizations.create_dataset('act_im', data=act_im)
 
         print(f"Added DMD{DMDix+1} data to {output_h5_filename}")
 
