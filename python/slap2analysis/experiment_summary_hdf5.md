@@ -15,9 +15,7 @@
    ┃ ┃ ┣ 📜mean_im (channels x rows x cols)
    ┃ ┃ ┣ 📜ref_stack (ref_stack_channels x depths x rows x cols)
    ┃ ┃ ┃  ┗ ℹ️channels (ref_stack_channels x 1)
-   ┃ ┃ ┣ 📜act_im (rows x cols)
-   ┃ ┃ ┣ 📜per_trial_mean_im (trials x rows x cols)
-   ┃ ┃ ┗ 📜per_trial_act_im (trials x rows x cols)
+   ┃ ┃ ┗ 📜act_im (rows x cols)
    ┃ ┣ 📂global/
    ┃ ┃ ┗ 📜F(total frames x 1)
    ┃ ┣ 📂user_rois/
