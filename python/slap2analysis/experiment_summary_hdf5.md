@@ -3,12 +3,12 @@
  ┗ 📂/
    ┣ 📂DMD1/
    ┃ ┣ 📂frame_info/
-   ┃ ┃ ┣ 📜*offlineXshifts (total frames x 1)*
-   ┃ ┃ ┣ 📜*offlineYshifts (total frames x 1)*
-   ┃ ┃ ┣ 📜*offlineZshifts (total frames x 1)*
-   ┃ ┃ ┣ 📜*onlineXshifts (total frames x 1)*
-   ┃ ┃ ┣ 📜*onlineYshifts (total frames x 1)*
-   ┃ ┃ ┣ 📜*onlineZshifts (total frames x 1)*
+   ┃ ┃ ┣ 📜offlineXshifts (total frames x 1)
+   ┃ ┃ ┣ 📜offlineYshifts (total frames x 1)
+   ┃ ┃ ┣ 📜offlineZshifts (total frames x 1)
+   ┃ ┃ ┣ 📜onlineXshifts (total frames x 1)
+   ┃ ┃ ┣ 📜onlineYshifts (total frames x 1)
+   ┃ ┃ ┣ 📜onlineZshifts (total frames x 1)
    ┃ ┃ ┣ 📜trial_start_idxs (trials x 1)
    ┃ ┃ ┗ 📜discard_frames (total frames x 1)
    ┃ ┣ 📂visualizations/
