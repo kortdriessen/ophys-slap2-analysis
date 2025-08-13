@@ -26,6 +26,13 @@ import reconstruct
 
 import cv2
 
+def nearest_interp(x, xp, yp):
+    x_bds = xp[:-1] / 2.0 + xp[1:] / 2.0
+    idx = np.searchsorted(x_bds, x, side='left')
+    idx = np.clip(idx, 0, len(xp) - 1)
+
+    return yp[idx]
+
 def fast_dilation(mask, kernel, iterations=1):
     if kernel is None:
         kernel = np.ones((7, 7), np.uint8)  # Structuring element for XY dilation
@@ -148,7 +155,7 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
     return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s
 
 def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
-                allSuperPixelIDs, dr, trialTable, A_final, psf):
+                allSuperPixelIDs, dr, trialTable, A_final, uniqueMotionDS, motIndsToKeepDS, background_spatial_components, psf):
     trialIx, keepTrial = trial_info
     
     if not keepTrial:
@@ -160,17 +167,17 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
         data_arrays = np.load(data_file)
         dataNonNorm = data_arrays['dataNonNorm']
         dataCt = data_arrays['dataCt']
-        DSframes = data_arrays['DSframes']
+        frames = data_arrays['DSframes']
 
         aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
         aData['DSframes'] = data_arrays['aData_DSframes']
     else:
-        dataNonNorm, dataCt, aData, DSframes = get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
+        dataNonNorm, dataCt, aData, frames = get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
         # Save data arrays
         data_arrays = {
             'dataNonNorm': dataNonNorm,
             'dataCt': dataCt,
-            'DSframes': DSframes,
+            'DSframes': frames,
             'aData_DSframes': aData['DSframes']
         }
         np.savez(data_file, **data_arrays)
@@ -184,14 +191,28 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     data = dataNonNorm / dataCt
 
-    motionR = np.interp(DSframes, aData['DSframes'].squeeze(), aData['motionDSr'].squeeze())
-    motionC = np.interp(DSframes, aData['DSframes'].squeeze(), aData['motionDSc'].squeeze())
-    motionZ = np.interp(DSframes, aData['DSframes'].squeeze(), aData['motionDSz'].squeeze())
+    motionR = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSr'].squeeze())
+    motionC = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSc'].squeeze())
+    motionZ = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSz'].squeeze())
+
+    onlineYshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineYshift'].squeeze())
+    onlineXshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineXshift'].squeeze())
+    onlineZshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineZshift'].squeeze())
 
     uniqueMotion, motInds = np.unique(np.round(np.stack((motionR, motionC, motionZ), axis=1)), axis=0, return_inverse=True)
-    motIndsToKeep = (np.bincount(motInds) > 100).nonzero()[0]
+    
+    motIndsToKeep = np.zeros_like(motIndsToKeepDS, dtype=np.int64)
+    motIndsToKeep[:] = -1
 
-    uniqueMotionYX = np.unique(uniqueMotion[:,:2],axis=0)
+    for i, motion_idx_DS in enumerate(motIndsToKeepDS):
+        matches = np.all(uniqueMotion == uniqueMotionDS[motion_idx_DS,:],axis=1).nonzero()[0]
+        if len(matches) > 0:
+            motIndsToKeep[i] = matches[0]
+    
+    background_spatial_components = background_spatial_components[:, motIndsToKeep != -1]
+    motIndsToKeep = motIndsToKeep[motIndsToKeep != -1]
+
+    uniqueMotionYX = np.unique(uniqueMotion[motIndsToKeep,:2],axis=0)
 
     refPixs = torch.from_numpy(subsampleMatrixInds[:,0])
     refD = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
@@ -214,7 +235,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     F0 = torch.zeros(data.shape[1], nSources, dtype=torch.float32)
     F0[:] = np.nan
     
-    for motion_idx in motIndsToKeep:
+    for i, motion_idx in enumerate(motIndsToKeep):
 
         # Extract data for the most common motion mode
         motion_frames = (motInds == motion_idx).nonzero()[0]
@@ -231,9 +252,9 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
         X = torch.sparse.mm(H, A_final[selPixIdxs,:])
 
         # add background spatial component
-        background_spatial_component = torch.median(data_tensor,dim=1)[0]
-        background_spatial_component = background_spatial_component / torch.norm(background_spatial_component)
-        X = torch.concat((X,background_spatial_component.unsqueeze(-1)),dim=1)
+        # background_spatial_component = torch.median(data_tensor,dim=1)[0]
+        # background_spatial_component = background_spatial_component / torch.norm(background_spatial_component)
+        X = torch.concat((X,background_spatial_components[:,i].unsqueeze(-1)),dim=1)
 
         XtX = X.T @ X
         Xtd = X.T @ data_tensor  # This gives all time points at once
@@ -256,7 +277,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     globalF = np.sum(data, axis=0)
 
-    return phi.numpy(), F0.numpy(), DSframes, selPixIdxs, globalF
+    return phi.numpy(), F0.numpy(), frames, selPixIdxs, globalF, (motionR, motionC, motionZ), (onlineYshifts, onlineXshifts, onlineZshifts)
 
 def main():
     # load SLAP2 data folder
@@ -948,7 +969,7 @@ def main():
                 overall_losses[outer_loop_iter] += torch.sum((data_for_nmf[:, motion_frames] - X @ phi_lowRes[motion_frames,:].T) ** 2).item()
 
             shuffled_indices = torch.randperm(len(motIndsToKeep))
-            for idx in shuffled_indices: # loop over all motion displacements in random order
+            for idx in tqdm(shuffled_indices,desc=f'Multiplicative NMF per motion displacement'): # loop over all motion displacements in random order
                 i = idx.item()
                 motion_idx = motIndsToKeep[i]
                 motion_frames = (motInds == motion_idx).nonzero()[0]
@@ -977,7 +998,7 @@ def main():
                 error_values = []
                 prev_reconstruction_error = float('inf')
 
-                for iter_idx in tqdm(range(mult_nmf_max_iters),desc=f'Multiplicative NMF {i+1}/{len(motIndsToKeep)}'): # iterative fit in sp space with NMF
+                for iter_idx in range(mult_nmf_max_iters): # iterative fit in sp space with NMF
                     # Multiplicative update for NMF
                     # Update phi (temporal components) using multiplicative update rule
                     # phi = phi * (X^T * data) / (X^T * X * phi + epsilon)
@@ -1020,8 +1041,6 @@ def main():
                         X = torch.where(norms > 0, X / norms, X)
                 
                 X_mots[i] = X
-
-            print("Fitting Gaussian spatial components using gradient descent...")
             
             # Initialize Adam optimizer
             optim_loc_params = source_params[:,:2].clone().requires_grad_(True)
@@ -1033,7 +1052,7 @@ def main():
             
             # Gradient descent optimization for Gaussian parameters
             losses = []
-            for epoch in tqdm(range(num_epochs),desc='Gaussian fitting'): # gradient descent to fit pixel space profile to sp profile
+            for epoch in tqdm(range(num_epochs),desc='Fitting Gaussian spatial profiles'): # gradient descent to fit pixel space profile to sp profile
                 # Zero gradients
                 optimizer.zero_grad()
                 
@@ -1089,8 +1108,6 @@ def main():
             A[~A_patches] = 0
             sources_total_mass = torch.sum(A, dim=0, keepdim=True)
             A = torch.where(sources_total_mass > 0, A / sources_total_mass, A)
-
-            print("Gaussian fitting complete")
 
             # get phi_lowRes for current spatial profiles
             for i, motion_idx in enumerate(motIndsToKeep):
@@ -1190,7 +1207,13 @@ def main():
                                               sparseHInds=sparseHInds,
                                               sparseHVals=sparseHVals,
                                               allSuperPixelIDs=allSuperPixelIDs,
-                                              dr=dr, trialTable=trialTable, A_final=A, psf=psf)
+                                              dr=dr, 
+                                              trialTable=trialTable, 
+                                              A_final=A,
+                                              uniqueMotionDS=uniqueMotion,
+                                              motIndsToKeepDS=motIndsToKeep,
+                                              background_spatial_components=background_spatial_components,
+                                              psf=psf)
 
         with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
@@ -1210,11 +1233,12 @@ def main():
             source_group = dmd_group.create_group('sources')
 
             spatial_group = source_group.create_group('spatial')
-            temporal_group = source_group.create_group('temporal')
 
-            spatial_group.create_dataset('source_params', data=source_params.numpy())
-            spatial_group.create_dataset('fp_masks', data=A.numpy().reshape(dmdPixelsPerRow,dmdPixelsPerColumn,-1).transpose(2,0,1))
-            spatial_group.create_dataset('fp_coords', data=source_params[:,:2].numpy())
+            # spatial_group.create_dataset('source_params', data=source_params.numpy())
+            spatial_group.create_dataset('profiles', data=A.numpy().reshape(dmdPixelsPerRow,dmdPixelsPerColumn,-1).transpose(2,0,1))
+            spatial_group.create_dataset('coords', data=source_params[:,:2].numpy())
+
+            temporal_group = source_group.create_group('temporal')
 
             dF = np.concatenate([r[0] for r in results], axis=0)
             temporal_group.create_dataset('dF', data=dF)
@@ -1227,6 +1251,15 @@ def main():
             frame_group = dmd_group.create_group('frame_info')
             frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
             frame_group.create_dataset('discard_frames', data=np.any(np.isnan(dF), axis=1))
+
+            frame_group.create_dataset('offlineXshifts', data=np.concatenate([r[5][1] for r in results], axis=0))
+            frame_group.create_dataset('offlineYshifts', data=np.concatenate([r[5][0] for r in results], axis=0))
+            frame_group.create_dataset('offlineZshifts', data=np.concatenate([r[5][2] for r in results], axis=0))
+
+            frame_group.create_dataset('onlineXshifts', data=np.concatenate([r[6][1] for r in results], axis=0))
+            frame_group.create_dataset('onlineYshifts', data=np.concatenate([r[6][0] for r in results], axis=0))
+            frame_group.create_dataset('onlineZshifts', data=np.concatenate([r[6][2] for r in results], axis=0))
+
             # frame_group.create_dataset('selPixIdxs', data=[r[2] for r in results])
 
             globalF = np.concatenate([r[4] for r in results], axis=0)
@@ -1235,6 +1268,19 @@ def main():
 
             visualizations = dmd_group.create_group('visualizations')
             visualizations.create_dataset('act_im', data=act_im)
+
+            ref_stack_channels = trialTable['refStack'][0,DMDix]['channels'][0,0].squeeze().reshape((-1,))
+            num_ref_stack_channels = len(ref_stack_channels)
+            
+            ref_stack = trialTable['refStack'][0,DMDix]['IM'][0,0].T
+            ref_stack_reshaped = np.zeros((num_ref_stack_channels,ref_stack.shape[0] // num_ref_stack_channels,ref_stack.shape[1], ref_stack.shape[2]))
+            for i in range(ref_stack.shape[0]):
+                c = i % num_ref_stack_channels
+                ref_stack_reshaped[c,i//num_ref_stack_channels,:,:] = ref_stack[i,:,:]
+            del ref_stack
+            
+            ref_stack_dataset = visualizations.create_dataset('ref_stack', data=ref_stack_reshaped)
+            ref_stack_dataset.attrs['channels'] = ref_stack_channels
 
         print(f"Added DMD{DMDix+1} data to {output_h5_filename}")
 
