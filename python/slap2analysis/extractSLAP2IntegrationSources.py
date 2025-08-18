@@ -10,7 +10,7 @@ import time
 import multiprocessing as mp
 from functools import partial
 import tkinter as tk
-from tkinter import filedialog
+from tkinter import filedialog, ttk, messagebox
 import datetime
 import importlib
 import skimage.io as skimio
@@ -20,13 +20,15 @@ import slap2_utils
 
 from tqdm import tqdm 
 
-sys.path.append('C:/Users/michael.xie/Documents/ophys-slap2-analysis/python')
-# sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
 
 import cv2
 
 def nearest_interp(x, xp, yp):
+    if len(xp) == 1:
+        return yp
+    
     x_bds = xp[:-1] / 2.0 + xp[1:] / 2.0
     idx = np.searchsorted(x_bds, x, side='left')
     idx = np.clip(idx, 0, len(xp) - 1)
@@ -161,7 +163,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     if not keepTrial:
         return [], [], []
 
-    data_file = os.path.join(params['savedr'], f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
+    data_file = os.path.join(dr, f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
     if os.path.exists(data_file):
         print(f'Loading existing trial data from {data_file}')
         data_arrays = np.load(data_file)
@@ -191,13 +193,13 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     data = dataNonNorm / dataCt
 
-    motionR = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSr'].squeeze())
-    motionC = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSc'].squeeze())
-    motionZ = np.interp(frames, aData['DSframes'].squeeze(), aData['motionDSz'].squeeze())
+    motionR = np.interp(frames, aData['DSframes'][0], aData['motionDSr'].T[0])
+    motionC = np.interp(frames, aData['DSframes'][0], aData['motionDSc'].T[0])
+    motionZ = np.interp(frames, aData['DSframes'][0], aData['motionDSz'].T[0])
 
-    onlineYshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineYshift'].squeeze())
-    onlineXshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineXshift'].squeeze())
-    onlineZshifts = nearest_interp(frames, aData['DSframes'].squeeze(), aData['onlineZshift'].squeeze())
+    onlineYshifts = nearest_interp(frames, aData['DSframes'][0], aData['onlineYshift'].T[0])
+    onlineXshifts = nearest_interp(frames, aData['DSframes'][0], aData['onlineXshift'].T[0])
+    onlineZshifts = nearest_interp(frames, aData['DSframes'][0], aData['onlineZshift'].T[0])
 
     uniqueMotion, motInds = np.unique(np.round(np.stack((motionR, motionC, motionZ), axis=1)), axis=0, return_inverse=True)
     
@@ -252,8 +254,6 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
         X = torch.sparse.mm(H, A_final[selPixIdxs,:])
 
         # add background spatial component
-        # background_spatial_component = torch.median(data_tensor,dim=1)[0]
-        # background_spatial_component = background_spatial_component / torch.norm(background_spatial_component)
         X = torch.concat((X,background_spatial_components[:,i].unsqueeze(-1)),dim=1)
 
         XtX = X.T @ X
@@ -279,12 +279,123 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     return phi.numpy(), F0.numpy(), frames, selPixIdxs, globalF, (motionR, motionC, motionZ), (onlineYshifts, onlineXshifts, onlineZshifts)
 
+def create_parameter_gui():
+    root = tk.Tk()
+    root.title("SLAP2 Analysis Parameters")
+    
+    # Create main frame
+    main_frame = ttk.Frame(root, padding="10")
+    main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+    
+    # Parameter variables
+    param_vars = {}
+    
+    # Create parameter inputs
+    row = 0
+    
+    # # Discard Initial (s)
+    # ttk.Label(main_frame, text="Discard Initial (s):").grid(row=row, column=0, sticky=tk.W, pady=2)
+    # param_vars['discardInitial_s'] = tk.DoubleVar(value=0.1)
+    # ttk.Entry(main_frame, textvariable=param_vars['discardInitial_s'], width=15).grid(row=row, column=1, pady=2)
+    # row += 1
+    
+    # Analyze Hz
+    ttk.Label(main_frame, text="Analyze Hz:").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['analyzeHz'] = tk.IntVar(value=100)
+    ttk.Entry(main_frame, textvariable=param_vars['analyzeHz'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+    
+    # Activity Channel
+    ttk.Label(main_frame, text="Activity Channel:").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['activityChannel'] = tk.IntVar(value=1)
+    ttk.Entry(main_frame, textvariable=param_vars['activityChannel'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+    
+    # Decay Tau (s)
+    ttk.Label(main_frame, text="Decay Tau (s):").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['decayTau_s'] = tk.DoubleVar(value=0.05)
+    ttk.Entry(main_frame, textvariable=param_vars['decayTau_s'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+    
+    # dXY
+    ttk.Label(main_frame, text="dXY:").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['dXY'] = tk.IntVar(value=5)
+    ttk.Entry(main_frame, textvariable=param_vars['dXY'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+    
+    # Sparse Factor (log scale)
+    ttk.Label(main_frame, text="Sparse Factor (log):").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['sparse_fac_log'] = tk.DoubleVar(value=-3.0)
+    ttk.Entry(main_frame, textvariable=param_vars['sparse_fac_log'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+    
+    # Add some spacing
+    row += 1
+    
+    # Result variable
+    result = {'params': None, 'cancelled': True}
+    
+    def on_ok():
+        try:
+            result['params'] = {
+                # 'discardInitial_s': param_vars['discardInitial_s'].get(),
+                'analyzeHz': param_vars['analyzeHz'].get(),
+                'activityChannel': param_vars['activityChannel'].get(),
+                'decayTau_s': param_vars['decayTau_s'].get(),
+                'dXY': param_vars['dXY'].get(),
+                'sparse_fac': torch.exp(torch.tensor(param_vars['sparse_fac_log'].get()))
+            }
+            result['cancelled'] = False
+            root.destroy()
+        except Exception as e:
+            messagebox.showerror("Error", f"Invalid parameter values: {e}")
+    
+    def on_cancel():
+        result['cancelled'] = True
+        root.destroy()
+    
+    # Buttons
+    button_frame = ttk.Frame(main_frame)
+    button_frame.grid(row=row, column=0, columnspan=2, pady=10)
+    
+    ttk.Button(button_frame, text="OK", command=on_ok).pack(side=tk.LEFT, padx=5)
+    ttk.Button(button_frame, text="Cancel", command=on_cancel).pack(side=tk.LEFT, padx=5)
+    
+    # Update window to calculate required size
+    root.update_idletasks()
+    
+    # Get the required size
+    width = main_frame.winfo_reqwidth()  # Add padding
+    height = main_frame.winfo_reqheight()  # Add padding
+    
+    # Set window size to fit contents
+    root.geometry(f"{width}x{height}")
+    
+    # Center the window
+    root.transient()
+    root.grab_set()
+    root.mainloop()
+    
+    return result
+
 def main():
     # load SLAP2 data folder
     dr = filedialog.askdirectory(initialdir = 'Z:\\scratch\\ophys\\Michael', \
                                         title = "Select data directory")
     # dr = 'Z:\\scratch\\ophys\\Michael\\slap2_integration+raster\\slap2_760268_2024-11-05_12-35-49\\fov1\\experiment1'
     print(dr)
+
+    # Show GUI and get parameters
+    gui_result = create_parameter_gui()
+    
+    if gui_result['cancelled']:
+        print("Parameter selection cancelled by user")
+        return
+    
+    # Extract metadata parameters
+    params = gui_result['params']
+    print("selected params:")
+    print(params)
 
     # find trialTable.mat file in data directory
     trialTableFile = os.path.join(dr, 'trialTable.mat')
@@ -355,22 +466,13 @@ def main():
     savedr = os.path.join(dr, 'ExperimentSummary')
     if not os.path.exists(savedr):
         os.makedirs(savedr)
-
-    # Create filename with timestamp
-    fnsave = os.path.join(savedr, f'IntegrationSummary-{datetime.datetime.now().strftime("%y%m%d-%H%M%S")}.mat')
+    output_h5_filename = os.path.join(savedr, f'experiment_summary_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}.h5')
 
     # Load aData file
     aData = spio.loadmat(trialTable['fnAdataInt'][0,firstValidTrial][0])['aData'][0,0]
-
-    # Extract metadata parameters
-    params = {}
-    params['discardInitial_s'] = 0.1
+    
     params['numChannels'] = aData['numChannels'][0,0]
     params['alignHz'] = aData['alignHz'][0,0]
-    params['analyzeHz'] = 100
-    params['activityChannel'] = 1
-    params['savedr'] = savedr
-    params['decayTau_s'] = 0.05
 
     # Get the lookup file path
     lookupFile = trialTable['lookupFile'][0]
@@ -418,6 +520,7 @@ def main():
         print(f"allSuperPixelIDs DMD{DMDix+1}: {allSuperPixelIDs['DMD'+str(DMDix+1)].shape}")
         print(f"sparseMaskInds DMD{DMDix+1}: {sparseMaskInds['DMD'+str(DMDix+1)].shape}")
 
+    # get integration reference stack
     refStack = {}
     for DMDix in range(nDMDs):
         pattern = f"**/*DMD{DMDix+1}_CONFIG2-REFERENCE*"
@@ -442,8 +545,7 @@ def main():
             else:
                 print(f"No matching files found for DMD{DMDix+1}")
 
-
-    # Save as multi-channel TIFF
+    # Get dilation 17 PSF or load in from file
     pattern = f"**/*DMD*-REFERENCE*"
     matching_files = list(Path(dr).glob(pattern))
     if matching_files:
@@ -508,7 +610,6 @@ def main():
         nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
 
         subsampleMatrixInds = np.zeros((numSuperPixels,2))
-
         for spIdx in range(numSuperPixels):
             currSpInds = np.where(sparseMaskInds[f'DMD{DMDix+1}'][:,1] == spIdx+1)[0]
             currSpOpenPixs = sparseMaskInds[f'DMD{DMDix+1}'][currSpInds,0]-1
@@ -522,9 +623,9 @@ def main():
         refR = (refPixs % dmdPixelsPerColumn).int()
 
         filterSize = psf[f'DMD{DMDix+1}'].shape[0]*psf[f'DMD{DMDix+1}'].shape[1]
+        
         sparseHInds = np.zeros((2,numSuperPixels*filterSize))
         sparseHVals = np.zeros((numSuperPixels*filterSize,))
-
         for spIdx in range(subsampleMatrixInds.shape[0]):
             tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
             tmpMap[:] = np.nan
@@ -537,13 +638,11 @@ def main():
             sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize] = np.where(~np.isnan(tmpMap.flatten()))[0]
 
             sparseHVals[spIdx*filterSize:(spIdx+1)*filterSize] = tmpMap.flatten()[sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize].astype(np.uint32)]
-
         non_zero_mask = sparseHVals != 0
         sparseHVals = sparseHVals[non_zero_mask]
         sparseHInds = sparseHInds[:, non_zero_mask]
 
         convMatrix = np.zeros((numSuperPixels,numSuperPixels))
-
         for spIdx in range(subsampleMatrixInds.shape[0]):
             tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
             tmpMap[refD[spIdx],
@@ -566,7 +665,7 @@ def main():
             trialTable=trialTable
         )
 
-        data_file = os.path.join(params['savedr'], f'lowres_data_DMD{DMDix+1}.npz')
+        data_file = os.path.join(dr, f'lowres_data_DMD{DMDix+1}.npz')
         
         if os.path.exists(data_file):
             print(f'Loading existing low resolution data from {data_file}')
@@ -907,9 +1006,6 @@ def main():
             torch.zeros(nSources, 1, dtype=torch.float32) # invtanh of correlation / tilt
         ], dim=1)
 
-        params['dXY'] = 5
-        params['sparse_fac'] = torch.exp(torch.tensor(-3.0))
-
         A_patches = torch.zeros((nPixels, nSources), dtype=torch.bool)
         A_patches[selPixIdxs,:] = sel_pix_patch_profile(torch.cat([torch.tensor(source_seeds, dtype=torch.float32),
                                                             params['dXY'] * torch.ones(nSources, 2, dtype=torch.float32)],
@@ -927,8 +1023,9 @@ def main():
         A = torch.where(sources_total_mass > 0, A / sources_total_mass, A)
 
         # NMF parameters
-        mult_nmf_max_iters = 10
         outer_loop_iters = 10
+        
+        mult_nmf_max_iters = 10
         nmf_tol = 1e-6
 
         # Gaussian fitting optimization parameters
@@ -1219,7 +1316,6 @@ def main():
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
 
         # Save data to HDF5 file
-        output_h5_filename = os.path.join(params['savedr'], f'experiment_summary_{datetime.datetime.now().strftime("%Y%m%d")}.h5')
         with h5py.File(output_h5_filename, 'a') as f:
             # Delete group if it exists
             group_name = f'DMD{DMDix+1}'
