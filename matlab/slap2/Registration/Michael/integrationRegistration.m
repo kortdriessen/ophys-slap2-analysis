@@ -69,7 +69,8 @@ function lookupTable = makeRefLookupTable(dr, trialTable, params)
 nDMDs = size(trialTable.filename,1);
 for DMDix = nDMDs:-1:1
     [~,n] = fileparts(trialTable.filename{DMDix,1});
-    n_base = regexprep(n,'-TRIAL[0-9]+$','','ignorecase');
+    n_base = regexprep(n,'-TRIAL[0-9]+','','ignorecase');
+    n_base = regexprep(n_base,'-CYCLE[0-9]+','','ignorecase');
     metaDataFileName = fullfile(dr, [n_base '.meta']);
     mustBeFile(metaDataFileName);
     metaData = load(metaDataFileName, '-mat');
@@ -89,6 +90,7 @@ for DMDix = nDMDs:-1:1
 
         zs_ix = horzcat(metaData.AcquisitionContainer.AcquisitionPlan.activeZs{:});
         zs_ix = unique(zs_ix);
+        zs = zeros(length(zs_ix),1);
 
         zPlanes = nan(1,numLinesPerCycle);
         for ix = 1:numLinesPerCycle
@@ -244,7 +246,11 @@ aData = params;
 disp(['Aligning: ' [dr filesep fn]])
 
 hSlap2DataFile = slap2.Slap2DataFile([dr filesep fn]);
-hLowLevelDataFile = hSlap2DataFile.hDataFile;
+if isprop(hSlap2DataFile, 'hDataFile')
+    hLowLevelDataFile = hSlap2DataFile.hDataFile;
+else
+    hLowLevelDataFile = hSlap2DataFile.hMultiDataFiles;
+end
 numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
 totalCycles = hLowLevelDataFile.numCycles;
 numChannels = hSlap2DataFile.numChannels;
@@ -336,7 +342,7 @@ for DSframeIx = 1:nDSframes
     % load data
     data = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),numChannels);
     spCt = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),1);
-    allLineData = hLowLevelDataFile.getLineData(lineIndices, cycleIndices);
+    allLineData = hLowLevelDataFile.getLineData(lineIndices, cycleIndices, channels);
     for t = 1:length(allLineData)
         superPixIdxs = hLowLevelDataFile.lineSuperPixelIDs{lineIndices(t)};
 
