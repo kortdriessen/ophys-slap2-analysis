@@ -43,6 +43,7 @@ switch fnName
         params.nWorkers = 16; tooltips.nWorkers = 'number of parallel workers';
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
         params.integrationOnly = false; tooltips.integrationOnly = 'Align only on integration superpixels';
+        params.saveTiffs = true; tooltips.saveTiffs = 'Save aligned tiff movies';
     case 'stripRegBergamo'
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.clipShift = 10; tooltips.clipShift = 'Maximum allowable shift per frame';
