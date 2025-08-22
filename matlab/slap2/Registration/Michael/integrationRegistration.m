@@ -51,13 +51,13 @@ end
 nDMDs = size(trialTable.filename,1);
 
 [dixs,fixs] = ndgrid(1:nDMDs,1:length(trialTable.trueTrialIx));
-fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx));
+if params.saveTiffs; fnRegDS = cell(nDMDs,length(trialTable.trueTrialIx)); end
 fnAdata = cell(nDMDs,length(trialTable.trueTrialIx));
 parfor p_ix = 1:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
     [fnRegDS{p_ix}, fnAdata{p_ix}]= alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix);
 end
-trialTable.fnRegDSInt = fnRegDS;
+if params.saveTiffs; trialTable.fnRegDSInt = fnRegDS; end
 trialTable.fnAdataInt = fnAdata;
 trialTable.alignParamsInt = params;
 save([dr filesep fn], "trialTable")
@@ -275,16 +275,20 @@ if dt < numLinesPerCycle
     disp(['Requested DS freq too fast, adjusting to ' int2str(aData.alignHz) ' Hz']);
 end
 
-fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
-if params.efficientTiffSave
-    fnwriteTmp = [params.tempFileDir filesep int2str(round(rand(1)*10000)) '.tif'];
+if params.saveTiffs
+    fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
+    if params.efficientTiffSave
+        fnwriteTmp = [params.tempFileDir filesep int2str(round(rand(1)*10000)) '.tif'];
+    else
+        fnwriteTmp = fnwrite;
+    end
 else
-    fnwriteTmp = fnwrite;
+    fnwrite = 'no tiff saved';
 end
 
 fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
 
-if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
+if ~params.overwriteExisting && exist(fnAdata, 'file') % && exist(fnwrite, 'file')
     disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
     return
 end
@@ -310,9 +314,11 @@ loglikelihoodDS = nan(nDSframes,1);
 % dataMatrix = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),nDSframes);
 % expectedMatrix = zeros(length(lookupTable.allSuperPixelIDs{DMD_ix}),nDSframes);
 
-pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
-fTIF = Fast_BigTiff_Write(fnwriteTmp,pixelscale,0);
-    
+if params.saveTiffs
+    pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
+    fTIF = Fast_BigTiff_Write(fnwriteTmp,pixelscale,0);
+end
+
 xMotRange = lookupTable.xPre + lookupTable.xPost + 1;
 yMotRange = lookupTable.yPre + lookupTable.yPost + 1;
 zMotRange = lookupTable.zPre{DMD_ix} + lookupTable.zPost{DMD_ix} + 1;
@@ -400,33 +406,35 @@ for DSframeIx = 1:nDSframes
     % dataMatrix(:,DSframeIx) = data;
     % expectedMatrix(:,DSframeIx) = brightnessDS(DSframeIx) .* lookupTable.likelihood_means{DMD_ix}(ySearch(My), xSearch(Mx), zSearch(Mz),:);
     
-    for zIdx = 1:numFastZs
-        A1 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
-        for cIdx = unique(spCols)'
-            spIdxs = find(spCols == cIdx & spPlanes == zIdx);
-            % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
-            % rowSpacings = diff(queriedRows);
-            
-            if numel(spIdxs) > 1
-                A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
-            else
-                continue;
-            end
-        end
-        fTIF.WriteIMG(uint16(A1));
-        if numChannels==2
-            A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+    if params.saveTiffs
+        for zIdx = 1:numFastZs
+            A1 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
             for cIdx = unique(spCols)'
                 spIdxs = find(spCols == cIdx & spPlanes == zIdx);
                 % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
                 % rowSpacings = diff(queriedRows);
+                
                 if numel(spIdxs) > 1
-                    A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
+                    A1(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,1)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
                 else
                     continue;
                 end
             end
-            fTIF.WriteIMG(uint16(A2));
+            fTIF.WriteIMG(uint16(A1));
+            if numChannels==2
+                A2 = nan(dmdPixelsPerColumn,dmdPixelsPerRow);
+                for cIdx = unique(spCols)'
+                    spIdxs = find(spCols == cIdx & spPlanes == zIdx);
+                    % queriedRows = spRows(spIdxs)'+motionDS(DSframeIx,1);
+                    % rowSpacings = diff(queriedRows);
+                    if numel(spIdxs) > 1
+                        A2(:,cIdx+round(motionDS(DSframeIx,2))) = interp1(spRows(spIdxs)'+round(motionDS(DSframeIx,1)),data(spIdxs,2)./spCt(spIdxs).*100,1:dmdPixelsPerColumn);
+                    else
+                        continue;
+                    end
+                end
+                fTIF.WriteIMG(uint16(A2));
+            end
         end
     end
     
@@ -439,7 +447,9 @@ catch ME
     registrationFailed = true;
 end
 
-fTIF.close;
+if params.saveTiffs
+    fTIF.close;
+end
 
 
 if registrationFailed
@@ -470,7 +480,7 @@ disp('Getting online motion correction offsets')
 
 save(fnAdata, 'aData');
 
-if params.efficientTiffSave
+if params.saveTiffs && params.efficientTiffSave
     copyfile(fnwriteTmp,fnwrite);
     delete(fnwriteTmp);
 end
