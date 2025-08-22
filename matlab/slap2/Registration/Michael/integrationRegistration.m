@@ -92,6 +92,8 @@ for DMDix = nDMDs:-1:1
         zs_ix = unique(zs_ix);
         zs = zeros(length(zs_ix),1);
 
+        true_zs = cellfun(@(x) x.z, metaData.AcquisitionContainer.ROIs.rois);
+
         zPlanes = nan(1,numLinesPerCycle);
         for ix = 1:numLinesPerCycle
             if ~isempty(metaData.AcquisitionContainer.AcquisitionPlan.activeZs{ix})
@@ -103,7 +105,8 @@ for DMDix = nDMDs:-1:1
                 zs(ix) = metaData.remoteFocusPosition_um;
             else
                 zPlane_um = mean(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory(zPlanes == zs_ix(ix)));
-                zs(ix) = zPlane_um;
+                [~, zPlane_trueIx] = min(abs(true_zs - zPlane_um))
+                zs(ix) = true_zs(zPlane_trueIx);
             end
         end
     else
@@ -120,8 +123,10 @@ for DMDix = nDMDs:-1:1
     allSuperPixelIDs{DMDix} = [];
 
     fastZ2RefZ{DMDix} = zeros(numFastZs,1);
+    middleRefZ = (max(ReferenceStack_.zs) + min(ReferenceStack_.zs))/2;
+    middleZ = (max(zs) + min(zs))/2;
     for z = 1:numFastZs
-        [~, ind] = min(abs(ReferenceStack_.zs - zs(z)));
+        [~, ind] = min(abs((ReferenceStack_.zs - middleRefZ) - (zs(z) - middleZ)));
         fastZ2RefZ{DMDix}(z) = ind;
     end
 
@@ -198,9 +203,11 @@ for DMDix = nDMDs:-1:1
     bl(bl < 0) = 0; % remove any negative values, should not happen
     bl = padarray(bl,[floor((max(size(bl,1),dmdPixelsPerColumn)-size(bl,1))/2),...
         floor((max(size(bl,2),dmdPixelsPerRow)-size(bl,2))/2),...
-        floor((max(size(bl,3),numFastZs)-size(bl,3))/2)],...
+        0],...
         mean(bl(:)),...
         'both');
+    
+    assert(size(bl,3) > numFastZs, 'ERROR: fewer Z planes in reference stack than fastZs');
 
     if size(bl,1) < dmdPixelsPerColumn
         bl = padarray(bl,[1,0,0],mean(bl(:)),'pre');
@@ -214,7 +221,8 @@ for DMDix = nDMDs:-1:1
 
     xPre = params.maxshiftXY; xPost = params.maxshiftXY;
     yPre = params.maxshiftXY; yPost = params.maxshiftXY;
-    zPre = params.maxshiftZ; zPost = params.maxshiftZ;
+    zPre = min(params.maxshiftZ, min(fastZ2RefZ{DMDix} - 1));
+    zPost = min(params.maxshiftZ, min(size(bl,3) - fastZ2RefZ{DMDix}));
 
     likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ{DMDix},-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
     % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs{DMDix})]),[size(likelihood_means{DMDix},1:4) 1]);
@@ -348,7 +356,7 @@ for DSframeIx = 1:nDSframes
 
         if numel(superPixIdxs) == 0; continue; end
 
-        lineData = allLineData{t};
+        lineData = max(0,allLineData{t});
         zIdx = hLowLevelDataFile.lineFastZIdxs(lineIndices(t));
 
         spID = superPixIdxs*100 + uint32(zIdx); % make superpixel index with Z plane
