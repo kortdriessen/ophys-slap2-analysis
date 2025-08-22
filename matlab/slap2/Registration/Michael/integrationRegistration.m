@@ -105,7 +105,7 @@ for DMDix = nDMDs:-1:1
                 zs(ix) = metaData.remoteFocusPosition_um;
             else
                 zPlane_um = mean(metaData.AcquisitionContainer.AcquisitionPlan.zTrajectory(zPlanes == zs_ix(ix)));
-                [~, zPlane_trueIx] = min(abs(true_zs - zPlane_um))
+                [~, zPlane_trueIx] = min(abs(true_zs - zPlane_um));
                 zs(ix) = true_zs(zPlane_trueIx);
             end
         end
