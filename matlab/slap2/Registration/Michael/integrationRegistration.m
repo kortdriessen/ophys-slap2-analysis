@@ -221,10 +221,10 @@ for DMDix = nDMDs:-1:1
 
     xPre = params.maxshiftXY; xPost = params.maxshiftXY;
     yPre = params.maxshiftXY; yPost = params.maxshiftXY;
-    zPre = min(params.maxshiftZ, min(fastZ2RefZ{DMDix} - 1));
-    zPost = min(params.maxshiftZ, min(size(bl,3) - fastZ2RefZ{DMDix}));
+    zPre{DMDix} = min(params.maxshiftZ, min(fastZ2RefZ{DMDix} - 1));
+    zPost{DMDix} = min(params.maxshiftZ, min(size(bl,3) - fastZ2RefZ{DMDix}));
 
-    likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ{DMDix},-yPre:yPost,-xPre:xPost,-zPre:zPost,ReferenceStack_.channels);
+    likelihood_means{DMDix} = makeLookupTable(bl, sparseMaskInds{DMDix}, numFastZs, fastZ2RefZ{DMDix},-yPre:yPost,-xPre:xPost,-zPre{DMDix}:zPost{DMDix},ReferenceStack_.channels);
     % likelihood_means{DMDix} = likelihood_means{DMDix} .* repmat(reshape(spSampleCt,[1 1 1 1 length(allSuperPixelIDs{DMDix})]),[size(likelihood_means{DMDix},1:4) 1]);
 end
 lookupTable.likelihood_means = likelihood_means;
@@ -315,7 +315,7 @@ fTIF = Fast_BigTiff_Write(fnwriteTmp,pixelscale,0);
     
 xMotRange = lookupTable.xPre + lookupTable.xPost + 1;
 yMotRange = lookupTable.yPre + lookupTable.yPost + 1;
-zMotRange = lookupTable.zPre + lookupTable.zPost + 1;
+zMotRange = lookupTable.zPre{DMD_ix} + lookupTable.zPost{DMD_ix} + 1;
 
 ySearch = 1:yMotRange;
 xSearch = 1:xMotRange;
@@ -389,11 +389,11 @@ for DSframeIx = 1:nDSframes
         ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
         dZ = (1-ratioZ)/(1+ratioZ)/2;
 
-        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre+1];
+        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
     
         % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
     else %the optimum is at an edge of search range; no superresolution
-        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre+1];
+        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
     end
 
     brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
@@ -432,7 +432,7 @@ for DSframeIx = 1:nDSframes
     
     ySearch = max(1,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) + searchRadius);
     xSearch = max(1,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) + searchRadius);
-    zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre-1) + searchRadius);
+    zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}-1) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}-1) + searchRadius);
 end
 catch ME
     disp(ME);
