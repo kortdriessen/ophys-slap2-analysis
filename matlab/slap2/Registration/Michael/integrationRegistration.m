@@ -306,6 +306,7 @@ log_means = log(lookupTable.likelihood_means{DMD_ix} + 1e-8);
 
 % how much change is allowed in each dimension at each step
 searchRadius = aData.clipShift;
+searchRadiusZ = ceil(searchRadius / 2);
 
 motionDS = nan(nDSframes,3);
 brightnessDS = nan(nDSframes,1);
@@ -384,23 +385,27 @@ for DSframeIx = 1:nDSframes
 
     [My, Mx, Mz] = ind2sub(size(logLikelihoodTable),I);
 
-    if My>1 && My<size(logLikelihoodTable,1) && Mx>1 && Mx<size(logLikelihoodTable,2) && Mz>1 && Mz<size(logLikelihoodTable,3)
-        %perform superresolution upsampling, assuming quadratic loglikelihood
+    %perform superresolution upsampling, assuming quadratic loglikelihood
+    dY = 0;dX = 0;dZ = 0;
+    if My>1 && My<size(logLikelihoodTable,1)
         ratioY = min(1e6,(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My-1,Mx,Mz))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My+1,Mx,Mz)));
         dY = (1-ratioY)/(1+ratioY)/2;
-        
+    end
+    if Mx>1 && Mx<size(logLikelihoodTable,2)
         ratioX =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx-1,Mz))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx+1,Mz)));
         dX = (1-ratioX)/(1+ratioX)/2;
-
+    end
+    if Mz>1 && Mz<size(logLikelihoodTable,3)
         ratioZ =min(1e6, (logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz-1))/(logLikelihoodTable(My,Mx,Mz) - logLikelihoodTable(My,Mx,Mz+1)));
         dZ = (1-ratioZ)/(1+ratioZ)/2;
+    end
 
-        motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
+    motionDS(DSframeIx,:) = [ySearch(My)-dY; xSearch(Mx)-dX; zSearch(Mz)-dZ] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
     
         % motion = shiftsCenter' + [shifts(rr)-dR shifts(cc)-dC];
-    else %the optimum is at an edge of search range; no superresolution
-        motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
-    end
+    % else %the optimum is at an edge of search range; no superresolution
+    %     motionDS(DSframeIx,:) = [ySearch(My); xSearch(Mx); zSearch(Mz)] - [lookupTable.yPre+1; lookupTable.xPre+1; lookupTable.zPre{DMD_ix}+1];
+    % end
 
     brightnessDS(DSframeIx) = scalingFactorTable(My, Mx, Mz);
     % dataMatrix(:,DSframeIx) = data;
@@ -438,9 +443,9 @@ for DSframeIx = 1:nDSframes
         end
     end
     
-    ySearch = max(1,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)+lookupTable.yPre-1) + searchRadius);
-    xSearch = max(1,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)+lookupTable.xPre-1) + searchRadius);
-    zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}-1) - searchRadius):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}-1) + searchRadius);
+    ySearch = max(1,round(motionDS(DSframeIx,1)+lookupTable.yPre+1) - searchRadius):min(xMotRange,round(motionDS(DSframeIx,1)+lookupTable.yPre+1) + searchRadius);
+    xSearch = max(1,round(motionDS(DSframeIx,2)+lookupTable.xPre+1) - searchRadius):min(yMotRange,round(motionDS(DSframeIx,2)+lookupTable.xPre+1) + searchRadius);
+    zSearch = max(1,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}+1) - searchRadiusZ):min(zMotRange,round(motionDS(DSframeIx,3)+lookupTable.zPre{DMD_ix}+1) + searchRadiusZ);
 end
 catch ME
     disp(ME);
