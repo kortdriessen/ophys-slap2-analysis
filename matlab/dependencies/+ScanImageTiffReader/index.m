@@ -11,12 +11,9 @@
 % <https://vidriotech.gitlab.io/scanimage-tiff-reader C library>.  There's also a
 % <https://vidriotech.gitlab.io/scanimage-tiff-reader command line interface>.
 %
-% More information and related tools can be found on
-% <http://scanimage.vidriotechnologies.com/display/SIH/Tools here>.
-%
 % Both <http://scanimage.org ScanImage> and this reader are products of 
-% <http://vidriotechnologies.com/ Vidrio Technologies>.  If you have
-% questions or need support feel free to
+% <https://vidriotechnologies.com/ Vidrio Technologies>.  If you have
+% questions or need support feel free to <https://gitlab.com/vidriotech/scanimagetiffreader-matlab/issues submit an issue>
 % <https://vidriotechnologies.com/contact-support contact us>. 
 %
 %%% Downloads
@@ -26,9 +23,8 @@
 % <html>
 % <table>
 %   <tr><td><b>Target</b></td><td></td><td><b>Version</b></td></td>
-%   <tr><td>Windows x64</td><td><a href="https://gitlab.com/vidriotech/scanimagetiffreader-matlab/-/jobs/artifacts/1.3/download?job=build_widows">Download</a></td><td>v1.3</td></tr>
-%   <tr><td>OS X</td><td><a href="https://gitlab.com/vidriotech/scanimagetiffreader-matlab/-/jobs/artifacts/1.3/download?job=build_osx">Download</a></td><td>v1.3</td></tr>
-%   <tr><td>Linux</td><td><a href="https://gitlab.com/vidriotech/scanimagetiffreader-matlab/-/jobs/artifacts/1.3/download?job=build_nix">Download</a></td><td>v1.3</td></tr>
+%   <tr><td>Windows x64</td><td><a href="https://gitlab.com/api/v4/projects/8668010/jobs/artifacts/master/download?job=build_windows">Download</a></td><td>v1.3</td></tr>
+%   <tr><td>OS X/Linux</td><td>Please contact support@mbfbioscience.com with your request!</td><td>v1.3</td></tr>
 % </table>
 % </html>
 %
@@ -46,7 +42,7 @@ import ScanImageTiffReader.ScanImageTiffReader;
 %
 % Note that Matlab's ordering of dimensions means the image might be 
 % transposed from what you expect.  We leave the transpose up to you.
-reader=ScanImageTiffReader('./data/resj_00001.tif');
+reader=ScanImageTiffReader('./hostpixelcorr_noavg_00001_00001.tif');
 vol=reader.data();
 imshow(vol(:,:,floor(size(vol,3)/2)),[]);
 %% 
@@ -69,4 +65,4 @@ disp(desc{1});
 % The included tests are very minimal.
 %
 % See |+ScanImageTiffReader/ScanImageTiffReaderTests.m|
-runtests ScanImageTiffReader
+% runtests ScanImageTiffReader
