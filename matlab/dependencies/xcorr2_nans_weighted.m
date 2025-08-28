@@ -25,7 +25,7 @@ for drix = 1:length(shifts)
         Tr = Fr0 + shifts(drix);
         Tc = Fc0 + shifts(dcix);
         
-        valid = Tr>=1 & Tr<=size(template,1) & Tc>=1 & Tc<=size(template,1);
+        valid = Tr>=1 & Tr<=size(template,1) & Tc>=1 & Tc<=size(template,2);
         Fr=Fr0(valid); Fc=Fc0(valid); Tr=Tr(valid); Tc=Tc(valid);
         
         T = template(sub2ind(sz, Tr,Tc));
