@@ -355,7 +355,10 @@ for chunkIx = 1:length(chunkEdges)-1
     recNegErr(1,t_ixs) = sqrt(squeeze(mean((max(0, (template-A_ds(:,:,t_ixs))./template_gamma).^2), [1 2], 'omitnan')./mean(max(0,(template./template_gamma).^2, 'includenan'), [1 2], 'omitnan')));
 end
 
-if std(motionDSc)>1.5 || std(motionDSr)>1.5
+disp('STANDARD DEVIATION VALUES BELOW:')
+    disp(std(motionDSc))
+    disp(std(motionDSr))
+if std(motionDSc)>3 || std(motionDSr)>3
     registrationFailed = true;
     warning(['Too much motion in file: ' fn]);
 end
