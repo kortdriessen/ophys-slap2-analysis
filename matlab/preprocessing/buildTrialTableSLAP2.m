@@ -44,11 +44,12 @@ end
 %first, load the reference images, deduce the imaging plane of the ROI, and
 % %compute the soma ROI
 DMDixs = [1 2];
-%find the files within the entire folder structure named REFERENCE
+%find the files within the entire folder structure named REFERENCE (start one level above current dir, at the location directory)
 for DMDix = DMDixs
-    list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*_CONFIG1-REFERENCE*']);
+    [LocDir, ~, ~] = fileparts(dr);
+    list = dir([LocDir filesep '**' filesep '*DMD' int2str(DMDix) '*_CONFIG1-REFERENCE*']);
     if isempty(list)
-        list = dir([dr filesep '**' filesep '*DMD' int2str(DMDix) '*-REFERENCE*']);
+        list = dir([LocDir filesep '**' filesep '*DMD' int2str(DMDix) '*-REFERENCE*']);
     end
     switch length(list)
     case 0
