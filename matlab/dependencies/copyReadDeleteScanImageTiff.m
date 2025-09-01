@@ -3,7 +3,7 @@ if isempty(remotepath) %PASS EMPTY MATRIX TO INITIALIZE
     thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
     if ~exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
         try
-            localDir = 'home/kdriessen/slap_wi_master/temp_data';
+            localDir = 'temp_data/';
             if ~exist(localDir, 'dir')
                 warning('User canceled setting local directory. defaulting to C:/temp on Windows else /scratch')
                 if ispc
