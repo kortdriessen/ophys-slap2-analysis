@@ -366,7 +366,7 @@ else
     disp('Did not save processing.json')
 end
 
-disp('Done summarize_NoLoCo')
+disp(['Done summarize_NoLoCo: ' char(datetime("now"))])
 end
 
 function IMsel = interpArray (IM, sel, shiftRC)
