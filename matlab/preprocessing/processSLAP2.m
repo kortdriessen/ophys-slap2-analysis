@@ -1,5 +1,5 @@
 function processSLAP2(dr)
-
+disp(['Script started at: ' char(datetime("now"))])
 if ~nargin
     dr = uigetdir; %neuron folder where scans are, not project folder
 end
@@ -15,6 +15,8 @@ if ~exist(fullPathToTrialTable, 'file')
     buildTrialTableSLAP2(dr);
 end
 
+%log header timestamps
+log_header_timestamps(dr)
 
 %align files
 multiRoiRegSLAP2(fullPathToTrialTable,aParams)
