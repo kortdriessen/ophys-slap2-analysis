@@ -70,7 +70,7 @@ switch fnName
         params.motionMetric = {'''poisson''','''correlation'''}; tooltips.motionMetric = 'Metric for selecting best motion shift';
         params.robust = false; tooltips.robust = 'Use robust likelihood?';
         params.efficientTiffSave = false; tooltips.efficientTiffSave = 'Save Tiffs locally first then transfer?';
-        params.tempFileDir = '/home/kdriessen/slap_wi_master/temp_data'; tooltips.tempFileDir = 'Directory for temp files';
+        params.tempFileDir = 'temp_data/'; tooltips.tempFileDir = 'Directory for temp files';
         % params.alpha = 0.005; tooltips.alpha = 'exponential decay of template per frame';%exponential time constant for template
         params.nWorkers = 56; tooltips.nWorkers = 'number of parallel workers';
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
