@@ -22,6 +22,8 @@ else
     end
 end
 
+params.startTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+
 copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops
 
 %confirm that all files exist
@@ -331,6 +333,8 @@ for DMDix = nDMDs:-1:1
 
     clear meanAligned meanIM actAligned F0selDS E
 end
+
+params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
 
 %prepare file for saving
 exptSummary.params = params;

@@ -21,6 +21,7 @@ switch fnName
         params.nanThresh = 0.33;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
         params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
         params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
+        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
@@ -31,6 +32,7 @@ switch fnName
         params.refStackTemplate = false; tooltips.refStackTemplate = 'Use ref stack as template';
         params.isReVolt = false; tooltips.isReVolt = 'select true for recordings with simultaneous red 1P imaging';
         params.includeIntegrationROIs = false; tooltips.includeIntegrationROIs = 'Use integration ROIs for alignment and TIFF generation?';
+        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
     case 'integrationRegistration'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshiftXY = 25; tooltips.maxshift = 'Maximum frame offset,in pixels';
@@ -44,6 +46,7 @@ switch fnName
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
         params.integrationOnly = false; tooltips.integrationOnly = 'Align only on integration superpixels';
         params.saveTiffs = true; tooltips.saveTiffs = 'Save aligned tiff movies';
+        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
     case 'stripRegBergamo'
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.clipShift = 10; tooltips.clipShift = 'Maximum allowable shift per frame';

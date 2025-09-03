@@ -13,6 +13,8 @@ else
     params = setParams('integrationRegistration');
 end
 
+params.startTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep 'trialTable.mat'], 'trialTable');
 
@@ -57,6 +59,9 @@ parfor p_ix = 1:numel(fixs)
     f_ix = fixs(p_ix); DMD_ix = dixs(p_ix);
     [fnRegDS{p_ix}, fnAdata{p_ix}]= alignIntegrationAsync(dr, trialTable, lookupTable, params, f_ix, DMD_ix);
 end
+
+params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+
 if params.saveTiffs; trialTable.fnRegDSInt = fnRegDS; end
 trialTable.fnAdataInt = fnAdata;
 trialTable.alignParamsInt = params;

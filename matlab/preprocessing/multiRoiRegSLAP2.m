@@ -13,6 +13,8 @@ else
     params = setParams('multiRoiRegSLAP2');
 end
 
+params.startTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+
 %load the trial Table, which sets correspondences between the two DMDs
 load([dr filesep fn], 'trialTable');
 
@@ -57,7 +59,7 @@ for DMD_ix = 1:nDMDs
 end
 %during alignment of some data we discard initial frames
 
-
+params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
 
 trialTable.alignParams = params;
 save([dr filesep fn], "trialTable")
