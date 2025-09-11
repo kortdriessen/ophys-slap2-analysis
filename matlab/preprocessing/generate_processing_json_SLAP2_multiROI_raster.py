@@ -56,7 +56,7 @@ except:
     version = "Unknown"
 
 example_code = Code(
-    url="https://github.com/abcd",
+    url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis",
     version=version,
     parameters={"size": 7},
 )
@@ -64,29 +64,15 @@ example_code = Code(
 p = Processing.create_with_sequential_process_graph(
     pipelines=[
         Code(
-            name="Matlab Slap2 processing pipeline",
-            url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/tree/main/matlab/preprocessing",
-            version="0.1.0",
+            name="SLAP2 multi-ROI raster processing pipeline (Matlab)",
+            url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/matlab/preprocessing/processSLAP2.m",
+            version=version,
         ),
     ],
     data_processes=[
         DataProcess(
-            process_type=ProcessName.VIDEO_ROI_TIMESERIES_EXTRACTION,
-            experimenters=[extraction_metadata.get('experimenter_name', 'Unknown')],
-            stage=ProcessStage.PROCESSING,
-            start_date_time=extraction_metadata.get('start_time', datetime.now(timezone.utc)),
-            end_date_time=extraction_metadata.get('end_time', datetime.now(timezone.utc)),
-            output_path="",
-            pipeline_name="Matlab Slap2 processing pipeline",
-            code=example_code.model_copy(
-                update=dict(
-                    parameters=extraction_metadata,
-                )
-            ),
-        ),
-        DataProcess(
             process_type=ProcessName.VIDEO_MOTION_CORRECTION,
-            pipeline_name="Matlab Slap2 processing pipeline",
+            pipeline_name="SLAP2 multi-ROI raster processing pipeline (Matlab)",
             experimenters=[align_params.get('experimenter_name', 'Unknown')],
             stage=ProcessStage.PROCESSING,
             start_date_time=align_params.get('start_time', datetime.now(timezone.utc)),
@@ -94,7 +80,23 @@ p = Processing.create_with_sequential_process_graph(
             output_path="",
             code=example_code.model_copy(
                 update=dict(
+                    url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/matlab/preprocessing/multiRoiRegSLAP2.m",
                     parameters=align_params
+                )
+            ),
+        ),
+        DataProcess(
+            process_type=ProcessName.VIDEO_ROI_TIMESERIES_EXTRACTION,
+            experimenters=[extraction_metadata.get('experimenter_name', 'Unknown')],
+            stage=ProcessStage.PROCESSING,
+            start_date_time=extraction_metadata.get('start_time', datetime.now(timezone.utc)),
+            end_date_time=extraction_metadata.get('end_time', datetime.now(timezone.utc)),
+            output_path="",
+            pipeline_name="SLAP2 multi-ROI raster processing pipeline (Matlab)",
+            code=example_code.model_copy(
+                update=dict(
+                    url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/matlab/preprocessing/summarize_NoLoCo.m",
+                    parameters=extraction_metadata,
                 )
             ),
         ),

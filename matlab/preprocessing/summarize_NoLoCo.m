@@ -343,6 +343,14 @@ exptSummary.dr = dr;
 
 %save
 save(fnsave, 'exptSummary', "-v7.3");
+
+try
+    pyrunfile([fullfile(fileparts(mfilename('fullpath')), 'generate_processing_json_SLAP2_multiROI_raster.py') ' --mat_path "' fnsave '" --output_dir "' savedr '"']);
+    disp('Saved processing.json')
+catch
+    disp('Did not save processing.json')
+end
+
 disp('Done summarize_NoLoCo')
 end
 
