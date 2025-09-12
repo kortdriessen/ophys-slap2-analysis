@@ -64,7 +64,7 @@ params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T'
 trialTable.alignParams = params;
 save([dr filesep fn], "trialTable")
 
-disp('done multiRoiRegistration.')
+disp(['Done multiRoiRegistration: ' char(datetime("now"))])
 end
 
 function [fnwrite, fnAdata, firstLine] = alignAsync(dr, trialTable, params, f_ix, DMD_ix)
@@ -358,7 +358,7 @@ end
 disp('STANDARD DEVIATION VALUES BELOW:')
     disp(std(motionDSc))
     disp(std(motionDSr))
-if std(motionDSc)>3 || std(motionDSr)>3
+if std(motionDSc)>3 || std(motionDSr)>6
     registrationFailed = true;
     warning(['Too much motion in file: ' fn]);
 end
