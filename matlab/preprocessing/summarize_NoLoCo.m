@@ -22,6 +22,11 @@ else
     end
 end
 
+if params.makeJSON
+    pythonenv_dir = uigetdir(getenv("USERPROFILE"),'Select Python Environment Directory');
+    disp(['python env: ' pythonenv_dir])
+end
+
 params.startTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
 
 copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops
@@ -344,10 +349,11 @@ exptSummary.dr = dr;
 %save
 save(fnsave, 'exptSummary', "-v7.3");
 
-try
+if params.makeJSON
+    setenv("PYTHONHOME",pythonenv_dir)
     pyrunfile([fullfile(fileparts(mfilename('fullpath')), 'generate_processing_json_SLAP2_multiROI_raster.py') ' --mat_path "' fnsave '" --output_dir "' savedr '"']);
     disp('Saved processing.json')
-catch
+else
     disp('Did not save processing.json')
 end
 

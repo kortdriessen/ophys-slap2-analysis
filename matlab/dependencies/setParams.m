@@ -22,6 +22,7 @@ switch fnName
         params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
         params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
         params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
+        params.makeJSON = false;             tooltips.makeJSON = 'run python script to create processing.json';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
