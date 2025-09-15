@@ -40,13 +40,11 @@ mat_path = pl.Path(args.mat_path)
 if not mat_path.exists():
     raise FileNotFoundError(f"The specified .mat file does not exist: {mat_path}")
 expsum = ExperimentSummary(mat_path)
-expsum._get_metadata()
 extraction_metadata = {key: to_serializable(val) for key, val in expsum.metadata.items()}
 print('extraction metadata:', extraction_metadata)
 
-with h5py.File(mat_path, 'r') as expsum_h5py:
-    align_params = {key: to_serializable(val[0][0]) for key, val in expsum_h5py['exptSummary/trialTable/alignParams'].items()}
-    print('align params:', align_params)
+align_params = {key: to_serializable(val) for key, val in expsum.align_params.items()}
+print('align params:', align_params)
 
 try:
     version = subprocess.check_output(
@@ -73,10 +71,10 @@ p = Processing.create_with_sequential_process_graph(
         DataProcess(
             process_type=ProcessName.VIDEO_MOTION_CORRECTION,
             pipeline_name="SLAP2 multi-ROI raster processing pipeline (Matlab)",
-            experimenters=[align_params.get('experimenter_name', 'Unknown')],
+            experimenters=[align_params.get('operator', 'Unknown')],
             stage=ProcessStage.PROCESSING,
-            start_date_time=align_params.get('start_time', datetime.now(timezone.utc)),
-            end_date_time=align_params.get('end_time', datetime.now(timezone.utc)),
+            start_date_time=align_params.get('startTime', datetime.now(timezone.utc)),
+            end_date_time=align_params.get('endTime', datetime.now(timezone.utc)),
             output_path="",
             code=example_code.model_copy(
                 update=dict(
@@ -87,10 +85,10 @@ p = Processing.create_with_sequential_process_graph(
         ),
         DataProcess(
             process_type=ProcessName.VIDEO_ROI_TIMESERIES_EXTRACTION,
-            experimenters=[extraction_metadata.get('experimenter_name', 'Unknown')],
+            experimenters=[extraction_metadata.get('operator', 'Unknown')],
             stage=ProcessStage.PROCESSING,
-            start_date_time=extraction_metadata.get('start_time', datetime.now(timezone.utc)),
-            end_date_time=extraction_metadata.get('end_time', datetime.now(timezone.utc)),
+            start_date_time=extraction_metadata.get('startTime', datetime.now(timezone.utc)),
+            end_date_time=extraction_metadata.get('endTime', datetime.now(timezone.utc)),
             output_path="",
             pipeline_name="SLAP2 multi-ROI raster processing pipeline (Matlab)",
             code=example_code.model_copy(
