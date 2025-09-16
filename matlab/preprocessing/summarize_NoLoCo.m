@@ -350,9 +350,13 @@ exptSummary.dr = dr;
 save(fnsave, 'exptSummary', "-v7.3");
 
 if params.makeJSON
-    setenv("PYTHONHOME",pythonenv_dir)
-    pyrunfile([fullfile(fileparts(mfilename('fullpath')), 'generate_processing_json_SLAP2_multiROI_raster.py') ' --mat_path "' fnsave '" --output_dir "' savedr '"']);
-    disp('Saved processing.json')
+    try
+        setenv("PYTHONHOME",pythonenv_dir)
+        pyrunfile([fullfile(fileparts(mfilename('fullpath')), 'generate_processing_json_SLAP2_multiROI_raster.py') ' --mat_path "' fnsave '" --output_dir "' savedr '"']);
+        disp('Saved processing.json')
+    catch
+        disp('Did not save processing.json')
+    end
 else
     disp('Did not save processing.json')
 end
