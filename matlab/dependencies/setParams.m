@@ -4,6 +4,7 @@ function params = setParams(fnName, paramsIn, forceGUI)
 switch fnName
     case 'summarize_NoLoCo'
         params.microscope = { '''bergamo''', '''SLAP2'''};          tooltips.scope = 'SLAP2 or bergamo';
+        params.includeIntegrationROIs = false; tooltips.includeIntegrationROIs = 'Use integration ROIs for trace extraction?';
         params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
         params.sparseFac = 0.05;         tooltips.sparseFac = 'sparsity factor for shrinking sources in space, 0-1, higher value makes things sparser';
         params.nmfIter = 5;              tooltips.nmfIter = 'number of iterations of NMF refinement';

@@ -5,6 +5,12 @@ disp([dr filesep fn])
 
 switch params.microscope
     case 'SLAP2'
+        if params.includeIntegrationROIs
+            spTypeFlag = 0; %use all superpixel types
+        else
+            spTypeFlag = 1; %use only raster superpixels
+        end
+
         %load the high time resolution data
         S2data = slap2.Slap2DataFile([dr filesep fn]);
         meta = loadMetadata([dr filesep fn]);
@@ -35,7 +41,8 @@ switch params.microscope
         %interpolate the raw data at the shifted coordinates
         for fix = nFrames:-1:1
             for cix = 1:numel(orderedChannels)
-                Y = S2data.getImage(orderedChannels(cix), frameLines(fix), ceil(dt), 1);
+                % Y = S2data.getImage(orderedChannels(cix), frameLines(fix), ceil(dt), 1);
+                [Y, ~] = getImageWrapper(S2data, orderedChannels(cix), frameLines(fix), ceil(dt), 1, spTypeFlag);
                 Y = Y(alignData.trimRows, alignData.trimCols);
                 Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData.viewC+motionC(fix), alignData.viewR+motionR(fix), 'linear', nan);
                 if cix==1
@@ -76,7 +83,8 @@ switch params.microscope
                 exptSummary.ROIs.F = nan(length(roiData),nFrames,numel(orderedChannels));
                 for fix = nFramesSoma:-1:1
                     for cix = 1:numel(orderedChannels)
-                        Y = S2data.getImage(orderedChannels(cix), somaLines(fix), ceil(dtSoma), 1);
+                        % Y = S2data.getImage(orderedChannels(cix), somaLines(fix), ceil(dtSoma), 1);
+                        [Y, ~] = getImageWrapper(S2data, orderedChannels(cix), somaLines(fix), ceil(dtSoma), 1, spTypeFlag);
                         Y = Y(alignData.trimRows, alignData.trimCols);
                         Y = interp2(1:Ysz(2), 1:Ysz(1), Y,alignData.viewC+motionC(fix), alignData.viewR+motionR(fix), 'linear', nan);
                         mIM = meanIM(:,:,orderedChannels(cix));
@@ -273,4 +281,13 @@ if numChannels==2
     F0_2 = computeF0(F_2', ceil(params.denoiseWindow_s*params.analyzeHz), ceil(params.baselineWindow_Ca_s*params.analyzeHz),1)';
     exptSummary.dF.ls(:,:,2) = F_2;
     exptSummary.F0(:,:,2) = F0_2;
+end
+end
+
+function [IM, freshness] = getImageWrapper(S2data, channel, frames, dt, zPlane, spTypeFlag)
+if spTypeFlag
+    [IM,~,freshness] = S2data.getImage(channel, frames, dt, zPlane, spTypeFlag);
+else
+    [IM,~,freshness] = S2data.getImage(channel, frames, dt, zPlane); %for backward compatibility
+end
 end
