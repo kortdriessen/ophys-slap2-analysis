@@ -23,7 +23,6 @@ end
 
 firstValidFrames = find(any(~isnan(IM), [1 2]),400, 'first');
 varIM = var(IM(:,:,firstValidFrames),0,3,"omitmissing");
-Vb = prctile(varIM, 5, 'all').^2; %estimate the variance of a 'dim' pixel, due to shot noise
 
 %initialize filtered image
 IMf = IM; clear IM;
@@ -42,6 +41,8 @@ IMf = reshape(IMf, sz(1),sz(2), []);
 if isempty(vIM) %for raster imaging
     vIM = ones(sz(1:2));
 end
+varIM(nanFrac>0.4) = nan;
+Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to shot noise
 IMb = smoothdata(IMf, 3, 'movmean', baselineWindow, 'omitnan');
 stdIM = sqrt((IMb+Vb).*vIM); %compute standard deviation
 
@@ -72,16 +73,16 @@ clear nans
 
 %nonmax suppression- find maxima
 skIm = zeros(sz(1:2));
-for fr = size(IMf,3)-1:-1:2
+for fr = size(IMf,3)-ceil(1.5*tau):-1:2 %ceil(tau) because the filtering is uncertain in the final frames
     IMfr = IMf(:,:,fr); IMpre = IMf(:,:,fr-1); IMpost = IMf(:,:,fr+1);
     
     maxinds = find(IMfr==ordfilt2(IMfr,9, ones(3)));
     sel = IMfr(maxinds)>0 & IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
+    %sel = IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
     maxinds = maxinds(sel);
     skIm(maxinds) = skIm(maxinds) + IMfr(maxinds).^2; 
 end
 
-%figure, plot(squeeze(IMf(338,583,:)))
 
 %summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3); %.*IMgamma; 
 summaryEroded = skIm;
