@@ -451,6 +451,12 @@ def create_parameter_gui():
     param_vars['operator'] = tk.StringVar(value='Maria Goeppert Mayer')
     ttk.Entry(main_frame, textvariable=param_vars['operator'], width=15).grid(row=row, column=1, pady=2)
     row += 1
+
+    # Max Workers
+    ttk.Label(main_frame, text="Max Workers:").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['max_workers'] = tk.IntVar(value=6)
+    ttk.Entry(main_frame, textvariable=param_vars['max_workers'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
     
     # Add some spacing
     row += 1
@@ -469,7 +475,8 @@ def create_parameter_gui():
                 'dXY': param_vars['dXY'].get(),
                 'sparse_fac': torch.exp(torch.tensor(param_vars['sparse_fac_log'].get())),
                 'denoiseWindow_s': param_vars['denoiseWindow_s'].get(),
-                'operator': param_vars['operator'].get()
+                'operator': param_vars['operator'].get(),
+                'max_workers': param_vars['max_workers'].get()
             }
             result['cancelled'] = False
             root.destroy()
@@ -803,7 +810,7 @@ def main():
             lowResMotionZ = data_arrays['lowResMotionZ']
             lowResTrialID = data_arrays['lowResTrialID']
         else:
-            with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
+            with mp.Pool(processes=min(params['max_workers'],min(mp.cpu_count(),len(trial_info)))) as pool:
                 results = list(pool.imap(get_trial_data_partial, trial_info))
 
             lowResData = np.concatenate([r[0] for r in results], axis=1)
@@ -1594,7 +1601,7 @@ def main():
                                               # background_spatial_components=background_spatial_components,
                                               psf=psf)
 
-        with mp.Pool(processes=min(mp.cpu_count(),len(trial_info))) as pool:
+        with mp.Pool(processes=min(params['max_workers'],min(mp.cpu_count(),len(trial_info)))) as pool:
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
 
         # Save data to HDF5 file
