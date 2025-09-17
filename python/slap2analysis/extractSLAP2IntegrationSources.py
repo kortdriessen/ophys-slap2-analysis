@@ -253,7 +253,13 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     nSources = A_final.shape[1]
 
     if not keepTrial:
-        return [], [], []
+        return np.full((0,nSources),np.nan,dtype=np.float32), \
+            np.full((0,nSources),np.nan,dtype=np.float32), \
+                np.full((0,),np.nan), \
+                    np.full((0,),np.nan), \
+                        np.full((0,),np.nan), \
+                            (np.full((0,),np.nan), np.full((0,),np.nan), np.full((0,),np.nan)), \
+                                (np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16))
 
     data_file = os.path.join(dr, f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
     if os.path.exists(data_file):
@@ -1622,10 +1628,12 @@ def main():
             temporal_group.create_dataset('F0', data=F0)
             # temporal_group.create_dataset('F', data=F)
 
-            trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[2]) for r in results])[:-1]])
+            # trial_start_idxs = np.concatenate([[0], np.cumsum([len(r[2]) for r in results])[:-1]])
+            trial_num_frames = np.concatenate([[len(r[2])] for r in results])
 
             frame_group = dmd_group.create_group('frame_info')
-            frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
+            # frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
+            frame_group.create_dataset('trial_num_frames', data=trial_num_frames)
             frame_group.create_dataset('discard_frames', data=np.any(np.isnan(F), axis=1))
 
             frame_group.create_dataset('offlineXshifts', data=np.concatenate([r[5][1] for r in results], axis=0))
