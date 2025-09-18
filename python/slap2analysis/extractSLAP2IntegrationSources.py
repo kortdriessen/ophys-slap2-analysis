@@ -11,20 +11,42 @@ import multiprocessing as mp
 from functools import partial
 import tkinter as tk
 from tkinter import filedialog, ttk, messagebox
-import datetime
+from datetime import datetime, timezone
 import importlib
 import skimage.io as skimio
 import h5py
 from scipy import stats, signal
 import slap2_utils
 import pandas as pd
+import subprocess
+from tqdm import tqdm
 
-from tqdm import tqdm 
-
-sys.path.append(str(Path(__file__).parent.parent))
+sys.path.append('C:/Users/michael.xie/Documents/ophys-slap2-analysis/python')
+# sys.path.append(str(Path(__file__).parent.parent))
 import reconstruct
 
 import cv2
+
+from aind_data_schema.components.identifiers import Code
+from aind_data_schema.core.processing import (
+    DataProcess,
+    Processing,
+    ProcessName,
+    ProcessStage,
+    ResourceTimestamped,
+    ResourceUsage,
+)
+from aind_data_schema_models.units import MemoryUnit
+from aind_data_schema_models.system_architecture import OperatingSystem, CPUArchitecture
+
+def to_serializable(val):
+    if isinstance(val, (np.integer, np.int32, np.int64, np.uint8)):
+        return int(val)
+    elif isinstance(val, (np.floating, np.float32, np.float64)):
+        return float(val)
+    elif isinstance(val, np.ndarray):
+        return val.tolist()
+    return val
 
 def nearest_interp(x, xp, yp):
     if len(xp) == 1:
@@ -473,7 +495,7 @@ def create_parameter_gui():
                 'decayTau_s': param_vars['decayTau_s'].get(),
                 'baselineWindow_s': param_vars['baselineWindow_s'].get(),
                 'dXY': param_vars['dXY'].get(),
-                'sparse_fac': torch.exp(torch.tensor(param_vars['sparse_fac_log'].get())),
+                'sparse_fac': float(np.exp(param_vars['sparse_fac_log'].get())),
                 'denoiseWindow_s': param_vars['denoiseWindow_s'].get(),
                 'operator': param_vars['operator'].get(),
                 'max_workers': param_vars['max_workers'].get()
@@ -524,7 +546,9 @@ def main():
     if gui_result['cancelled']:
         print("Parameter selection cancelled by user")
         return
-    
+
+    start_time = datetime.now(timezone.utc).astimezone()
+
     # Extract metadata parameters
     params = gui_result['params']
     print("selected params:")
@@ -560,6 +584,11 @@ def main():
 
     # Get the struct
     trialTable = spio.loadmat(trialTableFile)['trialTable'][0,0]
+
+    align_params = {}
+    tmp = trialTable['alignParamsInt'].reshape(-1)[0]
+    for key in trialTable['alignParamsInt'].dtype.names:
+        align_params[key] = to_serializable(np.squeeze(tmp[key]))
 
     nDMDs = trialTable['filename'].shape[0]
     nTrials = trialTable['filename'].shape[1]
@@ -599,7 +628,7 @@ def main():
     savedr = os.path.join(dr, 'ExperimentSummary')
     if not os.path.exists(savedr):
         os.makedirs(savedr)
-    output_h5_filename = os.path.join(savedr, f'experiment_summary_{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}.h5')
+    output_h5_filename = os.path.join(savedr, f'experiment_summary_{datetime.now().strftime("%Y%m%d-%H%M%S")}.h5')
 
     # Load aData file
     aData = spio.loadmat(trialTable['fnAdataInt'][0,firstValidTrial][0])['aData'][0,0]
@@ -1675,6 +1704,59 @@ def main():
             ref_stack_dataset.attrs['channels'] = ref_stack_channels
 
         print(f"Added DMD{DMDix+1} data to {output_h5_filename}")
+
+    end_time = datetime.now(timezone.utc).astimezone()
+
+    try:
+        version = subprocess.check_output(
+            ["git", "-C", str(Path(__file__).resolve().parent), "rev-parse", "HEAD"], text=True
+        ).strip()
+    except:
+        version = "Unknown"
+
+    p = Processing.create_with_sequential_process_graph(
+        pipelines=[
+            Code(
+                name="SLAP2 multi-band integration processing pipeline (Python)",
+                url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/",
+                version=version,
+            ),
+        ],
+        data_processes=[
+            DataProcess(
+                process_type=ProcessName.VIDEO_MOTION_CORRECTION,
+                pipeline_name="SLAP2 multi-band integration processing pipeline (Python)",
+                experimenters=[align_params.get('operator', 'Unknown')],
+                stage=ProcessStage.PROCESSING,
+                start_date_time=datetime.fromisoformat(align_params.get('startTime', datetime.now(timezone.utc).astimezone().isoformat())),
+                end_date_time=datetime.fromisoformat(align_params.get('endTime', datetime.now(timezone.utc).astimezone().isoformat())),
+                output_path="..",
+                code=Code(
+                    url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/matlab/preprocessing/integrationRegistration.m",
+                    version=version,
+                    parameters=align_params
+                ),
+            ),
+            DataProcess(
+                process_type=ProcessName.VIDEO_ROI_TIMESERIES_EXTRACTION,
+                experimenters=[params.get('operator', 'Unknown')],
+                stage=ProcessStage.PROCESSING,
+                start_date_time=start_time,
+                end_date_time=end_time,
+                output_path=".",
+                pipeline_name="SLAP2 multi-band integration processing pipeline (Python)",
+                code=Code(
+                    url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/python/slap2analysis/extractSLAP2IntegrationSources.py",
+                    version=version,
+                    parameters={key: to_serializable(val) for key, val in params.items()}
+                ),
+            ),
+        ],
+    )
+
+    serialized = p.model_dump_json()
+    deserialized = Processing.model_validate_json(serialized)
+    p.write_standard_file(Path(savedr),suffix='_integration.json')
 
 if __name__ == '__main__':
     main()
