@@ -981,6 +981,7 @@ def main():
                     if nnz < 2:
                         if nnz == 1:
                             single_point.append(int(c))
+                        cols = np.delete(cols, np.flatnonzero(cols == c))
                         continue
                     rows = sR[mask].astype(np.int32)
                     data_ix = np.flatnonzero(mask).astype(np.int32)
