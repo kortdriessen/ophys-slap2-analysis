@@ -56,6 +56,7 @@ switch fnName
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
         params.removeLines = 4; tooltips.removeLines = 'remove this many flyback lines from the top of each image';
         params.ds_time = 3; tooltips.ds_time = 'movies are downsampled (2^ds_time)x in time for alignment';
+        params.frameRate = 0; tooltips.frameRate = 'imaging frame rate; if 0, calculated from metadata or set as default';
         params.denoise20Hz = false;
     case 'extractDendrites'
         params.manualROIs = false;  tooltips.manualROIs = 'Draw ROIs manually? If false, use SLAP2 ROIs';

@@ -102,8 +102,13 @@ try
     end
     frametime = median(diff(timestamp(1:numChannels:end)));
 catch  % use default frametime if there is no metadata (e.g. simulated data)
-    disp('Warning! Failed to compute framerate from metadata. Using default frametime=0.0023')
-    frametime = 0.0023;
+    if params.frameRate > 0
+        frametime = 1/params.frameRate;
+        fprintf('Warning! Failed to compute framerate from metadata. Using user input frametime=%0.4f\n',frametime);
+    else
+        frametime = 0.0023;
+        disp('Warning! Failed to compute framerate from metadata. Using default frametime=0.0023')
+    end
 end
 aData.numChannels = numChannels;
 aData.frametime = frametime;
