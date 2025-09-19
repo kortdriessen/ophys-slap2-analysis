@@ -6,6 +6,8 @@ if iscell(fns) %user selected multiple tiffs; generate a trial table
     trialTable = buildTrialTableBergamo(dr, fns);
 elseif contains(fns, '.tif') %user selected single tiff; generate a trial table
     trialTable = buildTrialTableBergamo(dr, fns);
+elseif contains(fns, '.h5') %user selected single h5; generate a trial table
+    trialTable = buildTrialTableBergamo(dr, fns);
 elseif contains(fns, 'trialTable')
     load([dr filesep fns], 'trialTable');
 else
@@ -76,7 +78,12 @@ fn = strcat(fn,ext);
 
 disp(['Aligning: ' [dr filesep fn]])
 
-[Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+if contains(fn, '.h5')
+    desc = h5info([dr filesep fn]);
+    Ad = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
+else
+    [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
+end
 try
     evalc(desc{1});
 

@@ -20,15 +20,18 @@ if nargin<2
         epochfiles{epoch} = {unpickedfiles(indx).name};
         unpickedfiles(indx) = [];
     end
+elseif contains(fns, '.h5')
+    epoch = 1;
+    epochfiles{1} = {fns};
 elseif ~iscell(fns) && (contains(fns, '.tif') || fns==true) %generate an autoTrialTable with all files
     %select all tif files in folder that are not REGISTERED and put them in
     %a single epoch
-    epoch  = 1;
+    epoch = 1;
     files = dir([dr filesep '*.tif']);
     files = files(~contains({files.name}, 'REGISTERED') & ~contains({files.name}, 'FIGURE'));
     epochfiles{1} = {files.name};
 else %files were passed to generate an autoTrialTable
-    epoch  = 1;
+    epoch = 1;
     epochfiles{1} = fns;
 end
 
