@@ -6,7 +6,7 @@ if iscell(fns) %user selected multiple tiffs; generate a trial table
     trialTable = buildTrialTableBergamo(dr, fns);
 elseif contains(fns, '.tif') %user selected single tiff; generate a trial table
     trialTable = buildTrialTableBergamo(dr, fns);
-elseif contains(fns, '.h5') %user selected single h5; generate a trial table
+elseif endsWith(fns, '.h5') %user selected single h5; generate a trial table
     trialTable = buildTrialTableBergamo(dr, fns);
 elseif contains(fns, 'trialTable')
     load([dr filesep fns], 'trialTable');
@@ -78,7 +78,7 @@ fn = strcat(fn,ext);
 
 disp(['Aligning: ' [dr filesep fn]])
 
-if contains(fn, '.h5')
+if endsWith(fn, '.h5')
     desc = h5info([dr filesep fn]);
     Ad = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
 else
@@ -302,6 +302,9 @@ pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM
 
 %save a downsampled aligned recording
 fnDS = [fnstem '_REGISTERED_DOWNSAMPLED-' int2str(dsFac) 'x.tif'];
+if ~params.saveTif
+    fnDS = strrep(fnDS, '.tif', '.h5')
+end
 % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
 Bsum = zeros([size(viewR') numChannels]);
 Bcount = zeros([size(viewR') numChannels]);
@@ -328,7 +331,14 @@ nanCols = mean(mean(isnan(tiffSave),3),1) == 1;
 tiffSave(nanRows,:,:) = [];
 tiffSave(:,nanCols,:) = [];
 
-networkTiffWriter(tiffSave, [dr filesep fnDS], pixelscale);
+if params.saveTif
+    networkTiffWriter(tiffSave, [dr filesep fnDS], pixelscale);
+else
+    h5fn = [dr filesep strrep(fnDS,'.tif','.h5')];
+    h5sz = size(tiffSave);
+    h5create(h5fn, '/data', h5sz, 'Datatype', 'single', 'Deflate', 4, 'ChunkSize', [h5sz(1) h5sz(2) min(500, h5sz(3))]);
+    h5write(h5fn, '/data', tiffSave);
+end
 clear('tiffSave');
 
 % %save an average image for each channel
@@ -370,6 +380,9 @@ end
 % fTIF.close;
 
 fnRaw = [fnstem '_REGISTERED_RAW.tif'];
+if ~params.saveTif
+    fnRaw = strrep(fnRaw, '.tif', '.h5')
+end
 % fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
 tiffSave = single(zeros([size(viewR, [2 1]) - [sum(nanRows) sum(nanCols)] length(motionC)*numChannels]));
 for frame = 1:length(motionC)
@@ -382,7 +395,14 @@ for frame = 1:length(motionC)
     end
 end
 
-networkTiffWriter(single(tiffSave), [dr filesep fnRaw], pixelscale);
+if params.saveTif
+    networkTiffWriter(single(tiffSave), [dr filesep fnRaw], pixelscale);
+else
+    h5fn = [dr filesep strrep(fnRaw,'.tif','.h5')];
+    h5sz = size(tiffSave);
+    h5create(h5fn, '/data', h5sz, 'Datatype', 'single', 'Deflate', 4, 'ChunkSize', [h5sz(1) h5sz(2) min(500, h5sz(3))]);
+    h5write(h5fn, '/data', single(tiffSave));
+end
 clear('tiffSave')
 
 %save alignment metadata

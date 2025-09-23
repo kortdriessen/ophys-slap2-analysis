@@ -125,7 +125,12 @@ switch params.microscope
         activityChannel = params.activityChannel;
         numChannels = params.numChannels;
         fn = fnRaw;
-        IM = networkScanImageTiffReader([dr filesep fn]);
+        if endsWith(fn, '.h5')
+            desc = h5info([dr filesep fn]);
+            IM = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
+        else
+            IM = networkScanImageTiffReader([dr filesep fn]);
+        end
         IM = double(IM);
 
         selPx2D = any(selPix,3);

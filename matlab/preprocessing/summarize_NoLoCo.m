@@ -507,7 +507,12 @@ function [dFsel, F0selDS] = DFselAsync(path, discardFrames, selPix, motOutput, p
 baselineWindow = ceil(params.baselineWindow_Glu_s .* params.alignHz);
 denoiseWindow = ceil(params.denoiseWindow_s .* params.alignHz); %params.denoiseWindow_samps;
 
-rawIM = copyReadDeleteScanImageTiff(path);
+if endsWith(path, '.h5')
+    desc = h5info(path);
+    rawIM = h5read(path, ['/', desc.Datasets.Name]);
+else
+    rawIM = copyReadDeleteScanImageTiff(path);
+end
 rawIM = reshape(rawIM, size(rawIM,1), size(rawIM,2), params.numChannels, []); %deinterleave;
 rawIM = squeeze(rawIM(:,:,params.activityChannel,:));
 rawIM(:,:,discardFrames) = nan;

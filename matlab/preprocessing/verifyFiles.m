@@ -7,8 +7,8 @@ keepTrials = true(nDMDs, nTrials);
 for trialIx = nTrials:-1:1
     for DMDix = 1:nDMDs
         [~, tiffFn] = fileparts(trialTable.fnRegDS{DMDix,trialIx}); 
-        if isempty(dir([dr filesep tiffFn '.tif']))
-            disp(['Missing tiff file:' tiffFn])
+        if isempty(dir([dr filesep tiffFn '.tif'])) & isempty(dir([dr filesep tiffFn '.h5']))
+            disp(['Missing tiff or h5 file:' tiffFn])
             keepTrials(DMDix,trialIx) = false;
         end
         [~, alignFn] = fileparts(trialTable.fnAdata{DMDix,trialIx}); 

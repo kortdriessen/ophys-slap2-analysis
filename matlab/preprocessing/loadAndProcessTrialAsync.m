@@ -1,6 +1,11 @@
 function  [IM, meanIM, IMc, aData, peaks, discardFrames]= loadAndProcessTrialAsync(dr, fn, numChannels, params)
      %load the tiff
-    IM = copyReadDeleteScanImageTiff([dr filesep fn]);
+    if endsWith(fn, '.h5')
+        desc = h5info([dr filesep fn]);
+        IM = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
+    else
+        IM = copyReadDeleteScanImageTiff([dr filesep fn]);
+    end
     IM = reshape(IM, size(IM,1), size(IM,2), numChannels, []); %deinterleave;
 
     meanIM= mean(IM,4, 'omitnan');
