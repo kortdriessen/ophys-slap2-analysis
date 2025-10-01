@@ -1232,7 +1232,7 @@ def main():
         act_im[nan_mask] = np.nan
         
         act_im[nan_mask] = np.nanmedian(act_im.flatten())
-        act_im_filt = ndimage.gaussian_filter(act_im, sigma=[0.75, 0.75])
+        act_im_filt = ndimage.gaussian_filter(act_im, sigma=[0.5, 0.5])
         act_im_filt[nan_mask] = np.nan
         act_im[nan_mask] = np.nan
 
@@ -1240,25 +1240,41 @@ def main():
 
         # act_im_hp = act_im - ndimage.gaussian_filter(act_im, sigma=[10*i for i in psf_shape])
 
-        # Create a local maximum filter with a footprint of 3x3 pixels
-        local_max = ndimage.maximum_filter(act_im, size=3)
+        explored = act_im.copy()
+        nan_mask = np.isnan(explored)
+        explored[nan_mask] = -np.inf
 
-        maxima_mask = (act_im == local_max) & ~np.isnan(act_im)
+        pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=3))
+        pIM = np.zeros_like(act_im, dtype=bool)
+        while np.any(pTmp.flatten()):
+            pIM = pIM | pTmp
+            dilated_mask = ndimage.binary_dilation(pTmp, structure=np.ones((7,7))).astype(bool)
+            explored[dilated_mask] = -np.inf
+            pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=3))
+        # Create a local maximum filter with a footprint of 3x3 pixels
+        # local_max = ndimage.maximum_filter(act_im, size=3)
+
+        # maxima_mask = (act_im == local_max) & ~nan_mask
+        maxima_mask = pIM & ~nan_mask
 
         # Get coordinates and values of local maxima
         maxima_coords = np.where(maxima_mask)
         maxima_values = act_im[maxima_mask]
 
         # Sort maxima by value in descending order
-        sort_idx = np.argsort(-maxima_values)
-        maxima_coords = (maxima_coords[0][sort_idx], maxima_coords[1][sort_idx])
-        maxima_values = maxima_values[sort_idx]
+        # sort_idx = np.argsort(-maxima_values)
+        # maxima_coords = (maxima_coords[0][sort_idx], maxima_coords[1][sort_idx])
+        # maxima_values = maxima_values[sort_idx]
 
-        mad = np.median(np.abs(act_im[~np.isnan(act_im)] - np.median(act_im[~np.isnan(act_im)])))
-        thresh = 3 * 1.4826 * mad
+        # mad = np.median(np.abs(act_im[~np.isnan(act_im)] - np.median(act_im[~np.isnan(act_im)])))
+        # thresh = 3 * 1.4826 * mad
+        # valid_maxima = maxima_values > thresh
 
-        # Remove maxima that are within 3 pixels of nan values, unless they are in top 5%
-        valid_maxima = maxima_values > thresh
+        vals_transformed = np.cbrt(maxima_values)**2
+        mad_transformed = np.median(np.abs(vals_transformed - np.median(vals_transformed)))
+        thresh = np.median(vals_transformed) + 3 * 1.4826 * mad_transformed
+        valid_maxima = vals_transformed > thresh
+        
         maxima_coords = (maxima_coords[0][valid_maxima], maxima_coords[1][valid_maxima])
         maxima_values = maxima_values[valid_maxima]
         source_seeds = np.array(maxima_coords).T
