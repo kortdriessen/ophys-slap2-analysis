@@ -6,10 +6,10 @@ function hFig = plotTracesPanels(traces, varargin)
 %     'Color',[0 0.447 0.741], 'Fs',[], 'Title','')
 %
 % INPUT
-%   traces : [nROIs x nFrames x nChannels] numeric array
+%   traces : [nROIs x nFrames] or [nROIs x nFrames x nChannels] numeric array
 %
 % Name-Value options (all optional)
-%   'Channel'  : which channel to plot (default: 1)
+%   'Channel'  : which channel to plot (default: 1, only if traces is 3D)
 %   'ROIs'     : vector of ROI indices to include (default: 1:nROIs)
 %   'PerPanel' : number of ROIs per panel (default: 25)
 %   'NumCols'  : number of columns in the panel grid (default: 6)
@@ -23,8 +23,12 @@ function hFig = plotTracesPanels(traces, varargin)
 %   hFig : figure handle
 
 % ------------ Parse inputs
-validateattributes(traces, {'numeric'}, {'nonempty','ndims',3}, mfilename, 'traces', 1);
+validateattributes(traces, {'numeric'}, {'nonempty','ndims',2,3}, mfilename, 'traces', 1);
 [nROI, nFrames, nChan] = size(traces);
+
+if ndims(traces) == 3
+    nChan = size(traces, 3);
+end
 
 p = inputParser;
 addParameter(p,'Channel',1,@(x)isnumeric(x)&&isscalar(x)&&x>=1&&x<=nChan);
@@ -59,7 +63,7 @@ tlo  = tiledlayout(nRows, opt.NumCols, 'TileSpacing','compact','Padding','compac
 
 titleStr = string(opt.Title);
 if strlength(titleStr)==0
-    titleStr = sprintf('ROI Traces (Channel %d)', opt.Channel);
+    titleStr = sprintf('Source Traces (Channel %d)', opt.Channel);
 end
 title(tlo, titleStr, 'FontWeight','bold');
 
@@ -76,7 +80,11 @@ for pidx = 1:nPanels
     ax = nexttile; hold(ax,'on');
     for k = 1:nChunk
         r = chunk(k);
-        y = squeeze(traces(r,:,opt.Channel)) ./ opt.Scale - opt.Offset*(k-1);
+        if ndims(traces) == 3
+            y = squeeze(traces(r,:,opt.Channel)) ./ opt.Scale - opt.Offset*(k-1);
+        else
+            y = squeeze(traces(r,:)) ./ opt.Scale - opt.Offset*(k-1);
+        end
         plot(ax, x, y, 'Color', opt.Color, 'LineWidth', 0.8);
     end
 
@@ -87,7 +95,7 @@ for pidx = 1:nPanels
 
     xlim(ax, [x(1) x(end)]);
     xlabel(ax, xlab);
-    ylabel(ax, 'ROI #');
+    ylabel(ax, 'Source #');
     box(ax,'off');
 end
 end
