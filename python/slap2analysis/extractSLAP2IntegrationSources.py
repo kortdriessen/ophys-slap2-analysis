@@ -174,7 +174,10 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
     lastLine = trialTable['lastLine'][DMDix,trialIx]
 
     importlib.reload(slap2_utils)
-    hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
+    try:
+        hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
+    except:
+        hDataFile = slap2_utils.MultiDataFiles(os.path.join(dr, source_fn))
 
     linesPerCycle = hDataFile.header['linesPerCycle']
 
