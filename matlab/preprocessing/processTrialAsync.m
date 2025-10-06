@@ -144,15 +144,16 @@ switch params.microscope
             disp('Reordering channels for analysis!')
         end
         IM1 = squeeze(IM(:,:,1,:));
+        if numChannels==1
+            clear IM;
+        end
         IMsel = interpArray(IM1, any(selPix,3), motOutput); %interpolate the movie at the shifted coordinates
-
+        clear IM1;
         if numChannels==2
             IM2 =  squeeze(IM(:,:,2,:));
             clear IM;
             IM2sel = interpArray(IM2, any(selPix,3), motOutput); %interpolate the movie at the shifted coordinates
             clear IM2;
-        else %1 channel
-            clear IM;
         end
 
 end
