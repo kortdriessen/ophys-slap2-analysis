@@ -206,7 +206,8 @@ for DMDix = nDMDs:-1:1
     %strategy 1: find peaks directly on aligned activity image
     actIM = mean(actAligned(:,:,:,validTrials), 4, 'includenan');
     medIM = nanmedfilt2(actIM, (2*ceil(1.5*params.dXY)+1).*[1 1]);
-    actIM = actIM-medIM; %subtract a local baseline
+    actIM = actIM-medIM; %subtract a local baseline;
+    clear medIM
     explored = actIM; pTmp = explored>0 & explored == ordfilt2(explored, 9, ones(3));
     pIM = false(size(actIM));
     while any(pTmp(:))
@@ -214,6 +215,7 @@ for DMDix = nDMDs:-1:1
         explored(imdilate(pTmp, ones(5))) = 0;
         pTmp = explored>0 & explored == ordfilt2(explored, 9, ones(3));
     end
+    clear explored pTmp
 
     %Mask out somata from activity image
     somaMask = false(size(actIM));
@@ -336,7 +338,7 @@ for DMDix = nDMDs:-1:1
     exptSummary.perTrialActIMsAligned{DMDix} = actAligned;
     exptSummary.perTrialAlignmentOffsets{DMDix} = motOutput; %the alignment vector for each trial
 
-    clear meanAligned meanIM actAligned F0selDS E
+    clear meanAligned meanIM actAligned actIM F0selDS E
 end
 
 params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
