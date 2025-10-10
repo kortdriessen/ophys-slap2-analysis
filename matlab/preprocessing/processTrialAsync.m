@@ -259,6 +259,7 @@ exptSummary.dF.ls(:,:,1) = sum(W,1)'.*H5; %[source#, time, channel] LEAST SQUARE
 exptSummary.F0(:,:,1) = F0;
 exptSummary.footprints = single(Wfull);
 exptSummary.discardFrames = discard;
+exptSummary.frameLines = frameLines;
 
 
 %populate dF/F and noise estimation;
