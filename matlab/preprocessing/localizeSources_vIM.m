@@ -74,13 +74,16 @@ clear nans
 %nonmax suppression- find maxima
 skIm = zeros(sz(1:2));
 for fr = size(IMf,3)-ceil(1.5*tau):-1:2 %ceil(tau) because the filtering is uncertain in the final frames
+    
     IMfr = IMf(:,:,fr); IMpre = IMf(:,:,fr-1); IMpost = IMf(:,:,fr+1);
     
-    maxinds = find(IMfr==ordfilt2(IMfr,9, ones(3)));
-    sel = IMfr(maxinds)>0 & IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
-    %sel = IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
-    maxinds = maxinds(sel);
-    skIm(maxinds) = skIm(maxinds) + IMfr(maxinds).^2; 
+    selMax = IMfr==ordfilt2(IMfr,9, ones(3));
+    IMlocalMax(:,:,fr) = selMax & IMfr>IMpre & IMfr>=IMpost;
+    %maxinds = find(IMfr==ordfilt2(IMfr,9, ones(3)));
+    % sel = IMfr(maxinds)>0 & IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
+    % %sel = IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
+    % maxinds = maxinds(sel);
+    skIm(selMax) = skIm(selMax) + IMfr(selMax).^2; 
 end
 
 

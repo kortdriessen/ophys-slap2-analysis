@@ -1,5 +1,5 @@
 function [IM, vIM] = interpFrame(M1, viewC, viewR, freshness)
-%interpolates an image IM and computes the expected variance multiplier vIM
+%interpolates an image and computes the expected variance multiplier vIM
 sz = size(M1);
 
 c1 = (1-mod(viewC(1),1)).*(1-mod(viewR(1),1));

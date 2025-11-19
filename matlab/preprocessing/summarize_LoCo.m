@@ -60,7 +60,7 @@ end
 if ~exist(savedr, 'dir')
     mkdir(savedr);
 end
-fnsave = [savedr filesep 'Summary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
+fnsave = [savedr filesep 'SummaryLoCo-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %call up a GUI for the user to define Soma ROI and regions to exclude
 if params.drawUserRois
@@ -115,7 +115,7 @@ for DMDix = nDMDs:-1:1
             poolsize = p.NumWorkers;
         end
         nWorkers = min(params.nParallelWorkers, size(trialTable.filename,2));
-        if poolsize~=nWorkers
+        if poolsize~=nWorkers ||  ~strcmpi(class(p), 'parallel.ProcessPool')
             delete(gcp('nocreate'));
             parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
         end
@@ -322,5 +322,5 @@ else
     disp('Did not save processing.json')
 end
 
-disp('Done summarize_NoLoCo')
+disp('Done summarize_LoCo')
 end

@@ -3,7 +3,8 @@
 %Split out solver from simulation
 %implement parallelization across subproblems
 %
-%Baseline estimation- baseline seems to increase over iterations, Why??
+%Baseline estimation-
+%   add regressors?
 %
 % NaN handling!!
 
@@ -34,15 +35,19 @@ params.k_flip = k_flip;
 params.Hsigma = 1; %spatial filter for sources, 2D, usually a gaussian
 tmp = zeros(4*ceil(params.Hsigma)+1);
 tmp(ceil(end/2), ceil(end/2)) = 1;
-params.Hfilter = imgaussfilt(tmp, params.Hsigma, 'FilterSize',size(tmp,1));
+params.Hfilter= imgaussfilt(tmp, params.Hsigma, 'FilterSize',size(tmp,1));
 
-%precompute the filter for estimating high-frequency baseline changes from
+%precompute the filters for estimating high-frequency baseline changes from
 %surrounding pixels
 tmp = zeros(4*params.selRadius+1);
 tmp(ceil(end/2), ceil(end/2)) = 1;
 tmp1= imgaussfilt(tmp, params.selRadius, 'FilterSize',4*params.selRadius+1); tmp1 = tmp1./max(tmp1(:));
 tmp2 = imgaussfilt(tmp, params.selRadius/2,  'FilterSize',4*params.selRadius+1); tmp2 = tmp2./max(tmp2(:));
-params.Bfilter = max(0, tmp1-tmp2).^2;
+params.Bfilter(:,:,1) = max(0, tmp1-tmp2).^2;
+mask = zeros(size(tmp)); mask(:,ceil(end/2)+1:end) = 1; mask(:, ceil(end/2)) = 0.5;
+mask = mask-mean(mask(:));
+params.Bfilter(:,:,2) = params.Bfilter(:,:,1).*mask;
+params.Bfilter(:,:,3) = params.Bfilter(:,:,1).*mask';
 
 %simulate background
 Bim = imgaussfilt(rand(sz), 2); Bim = max(0, Bim-prctile(Bim(:),20))+(0.1.*Bim);
@@ -135,16 +140,15 @@ for problemIx = 1:CC.NumObjects %10
     [H_est,S_est, B_est] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params, GT);
 end
 
-keyboard
 %evaluate performance
 
 
-function [Hs_est,S_est, B_est, errFinal] = extractSources(Y_obs, F, sources, selPix, params, GT)
-%performs source extraction by alternating gradient descent on the
-%footprints and their activities,in a constrained NMF framework
+function [Hs_est,S_est_new, B_est, errFinal] = extractSources(Y_obs, Finv, sources, selPix, params, GT)
+%performs source extraction by alternating coordinate optimization on the
+%footprints (H,Hs), baseline (B), and source activities (S,X), in a constrained NMF framework
 
 %Yobs is [#selected pixels]x[#timepoints]
-%F is [#selected pixels]x[#timepoints], "freshness", proportional to #measurements averaged into each sample
+%Finv is [#selected pixels]x[#timepoints], 1./freshness, "freshness" is proportional to #measurements averaged into each sample
 %selpix is a 2D logical map, containing [#selected pixels] true values, that maps Yobs to 2D space
 %params
 
@@ -169,10 +173,10 @@ end
 
 %initialize B
 denoised = smoothdata(Y_obs,2,"movmean",params.denoiseWindow_samps,'omitmissing');
-LP = splitFreq(denoised, params.baselineWindow_samps);
+B_est = splitFreq(denoised, params.baselineWindow_samps);
+
 %medRes = median(denoised-LP,2);
-B_est = LP;
-typicalX = sqrt(mean((denoised(:,1:100)-LP(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
+typicalX = sqrt(mean((denoised(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
 
 %initialize S
 S_est = typicalX.*rand(num_sources,num_time_points);
@@ -188,7 +192,7 @@ problemH.lb = -eps*ones(size(Hs_est));
 problemH.ub = eps*ones(size(Hs_est));
 problemH.ub(Hvalid) = inf;
 
-nLoops = 3;
+nLoops = 4;
 if nargin>5 %ground truth supplied
     B_err = nan(1, nLoops);
     H_err = nan(1, nLoops);
@@ -217,25 +221,49 @@ for outerLoop = 1:nLoops
     if doFitS
         opts.TypicalX = typicalX;
         % Objective function handle (returns [f,g, Hinfo])
-        objS = @(x) objfun_S_wrapper(x, Y_obs, H_est, B_est, params.k, F, params.lambda);
+        objS = @(x) objfun_S_wrapper(x, Y_obs, H_est, B_est, params.k, Finv, params.lambda);
 
         % Hessian multiply for fmincon signature (x,y,flag)
-        opts.HessianMultiplyFcn = @(hinfo, v, flag) hessmult_S_wrapper(hinfo, Y_obs, H_est, B_est, params.k, F, params.lambda, v); %hessmult_S_wrapper takes (Svec, Z, H, B, k, F, lambda, v)
+        opts.HessianMultiplyFcn = @(hinfo, v, flag) hessmult_S_wrapper(hinfo, Y_obs, H_est, B_est, params.k, Finv, params.lambda, v); %hessmult_S_wrapper takes (Svec, Z, H, B, k, F, lambda, v)
 
         % Call fmincon
         [S_est_new, lossS] = fmincon(objS, S_est, [], [], [], [], problemS.lb, problemS.ub, [], opts);
     else
         S_est_new = S_est;
     end
+
+    if nargin>5 %if ground truth was supplied, make error plots
+        B_err(outerLoop+1) = mean(B_est(:)-GT.B(:)).^2;
+        H_err(outerLoop+1) = mean(H_est(:)-GT.H(:)).^2;
+        S_err(outerLoop+1) = 1-corr(S_est(:),GT.S(:));
+        plotGT(hAx, S_est, H_est, B_est, S_err, H_err, B_err, GT, selPix, params);
+        errFinal = S_err(outerLoop+1);
+    else
+        errFinal = nan;
+    end
+
+    if outerLoop==nLoops
+        break %we stop optimizing after fitting S on last loop
+    end
+
     %update X
     X_est_new = convn(S_est_new, params.k, 'same');
+    ord = ceil(params.baselineWindow_samps*0.4); % a percentile filter to remove overfit small spikes during iterations
+    Xfloor = smoothdata(ordfilt2(X_est_new,ord, ones(1,params.baselineWindow_samps)), 2,"movmean",params.baselineWindow_samps,"omitmissing");
+    X_est_new = max(0, X_est_new - Xfloor);
+
+    %SOLVE FOR B
+    if doFitB
+        B_est_new = fitB(Y_obs,X_est_new,H_est, Finv, selPix, Hvalid, params); %(Y,X, H, Finv, selPix, Hvalid, params)
+        B_est = B_est_new;
+    end
 
     %SOLVE FOR Hs
     if doFitH
         opts.TypicalX = max(H_est, 0.01);
         % Objective function handle (returns [f,g, Hinfo])
-        objHs = @(Hs) objfun_Hs_wrapper(Hs, Y_obs, X_est_new, B_est, params.Hfilter, selPix, F, params.lambda); %(Hs_vec, Z, X, B, kk, selPix, F, lambda, v)
-        opts.HessianMultiplyFcn = @(Hinfo, v, flag) hessmult_Hs_wrapper(Hinfo, Y_obs, X_est_new, B_est, params.Hfilter,selPix, F, params.lambda, v);
+        objHs = @(Hs) objfun_Hs_wrapper(Hs, Y_obs, X_est_new, B_est, params.Hfilter, selPix, Finv, params.lambda); %(Hs_vec, Z, X, B, kk, selPix, F, lambda, v)
+        opts.HessianMultiplyFcn = @(Hinfo, v, flag) hessmult_Hs_wrapper(Hinfo, Y_obs, X_est_new, B_est, params.Hfilter,selPix, Finv, params.lambda, v);
         % Call fmincon
         [Hs_est_new,lossH] = fmincon(objHs, Hs_est, [], [], [], [], problemH.lb, problemH.ub, [], opts);
     else
@@ -253,72 +281,75 @@ for outerLoop = 1:nLoops
     H_est_new = H_est_new./normFac;
     Hs_est_new = Hs_est_new./normFac;
     S_est_new = S_est_new.*normFac';
-    X_est_new = X_est_new.*normFac';
 
     %update with new values
     S_est = S_est_new;
     H_est = H_est_new;
     Hs_est = Hs_est_new;
-
-    if outerLoop==nLoops
-        break %we stop optimizing here, since updating B is only heuristic
-    end
-
-    %SOLVE FOR B
-    if doFitB
-        HX = H_est_new*X_est_new;
-        B_est_new = fitB(Y_obs,HX,B_est, selPix, params);
-        B_est = B_est_new;
-    end
-
-    if nargin>5 %if ground truth was supplied, make error plots
-        B_err(outerLoop+1) = mean(B_est(:)-GT.B(:)).^2;
-        H_err(outerLoop+1) = mean(H_est(:)-GT.H(:)).^2;
-        S_err(outerLoop+1) = 1-corr(S_est(:),GT.S(:));
-        plotGT(hAx, S_est, H_est, B_est, S_err, H_err, B_err, GT, selPix, params);
-        errFinal = S_err(outerLoop+1);
-    else
-        errFinal = nan;
-    end
+end
 end
 
 
+function preds = sinePredictors(t,basePeriod)
+T = 0:t-1;
+maxN = ceil(t/basePeriod);
+periods = (1:maxN)' .* basePeriod;
+phase = 2*pi*T./periods;
+preds = [sin(phase); cos(phase); T./max(T)-0.5];
 end
 
-%checkGradients
-% [valid,err] = checkGradients(problemS.objective, problemS.x0);
-[valid,err] = checkGradients(problemH.objective, problemH.x0);
-
-function B = fitB(Y,HX, B0, selPix, params)
+function B = fitB(Y,X, H, Finv, selPix, Hvalid, params)
 %fits a baseline (i.e. F0) to the measurements in Y, given the current
 %estimate of the activity, HX
+num_time_points = size(Y,2);
+[LP, HP] = splitFreq(Y-H*X, params.baselineWindow_samps);
+HPsurround = getSurround(HP,selPix,params);
+sinePreds = sinePredictors(num_time_points,2*params.baselineWindow_samps);
+%sqrtF = sqrt(1./Finv);
+%Yweighted = Y.*sqrtF; %multiply in the freshness effect
 
-%calculate corrections to avoid inflation of spikes
-meanRes = mean(Y-HX-B0,2, 'omitmissing');
-HXfloor = smoothdata(ordfilt2(HX,1, ones(1,params.baselineWindow_samps)), 2,"movmean",params.baselineWindow_samps,"omitmissing");
+for pxIx = size(Y,1):-1:1
+    nValid = sum(Hvalid(pxIx,:));
+    preds = [ X(Hvalid(pxIx,:),:) ; sinePreds; squeeze(HPsurround(pxIx,:,:))'; ones(1,num_time_points);]';
+    lb = -inf(1, size(preds,2)); lb(1:nValid) = 0;
+    ub = inf(1, size(preds,2));
+    b = lsqlin(preds,Y(pxIx,:)',[],[],[],[],lb,ub);
+    B(pxIx,:) = (preds(:,(nValid+1):end)*b((nValid+1):end))';
+end
+end
 
-HX1 = HX + meanRes- HXfloor; %adjust our fit by reducing the activity component; this encourages baseline to go up
-B1 = Y-HX1; %the data to fit
+function [LP,HP] = splitFreq(A, nSamps)
+nPages= floor(size(A,2)./nSamps);
+totSamps = nPages*nSamps;
+t = 1:size(A,2);
 
-%split into HighPass and LowPass components
-[LP, HP] = splitFreq(B1, params.baselineWindow_samps);
+a = reshape(A(:,1:totSamps), size(A,1), nSamps, nPages);
+aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
+a2 = a-aDS;
+sigma = std(reshape(a2, size(A,1),[]),0,2);
+sel = a2>1.5*sigma;
+a2(sel) = 0;
+a= a2 + aDS;
+aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
 
+tDS = (nSamps+1)/2 + (nSamps).*(0:size(aDS,3)-1);
+
+LP = nan(size(A));
+for pxIx = 1:size(LP,1)
+    LP(pxIx,:) = interp1(tDS,aDS(pxIx,:)',t,'linear','extrap');
+end
+HP = A-LP;
+end
+
+function HPsurround = getSurround(HP, selPix, params)
 %convert to pixel space
-HPfull = zeros(size(selPix,1), size(selPix,2), size(Y,2));
-LPfull = zeros(size(selPix,1), size(selPix,2), size(Y,2));
-HPfull(repmat(selPix, 1, 1, size(Y,2))) = HP;
-LPfull(repmat(selPix, 1, 1, size(Y,2))) = LP;
-
-%compute the ratio of the average highpass vs lowpass signal over surrounding pixels
-Bmod = convn(HPfull, params.Bfilter, 'same')./ convn(LPfull,params.Bfilter, 'same');
-
-%convert back to matrix form
-Bmod = reshape(Bmod, [], size(Bmod,3));
-Bmod = Bmod(selPix(:),:);
-
-%regressions
-b = sum(HP .* Bmod, 2) ./ sum(Bmod.^2, 2);
-B = LP + b.*Bmod;
+HPfull = zeros(size(selPix,1), size(selPix,2), size(HP,2));
+HPfull(repmat(selPix, 1, 1, size(HP,2))) = HP;
+for filtIx = size(params.Bfilter,3):-1:1
+    tmp = convn(HPfull, params.Bfilter(:,:,filtIx), 'same');
+    tmp = reshape(tmp, [], size(tmp,3));
+    HPsurround(:,:,filtIx) = tmp(selPix(:),:);
+end
 end
 
 function hAx = plotGT(hAx, S_est, H_est, B_est, S_err, H_err, B_err, GT, selPix, params)
@@ -331,29 +362,21 @@ if isempty(hAx) % SET UP PLOTS
     hAx(5) = subplot(3,2,5); title('H')
     hAx(6) = subplot(3,2,6); plot(H_err); title('H_err History')
 end
-
 sz = size(selPix);
-
 cla(hAx(1))
-imagesc(B_est - GT.B, 'parent', hAx(1)); title(hAx(1), '{B_{est} - B_{GT}}'); colorbar(hAx(1));
-
+imagesc(B_est - GT.B, 'parent', hAx(1), [-0.1 0.1]); title(hAx(1), '{B_{est} - B_{GT}}'); colorbar(hAx(1));
 plot(hAx(2), B_err); title(hAx(2), 'B error history');
-
 cla(hAx(3));
 plot(conv2(GT.S, params.k, 'same')' + (1:size(GT.S,1)), 'r','parent', hAx(3)),
 hold(hAx(3), 'on'),
 plot(conv2(S_est, params.k, 'same')' + (1:size(GT.S,1)), 'b', 'parent', hAx(3));
 set(hAx(3), 'xlim', [0 1000]);
 title(hAx(3), '{X_{est} (blue) , X_{GT} (red)} (first 1000 samples)');
-
 plot(hAx(4), S_err); title(hAx(4), 'S error history');
-
 cla(hAx(5))
 Him = nan(sz); Him(selPix) = sum(H_est,2);
 imagesc(Him, 'parent', hAx(5)); title(hAx(5), 'H');
-
 plot(hAx(6), H_err); title(hAx(6), 'H error history');
-
 drawnow
 end
 
@@ -364,7 +387,7 @@ function [f, gHs, HvHs] = objfun_Hs(Hs, Z, X, B, kk, selPix, F, lambda, v)
 %
 % Usage:
 %   [f, gHs] = objfun_Hs_new(Hs, Z, X, B, kk, F, lambda);
-%   [f, gHs, HvHs] = objfun_Hs_new(Hs, Z, X, B, kk, F, lambda, VHs);
+%   [~, ~, HvHs] = objfun_Hs_new(Hs, Z, X, B, kk, F, lambda, VHs);
 %
 % Inputs:
 %   Hs     : m-by-p matrix (optimization variable)
@@ -403,17 +426,13 @@ if nargin >= 9 && ~isempty(v)
 
         % Perturbation in T
         dT = V * X;                     % m-by-n
-
-        % coef = 2*(Z + lambda).^2 ./ (F .* (s.^3))
         coef = 2 .* (Z + lambda).^2 ./ ( F .* (s.^3) );   % m-by-n
-
-        % dp = coef .* dT  (elementwise)
         dp = coef .* dT;                % m-by-n
 
-        % Map back to H-space and then to Hs-space
+        % Map back to H-space
         HvH = dp * X.';                % m-by-p
 
-        %Backprop to Hs
+        %Backprop to Hs in real space
         tmp = zeros(size(selPix3D));
         tmp(selPix3D) = HvH;
         tmp = convn(tmp, rot90(kk,2), 'same');
@@ -423,12 +442,10 @@ if nargin >= 9 && ~isempty(v)
     gHs = [];
 else %loss and gradient
     % Compute loss
-    % Guard against zero or negative entries in F or s externally if needed.
     denom = F .* s;              % m-by-n
     f = sum( (E.^2) ./ denom , 'all' );
 
-    % Gradient wrt T (elementwise)
-    % p = - (2 E s + E.^2) ./ (F .* s.^2)
+    % Gradient wrt T
     p = - (2 .* E .* s + E.^2) ./ ( F .* (s.^2) );  % m-by-n
 
     % Gradient wrt H
@@ -541,25 +558,12 @@ function HvS = hessmult_S_wrapper(S, Z, H, B, k, F, lambda, v)
 end
 
 
-function [LP,HP] = splitFreq(A, nSamps)
-nPages= floor(size(A,2)/nSamps);
-totSamps = nPages*nSamps;
-t = 1:size(A,2);
 
-a = reshape(A(:,1:totSamps), size(A,1), nSamps, nPages);
-aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
-a2 = a-aDS;
-sigma = std(reshape(a2, size(A,1),[]),0,2);
-sel = a2>1.5*sigma;
-a2(sel) = 0;
-a= a2 + aDS;
-aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
 
-tDS = (nSamps+1)/2 + (nSamps).*(0:size(aDS,3)-1);
-
-LP = nan(size(A));
-for pxIx = 1:size(LP,1)
-    LP(pxIx,:) = interp1(tDS,aDS(pxIx,:)',t,'linear','extrap');
-end
-HP = A-LP;
-end
+% %calculate corrections to avoid inflation of spikes
+% %meanRes = mean(Y-HX-B0,2, 'omitmissing');
+% %HXfloor = smoothdata(ordfilt2(HX,1, ones(1,params.baselineWindow_samps)), 2,"movmean",params.baselineWindow_samps,"omitmissing");
+% %HX1 = HX + meanRes- HXfloor; %adjust our fit by reducing the activity component; this encourages baseline to go up
+% 
+% B1 = Y-HX; %the data to fit
+% B = splitFreqHelper(B1, selPix, params);

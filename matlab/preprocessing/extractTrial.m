@@ -1,7 +1,7 @@
-function [H,B,S,LS,F0,SNR] = extractTrial(Y_obs,Finv, sources, selPix, params, GT)
+function resultsFuture = extractTrial(Y_obs,Finv, sources, selPix, params, GT)
 
 if isempty(gcp('nocreate'))
-    parpool; % start pool if none
+    parpool('Threads'); % start pool if none
 end
 
 Y_obs = double(Y_obs);
@@ -17,7 +17,7 @@ CC = bwconncomp(selPix);
 nProblems = CC.NumObjects;
 analysisFutures = parallel.FevalFuture.empty(nProblems,0);
 sourceList = cell(1,nProblems);
-for problemIx = 1:nProblems %10
+for problemIx = 1:nProblems %9
     disp(['Solving subproblem ' int2str(problemIx) ' of ' int2str(CC.NumObjects)]);
     pxList = CC.PixelIdxList{problemIx};
     
@@ -28,7 +28,7 @@ for problemIx = 1:nProblems %10
     selPix_p(pxList) = true;
     sources_p.R = sources.R(selSources);
     sources_p.C = sources.C(selSources);
-    Y_p = Y_obs(selIdxs(pxList),:); %observations
+    Y_p = squeeze(Y_obs(selIdxs(pxList),:)); %observations
     F_inv_p = Finv(selIdxs(pxList),:); % inverse freshness
 
     %crop, to reduce memory and improve visualization
@@ -46,22 +46,22 @@ for problemIx = 1:nProblems %10
         GTp.Hs = GT.Hs(selIdxs(pxList), selSources); % superres source images; pixels x sources
 
         analysisFutures(problemIx) = parfeval(@extractSources, 6, Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
-        
-        %[Htmp,S_est{problemIx}, B_est{problemIx}, dFls, snr, errFinal] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
+        %[idx, Hi,Si,Bi, LSi, SNRi] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
     else
         analysisFutures(problemIx) = parfeval(@extractSources, 5, Y_p, F_inv_p, sources_p, selPix_p, params);
-        %[Htmp,S_est{problemIx}, B_est{problemIx}] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params);
+        %[idx, Hi,Si,Bi, LSi, SNRi] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params);
     end
-
 end
 
-%assemble results
-nSources = numel(sources.R);
-nTimepoints = size(Y_obs,2);
-nFutures = length(analysisFutures);
+resultsFuture = afterAll(analysisFutures,@(x)assembleResults(x, CC, selIdxs, sourceList, numel(sources.R), size(Y_obs,2)),6, "PassFuture",true);
+end
 
+function [H,B,S,LS,F0,SNR] = assembleResults(analysisFutures, CC, selIdxs, sourceList, nSources, nTimepoints)
+%assemble results
+sz = CC.ImageSize;
+nFutures = length(analysisFutures);
 H = nan([sz nSources], 'single');
-B = nan(size(Y_obs));
+B = nan(nnz(selIdxs>0), nTimepoints);
 S = nan(nSources, nTimepoints);
 LS = nan(nSources, nTimepoints);
 F0 = nan(nSources, nTimepoints);
@@ -86,6 +86,7 @@ end
 
 
 
+
 function [H_est,S_est_new, B_est, dFls, Xsnr, errFinal] = extractSources(Y_obs, Finv, sources, selPix, params, GT)
 %performs source extraction by alternating coordinate optimization on the
 %footprints (H,Hs), baseline (B), and source activities (S,X), in a constrained NMF framework
@@ -107,8 +108,9 @@ for six = num_sources:-1:1
     tmp = zeros(sz);
     tmp(sources.R(six), sources.C(six)) = 1;
 
-    tmpValid = imdilate(logical(tmp), strel('disk', params.dXY));
-    tmpHs = imdilate(tmp, strel('disk', ceil(params.dXY/2)));
+    tmpValid = imdilate(logical(tmp), params.validKernel);
+
+    tmpHs = imdilate(tmp, strel('disk', 1)); tmpHs = tmpHs./sum(tmpHs,'all');
     tmpH = imgaussfilt(tmpHs, params.sigma_px);
     
     Hs_est(:,six) = tmpHs(selPix); %initial estimate
@@ -117,11 +119,12 @@ for six = num_sources:-1:1
 end
 
 %initialize B
-denoised = smoothdata(Y_obs,2,"movmean",ceil(params.denoiseWindow_s.*params.analyzeHz),'omitmissing');
-B_est = splitFreq(denoised, params.baselineWindow_samps);
+params.denoiseWindow_samps = ceil(params.denoiseWindow_s.*params.analyzeHz);
+%denoised = smoothdata(Y_obs,2,"movmean",,'omitmissing');
+B_est = splitFreq(Y_obs, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps));
 
 %medRes = median(denoised-LP,2);
-typicalX = sqrt(mean((denoised(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
+typicalX = sqrt(mean((Y_obs(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
 
 %initialize S
 S_est = typicalX.*rand(num_sources,num_time_points);
@@ -206,11 +209,11 @@ for outerLoop = 1:params.nmfIter
     end
 
     Xfloor = computeFloor(X_est_new, params.denoiseWindow_samps, params.baselineWindow_samps);
-    X_est_new = max(0, X_est_new - Xfloor - Xnoise);
+    X_est_new = max(0, X_est_new - Xfloor - 2*Xnoise);
 
     %SOLVE FOR B
     if doFitB
-        B_est_new = fitB(Y_obs,X_est_new,H_est, Finv, selPix, Hvalid, params); %(Y,X, H, Finv, selPix, Hvalid, params)
+        B_est_new = fitB(B_est, Y_obs,X_est_new,H_est, Finv, selPix, params); %(Y,X, H, Finv, selPix, params)
         B_est = B_est_new;
     end
 
@@ -260,45 +263,56 @@ phase = 2*pi*T./periods;
 preds = [sin(phase); cos(phase); T./max(T)-0.5];
 end
 
-function B = fitB(Y,X, H, Finv, selPix, Hvalid, params)
+function B = fitB(B0,Y,X, H, Finv, selPix, params)
 %fits a baseline (i.e. F0) to the measurements in Y, given the current
 %estimate of the activity, HX
 num_time_points = size(Y,2);
-[LP, HP] = splitFreq(Y-H*X, params.baselineWindow_samps);
+[~, HP] = splitFreq(Y-H*X, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps));
 HPsurround = getSurround(HP,selPix,params);
-sinePreds = sinePredictors(num_time_points,2*params.baselineWindow_samps);
+sinePreds = sinePredictors(num_time_points,params.baselineWindow_samps);
 %sqrtF = sqrt(1./Finv);
 %Yweighted = Y.*sqrtF; %multiply in the freshness effect
 opts = optimoptions('lsqlin','Display','none');
 for pxIx = size(Y,1):-1:1
-    nValid = sum(Hvalid(pxIx,:));
-    preds = [ X(Hvalid(pxIx,:),:) ; sinePreds; squeeze(HPsurround(pxIx,:,:))'; ones(1,num_time_points);]';
-    lb = -inf(1, size(preds,2)); lb(1:nValid) = 0;
-    ub = inf(1, size(preds,2));
-    b = lsqlin(preds,Y(pxIx,:)',[],[],[],[],lb,ub,[],opts);
+    scale = mean(Y(pxIx,:));
+    nValid = size(H,2);
+    preds = [ H(pxIx,:)'.*X; sinePreds; squeeze(HPsurround(pxIx,:,:))'; ones(1,num_time_points).*scale;]';
+    lb = -10*scale.*ones(1, size(preds,2)); lb(1:nValid) = 0;
+    ub = 10*scale.*ones(1, size(preds,2));
+
+    %calculate weighted regression
+    W = sqrt(1./Finv(pxIx,:)) .*  B0(pxIx,:)./(B0(pxIx,:) + H(pxIx,:)*X);
+    preds_scaled = W'.*preds;
+    resp_scaled = W'.*Y(pxIx,:)';
+    
+    b = lsqlin(preds_scaled,resp_scaled,[],[],[],[],lb,ub,[],opts);
     B(pxIx,:) = max(params.lambda/10, (preds(:,(nValid+1):end)*b((nValid+1):end))');
 end
 end
 
-function [LP,HP] = splitFreq(A, nSamps)
+function [LP,HP] = splitFreq(A, nSamps, LPfactor)
 nPages= floor(size(A,2)./nSamps);
 totSamps = nPages*nSamps;
 t = 1:size(A,2);
 
 a = reshape(A(:,1:totSamps), size(A,1), nSamps, nPages);
-aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
-a2 = a-aDS;
-sigma = std(reshape(a2, size(A,1),[]),0,2);
-sel = a2>1.5*sigma;
-a2(sel) = 0;
-a= a2 + aDS;
-aDS = smoothdata(mean(a,2),3, 'lowess',15, 'omitmissing');
+Ma = mean(a,2);
+SMa = smoothdata(Ma,3, 'lowess',LPfactor, 'omitmissing');
+doLoop = true; loopIx = 0;
+while doLoop && loopIx<6
+    resid = Ma-SMa;
+    sigma = std(resid, 0,3, 'omitmissing');
+    ZMa = resid./sigma;
+    setNan = ZMa>2; doLoop = any(setNan(:)); loopIx = loopIx+1;
+    Ma(setNan) = nan;
+    SMa = smoothdata(Ma,3, 'lowess',LPfactor, 'omitmissing');
+    %Ma(setNan) = SMa(setNan);
+end
 
-tDS = (nSamps+1)/2 + (nSamps).*(0:size(aDS,3)-1);
-
+tDS = (nSamps+1)/2 + (nSamps).*(0:size(SMa,3)-1);
 LP = nan(size(A));
 for pxIx = 1:size(LP,1)
-    LP(pxIx,:) = interp1(tDS,aDS(pxIx,:)',t,'linear','extrap');
+    LP(pxIx,:) = interp1(tDS,SMa(pxIx,:)',t,'linear','extrap');
 end
 HP = A-LP;
 end
