@@ -22,6 +22,7 @@ end
 
 if redoAlignment
     %delete all the alignmentdata and aligned data files
+    try
     for ix = 1:numel(trialTable.fnRegDS)
         delete(trialTable.fnRegDS{ix});
     end
@@ -29,9 +30,12 @@ if redoAlignment
         delete(trialTable.fnAdata{ix});
     end
     trialTable = rmfield(trialTable, {'fnRegDS', 'fnAdata'});
+    catch
+    end
     movefile(ttfn, [dr filesep 'ttOld-' datestr(now, 'YYYYMMDD') '.mat'])
     save(ttfn, 'trialTable');
 
+    aParams.overwriteExisting =true;
     multiRoiRegSLAP2(ttfn,aParams)
 end
 summarize_LoCo(ttfn, sParams);
