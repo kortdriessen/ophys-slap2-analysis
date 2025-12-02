@@ -264,7 +264,7 @@ for DMDix = nDMDs:-1:1
     sources.R = sources.R(keepSources);
     sources.C = sources.C(keepSources);
     selPix = selPix(:,:,keepSources);
-    disp(['Number of sources: ' sum(keepSources)]);
+    disp(['Number of sources: ' int2str(sum(keepSources))]);
         
     %for each file, load high res data and refine
     params.tau_full=params.tau_s*params.analyzeHz;
@@ -295,7 +295,7 @@ for DMDix = nDMDs:-1:1
         %per-trial images
         exptSummary.E(:,DMDix) = E; %experiment data
     end
-
+    exptSummary.selPix{DMDix} = any(selPix,3);
     exptSummary.aData(:,DMDix) = alignData;
     exptSummary.userROIs{DMDix} = roiData;
     exptSummary.peaks{DMDix}= peaks;
