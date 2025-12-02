@@ -114,10 +114,18 @@ for DMDix = nDMDs:-1:1
         else
             poolsize = p.NumWorkers;
         end
-        nWorkers = min(params.nParallelWorkers, size(trialTable.filename,2));
+        
+        firstValidTrial = find(keepTrials(DMDix,:),1,"first");
+        dd = dir(trialTable.fnRegDS{DMDix, firstValidTrial});
+        fileSize = dd.bytes;
+        userMemInfo = memory;
+        memAvailable = userMemInfo.MemAvailableAllArrays;
+        maxWorkers = min(size(trialTable.filename,2), floor(0.13*memAvailable/fileSize));
+        nWorkers = min(params.nParallelWorkers, maxWorkers);
+        
         if poolsize~=nWorkers ||  ~strcmpi(class(p), 'parallel.ProcessPool')
             delete(gcp('nocreate'));
-            parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM %4-30-24, lowering processes again to prevent another error (18 --> 15)
+            parpool('processes',nWorkers); %limit the number of workers to avoid running out of RAM 
         end
     else
         delete(gcp('nocreate'));

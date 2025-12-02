@@ -2,7 +2,7 @@ function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardF
 curPool = gcp('nocreate');
 if isempty(curPool) || ~strcmpi(class(curPool), 'parallel.ThreadPool') %  ~strcmpi(class(curPool), 'parallel.ProcessPool') %
     delete(curPool);
-    parpool('Threads');
+    parpool('Threads'); %use all available Threads
 end
 numDatasets = numel(fls);
 E = cell(numDatasets,1); 
@@ -10,11 +10,11 @@ for i = 1:numDatasets
     nLoad = i;
     CD = loadTrial(dr, fns{nLoad},fls(nLoad),els(nLoad),selPix,discardFrames{nLoad}, alignData{nLoad}, mIM{nLoad}, motOutput(:,nLoad), roiData, params);
     E{i}.ROIs = CD.ROIs; E{i}.global = CD.global;
-    if i>1
-        E{i-1} = processResult(resultsFuture, E{i},params);
+    if i>1 %we process the previous trial after loading the next, to keep CPU usage up during loading
+        [E{i-1}, B] = processResult(resultsFuture, E{i-1},params);
         doPlot = false;
         if doPlot
-            plotE(E{i-1},Y,selPix); %the Y here is from the previous trial
+            plotE(E{i-1},Y,B,selPix); %the Y here is from the previous trial
         end
     end
     disp(['Processing dataset: ' fns{i}])
@@ -22,30 +22,30 @@ for i = 1:numDatasets
     resultsFuture = extractTrial(Y,CD.Finv, sources, any(selPix,3), params);
     clear CD;
 end
-E{i} = processResult(resultsFuture,E{i},params);
+[E{i}, B] = processResult(resultsFuture,E{i},params);
 
 if doPlot    
-    plotE(E{i},Y,selPix);
+    plotE(E{i},Y,B,selPix);
 end
 
 end
 % ---------------- Helper Functions ----------------
-function plotE(E, Y,selPix)
+function plotE(E, Y,B,selPix)
     %generate activity movie, baseline movie, and residual
     sel2D = any(selPix,3);
     Ht = reshape(E.footprints,numel(sel2D),[]);
     Ht = Ht(sel2D(:),:);
 
     Amov = max(0,Ht,'omitmissing')*max(0,E.dF.denoised,'omitmissing');
-    Rmov = Y - Amov - E.baseline;
+    Rmov = Y - Amov - B;
 
     render = zeros([size(sel2D) 500]);
-    render(repmat(sel2D,1,1,500)) = E.baseline(:,501:1000);
+    render(repmat(sel2D,1,1,500)) = B(:,501:1000);
 end
-function E = processResult(resultsFuture, E, params)
+function [E, B] = processResult(resultsFuture, E, params)
         [H,B,S,LS,F0,SNR] = fetchOutputs(resultsFuture);
         E.footprints = H;
-        E.baseline = B;
+        %E.baseline = single(B); %This is a huge variable and currently unused.
         E.dF.events = S;
         E.dF.denoised = convn(S,params.k,'same');
         E.dF.ls = LS;
@@ -126,23 +126,25 @@ switch params.microscope
             %compute user ROI activity
             for rix = length(roiData):-1:1
                 mask = roiData{rix}.mask;
-                tmp1 = Y2(mask(:),:,:); tmp2 = meanPx(mask(:),:,:);   tmp2(isnan(tmp2)) = 0;
-                nans= isnan(tmp1);
-
-                Fpx{rix}(:,fIxs,:) = tmp1;
-                CD.ROIs.F(rix, fIxs,:) = (sum(tmp1(~nans),1)./sum(tmp2(~nans),1)).*sum(tmp2,1);
+                tmp1 = Y2(mask(:),:,:);  %the data over the ROI pixels
+                Fpx{rix}(:,:,fIxs) = tmp1;
+                tmp2 = repmat(meanPx(mask(:),:), 1,1,numel(fIxs)); %the mean image over the ROI pixels
+                nans= isnan(tmp1) | isnan(tmp2);
+                tmp1(nans) = 0;
+                tmp2(nans) = 0;
+                CD.ROIs.F(rix,:,fIxs) = (sum(tmp1,1)./sum(tmp2,1)).*sum(meanPx(mask(:),:),1,'omitmissing'); %dFF over the valid pixels, times the mean
             end
         end
 
         %perform SVD on user ROIs to denoise
-        CD.ROIs.Fsvd = nan(length(roiData), nFrames, numChannels);
+        CD.ROIs.Fsvd = nan(length(roiData), numChannels, nFrames);
         for rix = 1:length(roiData)
             for cix = 1:numel(orderedChannels)
-                Dtmp = double(Fpx{rix}(:,:,cix));
+                Dtmp = squeeze(double(Fpx{rix}(:,cix,:)));
                 [UU,SS,VV,bg] = nansvd(Dtmp,3, 10, params.nanThresh);
                 roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
                 [~,selPC] = max(roiLikeness);
-                CD.ROIs.Fsvd(rix,:,cix) = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
+                CD.ROIs.Fsvd(rix,cix,:) = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
             end
         end
 
@@ -178,9 +180,9 @@ end
 
 discard = interp1(1:numel(discardFrames), double(discardFrames(:)), linspace(1, numel(discardFrames), size(IMsel,2)))>0; %upsample the discard frames
 IMsel(:,discard) = nan;     %throw away movement frames as above
-CD.global.F(discard,:) = nan;
-CD.ROIs.F(:, discard,:) = nan;
-CD.ROIs.Fsvd(:,discard,:) = nan;
+CD.global.F(:,discard) = nan;
+CD.ROIs.F(:, :, discard) = nan;
+CD.ROIs.Fsvd(:,:,discard) = nan;
 
 % Remove nans from IMsel and Finvsel
 nans = isnan(IMsel);

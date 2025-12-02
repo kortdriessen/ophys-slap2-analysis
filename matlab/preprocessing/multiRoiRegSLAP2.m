@@ -26,7 +26,7 @@ else
     poolsize = p.NumWorkers;
 end
 nWorkers = min([params.nWorkers, numel(trialTable.filename), feature('numcores')]);
-if poolsize<nWorkers
+if poolsize<nWorkers || ~strcmpi(class(p), 'parallel.ProcessPool')
     delete(gcp('nocreate'));
     if params.nWorkers<15
         warning('You are using few parallel workers!');

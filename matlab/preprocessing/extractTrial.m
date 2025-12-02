@@ -1,8 +1,4 @@
-function resultsFuture = extractTrial(Y_obs,Finv, sources, selPix, params, GT)
-
-if isempty(gcp('nocreate'))
-    parpool('Threads'); % start pool if none
-end
+function varargout = extractTrial(Y_obs,Finv, sources, selPix, params, GT)
 
 Y_obs = double(Y_obs);
 Finv = double(Finv);
@@ -10,26 +6,42 @@ sz = size(selPix);
 
 params.lambda = prctile(mean(Y_obs,2),5);
 
-%break the problem into separable chunks based on selPix
+%break the problem into separable chunks, i.e. nonoverlap sets
+zones = false(sz); zones(sub2ind(sz,sources.R,sources.C)) = true;
+zones = imdilate(zones, strel('disk', ceil(1.5*params.sigma_px+(size(params.validKernel,1)-1)/2)));
+CC = bwconncomp(zones,4);
+nProblems = CC.NumObjects;
+
 selIdxs = nan(sz);
 selIdxs(selPix) = 1:sum(selPix(:));
-CC = bwconncomp(selPix);
-nProblems = CC.NumObjects;
-analysisFutures = parallel.FevalFuture.empty(nProblems,0);
-sourceList = cell(1,nProblems);
+
+if nargout==1
+    doParallel = true;
+    if isempty(gcp('nocreate'))
+        parpool('Threads'); % start pool if none
+    end
+    analysisFutures = parallel.FevalFuture.empty(nProblems,0);
+else
+    doParallel = false;
+end
+
+sourceList = cell(1,nProblems); pxList_p = cell(1,nProblems);
 for problemIx = 1:nProblems %9
     disp(['Solving subproblem ' int2str(problemIx) ' of ' int2str(CC.NumObjects)]);
     pxList = CC.PixelIdxList{problemIx};
     
     selSources = any(sub2ind(sz,sources.R,sources.C)==pxList',2); 
-    sourceList{problemIx} = find(selSources);
-
-    selPix_p = false(sz);
-    selPix_p(pxList) = true;
     sources_p.R = sources.R(selSources);
     sources_p.C = sources.C(selSources);
-    Y_p = squeeze(Y_obs(selIdxs(pxList),:)); %observations
-    F_inv_p = Finv(selIdxs(pxList),:); % inverse freshness
+    sourceList{problemIx} = find(selSources);
+    
+    selPix_p = false(sz);
+    selPix_p(sub2ind(sz,sources_p.R,sources_p.C)) = true;
+    selPix_p = imdilate(selPix_p, strel('disk',params.selRadius)) & selPix;
+    pxList_p{problemIx} = find(selPix_p(:));
+
+    Y_p = squeeze(Y_obs(selIdxs(pxList_p{problemIx}),:)); %observations
+    F_inv_p = Finv(selIdxs(pxList_p{problemIx}),:); % inverse freshness
 
     %crop, to reduce memory and improve visualization
     rowSupport = [find(any(selPix_p,2),1,'first') find(any(selPix_p,2),1,'last')];
@@ -41,26 +53,42 @@ for problemIx = 1:nProblems %9
     if nargin>5 %Ground truth supplied
         GTp.S = GT.S(selSources,:); % spikes,sources x time
         GTp.X = GT.X(selSources,:); % S convolved with kernel
-        GTp.B = GT.B(selIdxs(pxList),:); % background
-        GTp.H = GT.H(selIdxs(pxList), selSources); % source images; pixels x sources
-        GTp.Hs = GT.Hs(selIdxs(pxList), selSources); % superres source images; pixels x sources
+        GTp.B = GT.B(selIdxs(pxList_p{problemIx}),:); % background
+        GTp.H = GT.H(selIdxs(pxList_p{problemIx}), selSources); % source images; pixels x sources
+        GTp.Hs = GT.Hs(selIdxs(pxList_p{problemIx}), selSources); % superres source images; pixels x sources
 
-        analysisFutures(problemIx) = parfeval(@extractSources, 6, Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
-        %[idx, Hi,Si,Bi, LSi, SNRi] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
+        if doParallel
+            analysisFutures(problemIx) = parfeval(@extractSources, 6, Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
+        else
+            [Hi,Si,Bi, LSi, SNRi, errFinal] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params, GTp);
+        end
     else
-        analysisFutures(problemIx) = parfeval(@extractSources, 5, Y_p, F_inv_p, sources_p, selPix_p, params);
-        %[idx, Hi,Si,Bi, LSi, SNRi] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params);
+        if doParallel
+            analysisFutures(problemIx) = parfeval(@extractSources, 5, Y_p, F_inv_p, sources_p, selPix_p, params);
+        else
+            [Hi,Si,Bi, LSi, SNRi] = extractSources(Y_p, F_inv_p, sources_p, selPix_p, params);
+        end
+    end
+
+    if ~doParallel %process this problem now
+        %TODO
+        H = []; B = []; S = []; LS = []; F0 = []; SNR = [];
     end
 end
 
-resultsFuture = afterAll(analysisFutures,@(x)assembleResults(x, CC, selIdxs, sourceList, numel(sources.R), size(Y_obs,2)),6, "PassFuture",true);
+if doParallel
+    varargout{1} = afterAll(analysisFutures,@(x)assembleResults(x, pxList_p, selIdxs, sourceList, numel(sources.R), size(Y_obs,2)),6, "PassFuture",true);
+else
+    varargout = {H,B,S,LS,F0,SNR};
+end
 end
 
-function [H,B,S,LS,F0,SNR] = assembleResults(analysisFutures, CC, selIdxs, sourceList, nSources, nTimepoints)
+function [H,B,S,LS,F0,SNR] = assembleResults(analysisFutures, pxList_p, selIdxs, sourceList, nSources, nTimepoints)
 %assemble results
-sz = CC.ImageSize;
+%sz = CC.ImageSize;
 nFutures = length(analysisFutures);
-H = nan([sz nSources], 'single');
+%H = nan([sz nSources], 'single');
+H = nan(nnz(selIdxs>0),nSources, 'single');
 B = nan(nnz(selIdxs>0), nTimepoints);
 S = nan(nSources, nTimepoints);
 LS = nan(nSources, nTimepoints);
@@ -69,17 +97,18 @@ SNR = nan(nSources,1);
 
 for j = 1:nFutures
     [idx, Hi,Si,Bi, LSi, SNRi] = fetchNext(analysisFutures);
-    nj = size(Hi,2); %number of sources in this subproblem
-    pxList = CC.PixelIdxList{idx};
+    %nj = size(Hi,2); %number of sources in this subproblem
+    pxList = pxList_p{idx};
     
-    tmp = nan([prod(sz), nj]);
-    tmp(pxList,:) = Hi;
-    H(:,:,sourceList{idx}) = reshape(tmp, [sz nj]); %footprints
+    %tmp = nan([prod(sz), nj]);
+    %tmp(pxList,:) = Hi;
+    %H(:,:,sourceList{idx}) = reshape(tmp, [sz nj]); %footprints
+    H(selIdxs(pxList),sourceList{idx}) = Hi;
     B(selIdxs(pxList),:) = Bi; %background
     
     S(sourceList{idx},:) = Si; %spikes
     LS(sourceList{idx},:) = LSi; %least squares estimate
-    F0(sourceList{idx},:) = (Hi'*Bi)./sum(Hi.^2,1)';
+    F0(sourceList{idx},:) = (Hi'*Bi)./sum(Hi.^2,1)'; %F0 is weighted background
     SNR(sourceList{idx}) = SNRi;
 end
 end
@@ -154,7 +183,7 @@ end
 opts = optimoptions('fmincon', ...
     'Algorithm','trust-region-reflective', ...   %'interior-point'
     'SpecifyObjectiveGradient',true,'SubproblemAlgorithm', 'cg', ...
-    'Display','none','MaxPCGIter', 50);
+    'Display','none','MaxPCGIter', 10);
 
 doFitS = true;
 doFitH = true;
@@ -162,7 +191,7 @@ doFitB = true;
 
 %OPTIMIZE
 for outerLoop = 1:params.nmfIter
-    opts.MaxIterations = 20*outerLoop;
+    opts.MaxIterations = 10*outerLoop;
 
     %SOLVE FOR S
     if doFitS
