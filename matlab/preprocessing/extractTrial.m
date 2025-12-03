@@ -150,7 +150,7 @@ end
 %initialize B
 params.denoiseWindow_samps = ceil(params.denoiseWindow_s.*params.analyzeHz);
 %denoised = smoothdata(Y_obs,2,"movmean",,'omitmissing');
-B_est = splitFreq(Y_obs, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps));
+B_est = max(params.lambda/10, splitFreq(Y_obs, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
 
 %medRes = median(denoised-LP,2);
 typicalX = sqrt(mean((Y_obs(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
