@@ -42,10 +42,10 @@ if isempty(vIM) %for raster imaging
     vIM = ones(sz(1:2));
 end
 varIM(nanFrac>0.4) = nan;
-Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to shot noise
+Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to electronic and dark noise
 IMb = smoothdata(IMf, 3, 'movmean', baselineWindow, 'omitnan');
-stdIM = sqrt((IMb+Vb).*vIM); %compute standard deviation
 
+stdIM = sqrt((100*IMb+Vb).*vIM); %compute standard deviation
 %Highpass filter in time; This must occur before DoG to avoid edge artifacts
 IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
 %divide by uncertainty to get a Z-score
