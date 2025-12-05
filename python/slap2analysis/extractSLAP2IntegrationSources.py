@@ -20,6 +20,7 @@ import slap2_utils
 import pandas as pd
 import subprocess
 from tqdm import tqdm
+import re
 
 sys.path.append('C:/Users/michael.xie/Documents/ophys-slap2-analysis/python')
 # sys.path.append(str(Path(__file__).parent.parent))
@@ -63,9 +64,10 @@ def fast_dilation(mask, kernel, iterations=1):
         kernel = np.ones((7, 7), np.uint8)  # Structuring element for XY dilation
     out = np.empty_like(mask)
     
-    # Iterate over Z slices (first dimension)
-    for z in range(mask.shape[0]):
-        out[z] = cv2.dilate(mask[z].astype(np.uint8), kernel, iterations=iterations)
+    # Iterate over all but last two dimensions
+    leading_shape = mask.shape[:-2]
+    for idx in np.ndindex(leading_shape):
+        out[idx] = cv2.dilate(mask[idx].astype(np.uint8, copy=False), kernel, iterations=iterations)
     
     return out.astype(bool)
 
@@ -150,12 +152,16 @@ def compute_f0(Fin, denoise_window: int, hull_window: int):
         FF[nan_mask] = fill[nan_mask]
         FF = _movmean_nan(FF, win)
 
+        nan_mask = np.isnan(FF)
+        if np.any(nan_mask):
+            FF = np.interp(sample_times, sample_times[~nan_mask], FF[~nan_mask])
+
         pchip = PchipInterpolator(sample_times, FF, extrapolate=True)
         F0[:,cix] = pchip(np.arange(T))
 
     return F0.reshape(orig_shape)
 
-def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable):
+def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable, all_channels=False):
     trialIx, keepTrial = trial_info
     
     if not keepTrial:
@@ -174,10 +180,10 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
     lastLine = trialTable['lastLine'][DMDix,trialIx]
 
     importlib.reload(slap2_utils)
-    try:
-        hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
-    except:
+    if re.search(r'CYCLE\d+', source_fn):
         hDataFile = slap2_utils.MultiDataFiles(os.path.join(dr, source_fn))
+    else:
+        hDataFile = slap2_utils.DataFile(os.path.join(dr, source_fn))
 
     linesPerCycle = hDataFile.header['linesPerCycle']
 
@@ -212,11 +218,14 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
     start_line_data_time = time.time()
     print(f"Getting line data for {len(all_lines)} lines", end="")
     # Get all line data at once
-    all_line_data = hDataFile.getLineData(all_lines, all_cycles, params['activityChannel'])
+    all_line_data = hDataFile.getLineData(all_lines, all_cycles, params['activityChannel'] if not all_channels else None)
     print(f" - completed in {time.time() - start_line_data_time:.3f} sec")
 
-    data = np.zeros((numSuperPixels,nDSframes))
-    dataCt = np.zeros((numSuperPixels,nDSframes))
+    data = np.zeros((numSuperPixels,nDSframes), dtype=np.float32)
+    dataCt = np.zeros((numSuperPixels,nDSframes), dtype=np.float32)
+    if all_channels:
+        data2 = np.zeros((numSuperPixels,nDSframes), dtype=np.float32)
+        dataCt2 = np.zeros((numSuperPixels,nDSframes), dtype=np.float32)
     # Initialize timing variables
     start_time = time.time()
 
@@ -262,14 +271,20 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
                 weight = weights[i]
                 data[matching_indices, DSframeIx] += line_data[matched_positions, 0] * weight
                 dataCt[matching_indices, DSframeIx] += weight
+                if all_channels:
+                    data2[matching_indices, DSframeIx] += line_data[matched_positions, 1] * weight
+                    dataCt2[matching_indices, DSframeIx] += weight
 
     aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
     aData['DSframes'] = aData['DSframes'] * hDataFile.metaData.linePeriod_s
     
-    return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s
+    if all_channels:
+        return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s, data2/100, dataCt2
+    else:
+        return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s
 
 def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
-                allSuperPixelIDs, dr, trialTable, A_final, uniqueMotionDS, motIndsToKeepDS, psf):
+                allSuperPixelIDs, dr, trialTable, A_final, uniqueMotionDS, motIndsToKeepDS, psf, soma_sps):
     trialIx, keepTrial, backgroundDS = trial_info
     
     if not isinstance(A_final, torch.Tensor):
@@ -284,7 +299,8 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
                     np.full((0,),np.nan), \
                         np.full((0,),np.nan), \
                             (np.full((0,),np.nan), np.full((0,),np.nan), np.full((0,),np.nan)), \
-                                (np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16))
+                                (np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16)), \
+                                    np.full((0,len(soma_sps[f'DMD{DMDix+1}'])),np.nan,dtype=np.float32)
 
     data_file = os.path.join(dr, f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
     if os.path.exists(data_file):
@@ -293,17 +309,21 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
         dataNonNorm = data_arrays['dataNonNorm']
         dataCt = data_arrays['dataCt']
         frames = data_arrays['DSframes']
+        data2NonNorm = data_arrays['data2NonNorm']
+        dataCt2 = data_arrays['dataCt2']
 
         aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
         aData['DSframes'] = data_arrays['aData_DSframes']
     else:
-        dataNonNorm, dataCt, aData, frames = get_trial_data(trial_info[:2], DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable)
+        dataNonNorm, dataCt, aData, frames, data2NonNorm, dataCt2 = get_trial_data(trial_info[:2], DMDix, params, sampFreq, refStack, fastZ2RefZ, allSuperPixelIDs, dr, trialTable, all_channels=True)
         # Save data arrays
         data_arrays = {
             'dataNonNorm': dataNonNorm,
             'dataCt': dataCt,
             'DSframes': frames,
-            'aData_DSframes': aData['DSframes']
+            'aData_DSframes': aData['DSframes'],
+            'data2NonNorm': data2NonNorm,
+            'dataCt2': dataCt2
         }
         np.savez(data_file, **data_arrays)
         print(f'Saved trial data to {data_file}')
@@ -315,6 +335,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
     numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
 
     data = dataNonNorm / dataCt
+    data2 = data2NonNorm / dataCt2
 
     motionR = np.interp(frames, aData['DSframes'][0], aData['motionDSr'].T[0])
     motionC = np.interp(frames, aData['DSframes'][0], aData['motionDSc'].T[0])
@@ -407,7 +428,12 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
 
     globalF = np.sum(data, axis=0)
 
-    return phi.numpy(), F0.numpy(), frames, selPixIdxs, globalF, (motionR, motionC, motionZ), (onlineYshifts, onlineXshifts, onlineZshifts)
+    F_soma = np.full((data.shape[1], len(soma_sps)), np.nan, dtype=np.float32)
+    for i, roi_sps in enumerate(soma_sps):
+        F_soma[:,i] = np.nansum(data2[roi_sps,:], axis=0)
+
+    return phi.numpy(), F0.numpy(), frames, selPixIdxs, globalF, \
+        (motionR, motionC, motionZ), (onlineYshifts, onlineXshifts, onlineZshifts), F_soma
 
 def create_parameter_gui():
     root = tk.Tk()
@@ -435,8 +461,8 @@ def create_parameter_gui():
     ttk.Entry(main_frame, textvariable=param_vars['analyzeHz'], width=15).grid(row=row, column=1, pady=2)
     row += 1
     
-    # Activity Channel
-    ttk.Label(main_frame, text="Activity Channel:").grid(row=row, column=0, sticky=tk.W, pady=2)
+    # Glutamate Channel
+    ttk.Label(main_frame, text="Glutamate Channel:").grid(row=row, column=0, sticky=tk.W, pady=2)
     param_vars['activityChannel'] = tk.IntVar(value=1)
     ttk.Entry(main_frame, textvariable=param_vars['activityChannel'], width=15).grid(row=row, column=1, pady=2)
     row += 1
@@ -458,7 +484,7 @@ def create_parameter_gui():
     param_vars['denoiseWindow_s'] = tk.DoubleVar(value=1)
     ttk.Entry(main_frame, textvariable=param_vars['denoiseWindow_s'], width=15).grid(row=row, column=1, pady=2)
     row += 1
-    
+
     # dXY
     ttk.Label(main_frame, text="dXY:").grid(row=row, column=0, sticky=tk.W, pady=2)
     param_vars['dXY'] = tk.IntVar(value=5)
@@ -483,6 +509,12 @@ def create_parameter_gui():
     ttk.Entry(main_frame, textvariable=param_vars['max_workers'], width=15).grid(row=row, column=1, pady=2)
     row += 1
     
+    # Select Soma
+    ttk.Label(main_frame, text="Select Soma?").grid(row=row, column=0, sticky=tk.W, pady=2)
+    param_vars['select_soma'] = tk.IntVar(value=False)
+    ttk.Entry(main_frame, textvariable=param_vars['select_soma'], width=15).grid(row=row, column=1, pady=2)
+    row += 1
+
     # Add some spacing
     row += 1
     
@@ -501,7 +533,8 @@ def create_parameter_gui():
                 'sparse_fac': float(np.exp(param_vars['sparse_fac_log'].get())),
                 'denoiseWindow_s': param_vars['denoiseWindow_s'].get(),
                 'operator': param_vars['operator'].get(),
-                'max_workers': param_vars['max_workers'].get()
+                'max_workers': param_vars['max_workers'].get(),
+                'select_soma': param_vars['select_soma'].get()
             }
             result['cancelled'] = False
             root.destroy()
@@ -600,13 +633,7 @@ def main():
     keepTrials = np.ones((nDMDs, nTrials), dtype=bool)
 
     for trialIx in range(nTrials-1, -1, -1):
-        for DMDix in range(nDMDs):
-            # Check registration TIFF files
-            # tiff_fn = os.path.splitext(os.path.basename(trialTable['fnRegDSInt'][DMDix,trialIx][0]))[0]
-            # if not os.path.exists(os.path.join(dr, tiff_fn + '.tif')):
-            #     print(f'Missing tiff file: {tiff_fn}')
-            #     keepTrials[DMDix,trialIx] = False
-                
+        for DMDix in range(nDMDs):                
             # Check alignment data files
             align_fn = os.path.splitext(os.path.basename(trialTable['fnAdataInt'][DMDix,trialIx][0]))[0]
             if not os.path.exists(os.path.join(dr, align_fn + '.mat')):
@@ -635,7 +662,7 @@ def main():
 
     # Load aData file
     aData = spio.loadmat(trialTable['fnAdataInt'][0,firstValidTrial][0])['aData'][0,0]
-    
+
     params['numChannels'] = aData['numChannels'][0,0]
     params['alignHz'] = aData['alignHz'][0,0]
 
@@ -679,9 +706,19 @@ def main():
 
     del sparseMaskInds_refs, allSuperPixelIDs_refs, fastZ2RefZ_refs
 
-    # Print shapes to verify
+    # Extract superpixel locations and print shapes to verify
     print("Shapes:")
+    subsampleMatrixInds = {}
     for DMDix in range(nDMDs):
+        numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
+        subsampleMatrixInds[f'DMD{DMDix+1}'] = np.zeros((numSuperPixels,2), dtype=np.int32)
+        for spIdx in range(numSuperPixels):
+            currSpInds = np.where(sparseMaskInds[f'DMD{DMDix+1}'][:,1] == spIdx+1)[0]
+            currSpOpenPixs = sparseMaskInds[f'DMD{DMDix+1}'][currSpInds,0]-1
+            spRefPix = currSpOpenPixs[np.floor(len(currSpOpenPixs)/2).astype(int)]
+            subsampleMatrixInds[f'DMD{DMDix+1}'][spIdx,0] = spRefPix
+            subsampleMatrixInds[f'DMD{DMDix+1}'][spIdx,1] = spIdx+1
+
         print(f"allSuperPixelIDs DMD{DMDix+1}: {allSuperPixelIDs['DMD'+str(DMDix+1)].shape}")
         print(f"sparseMaskInds DMD{DMDix+1}: {sparseMaskInds['DMD'+str(DMDix+1)].shape}")
 
@@ -710,6 +747,119 @@ def main():
             else:
                 print(f"No matching files found for DMD{DMDix+1}")
 
+    # Optional manual soma selection on reference images (scroll through fast-Z planes)
+    soma_masks = {}
+    soma_sps = {}
+    if params['select_soma']:
+        print('Manually select soma mask on each DMD based on the reference image')
+        print('Controls: E=edit/add ROIs on current plane, N/P=next/prev plane, ESC/Q=finish DMD')
+        for DMDix in range(nDMDs):
+            aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,firstValidTrial][0])['aData'][0,0]
+
+            avg_motionR = int(np.nanmedian(np.round(aData['motionDSr'].T[0])))
+            avg_motionC = int(np.nanmedian(np.round(aData['motionDSc'].T[0])))
+            avg_motionZ = int(np.nanmedian(np.round(aData['motionDSz'].T[0])))
+
+            soma_sps[f'DMD{DMDix+1}'] = []
+            ref = refStack[f'DMD{DMDix+1}']  # [channels, z, y, x]
+            num_ref_z = ref.shape[1]
+            yx_shape = (ref.shape[2], ref.shape[3])
+            # choose channel with largest mean intensity
+            ch_means = [np.nanmean(ref[c]) for c in range(ref.shape[0])]
+            best_ch = int(np.argmax(ch_means)) if len(ch_means) > 0 else 0
+
+            # Map fast-Z to ref-Z for viewing; adjust potential 1-based indexing
+            z_map = np.array(fastZ2RefZ[f'DMD{DMDix+1}'] + avg_motionZ).reshape(-1) - 1
+            num_fast_z = z_map.shape[0]
+            
+            sp_fastz = subsampleMatrixInds[f'DMD{DMDix+1}'][:,0] // (yx_shape[0]*yx_shape[1])
+            sp_cols = avg_motionC + (subsampleMatrixInds[f'DMD{DMDix+1}'][:,0] - sp_fastz * (yx_shape[0]*yx_shape[1])) // yx_shape[0]
+            sp_rows = avg_motionR + subsampleMatrixInds[f'DMD{DMDix+1}'][:,0] % yx_shape[0]
+            sp_mask = np.zeros((num_fast_z, *yx_shape), dtype=bool)
+            
+            # clip to valid bounds
+            valid = (sp_rows >= 0) & (sp_rows < yx_shape[0]) & (sp_cols >= 0) & (sp_cols < yx_shape[1]) & (sp_fastz >= 0) & (sp_fastz < num_fast_z)
+            if np.any(valid):
+                sp_mask[sp_fastz[valid], sp_rows[valid], sp_cols[valid]] = True
+
+            # mask in fast-Z space (store labels per plane)
+            mask_fastz = np.zeros((num_fast_z, *yx_shape), dtype=np.int8)
+
+            window_name = f'Select soma ROI(s) DMD{DMDix+1}'
+            cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+            cv2.resizeWindow(window_name, 800, 500)
+            cv2.createTrackbar('z', window_name, 0, max(0, num_fast_z-1), lambda v: None)
+
+            while True:
+                curr_fz = int(np.clip(cv2.getTrackbarPos('z', window_name), 0, max(0, num_fast_z-1)))
+                refz = int(np.clip(z_map[curr_fz], 0, max(0, num_ref_z-1)))
+
+                plane = ref[best_ch, refz]
+                im = np.nan_to_num(plane, nan=0.0)
+                vmin = np.percentile(im, 1)
+                vmax = np.percentile(im, 99.5)
+                if not np.isfinite(vmin):
+                    vmin = float(np.nanmin(im)) if np.any(np.isfinite(im)) else 0.0
+                if not np.isfinite(vmax):
+                    vmax = float(np.nanmax(im)) if np.any(np.isfinite(im)) else 1.0
+                if vmax <= vmin:
+                    vmax = vmin + 1.0
+                im8 = np.clip((im - vmin) / (vmax - vmin), 0, 1)
+                im8 = (im8 * 255).astype(np.uint8)
+
+                # show overlay text
+                disp = cv2.cvtColor(im8, cv2.COLOR_GRAY2BGR)
+                text = f'FastZ {curr_fz+1}/{num_fast_z} (RefZ {refz+1}/{num_ref_z}) | E=edit, N/P=nav, ESC=done'
+                cv2.putText(disp, text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2, cv2.LINE_AA)
+                # overlay superpixel mask (green) on current plane
+                if np.any(sp_mask[curr_fz]):
+                    sp_color = np.zeros_like(disp)
+                    sp_color[sp_mask[curr_fz]] = (0, 255, 0)
+                    alpha_sp = 0.25
+                    disp = cv2.addWeighted(disp, 1 - alpha_sp, sp_color, alpha_sp, 0)
+                # overlay drawn soma mask (red)
+                if (mask_fastz[curr_fz] > 0).any():
+                    roi_color = np.zeros_like(disp)
+                    roi_color[mask_fastz[curr_fz] > 0] = (0, 0, 255)
+                    alpha_roi = 0.3
+                    disp = cv2.addWeighted(disp, 1 - alpha_roi, roi_color, alpha_roi, 0)
+                cv2.imshow(window_name, disp)
+
+                key = cv2.waitKey(50) & 0xFF
+                if key == ord('e'):
+                    edit_name = f'Edit ROIs z={curr_fz+1}'
+                    # prepare edit image with superpixel overlay for context
+                    edit_disp = cv2.cvtColor(im8, cv2.COLOR_GRAY2BGR)
+                    if np.any(sp_mask[curr_fz]):
+                        sp_color = np.zeros_like(edit_disp)
+                        sp_color[sp_mask[curr_fz]] = (0, 255, 0)
+                        alpha_sp = 0.25
+                        edit_disp = cv2.addWeighted(edit_disp, 1 - alpha_sp, sp_color, alpha_sp, 0)
+                        rois = cv2.selectROIs(edit_name, edit_disp, showCrosshair=True, fromCenter=False)
+                        cv2.resizeWindow(edit_name, 800, 500)
+                        if rois is not None and len(rois) > 0:
+                            next_label = int(np.max(mask_fastz)) + 1
+                            for (x, y, w, h) in rois:
+                                mask_fastz[curr_fz, y:y+h, x:x+w] = next_label
+                                next_label += 1
+                            print(f'Added {len(rois)} ROI(s) at fast-Z {curr_fz+1} for DMD{DMDix+1}')
+                        cv2.destroyWindow(edit_name)
+                elif key == ord('n'):
+                    curr_fz = min(curr_fz + 1, num_fast_z - 1)
+                    cv2.setTrackbarPos('z', window_name, curr_fz)
+                elif key == ord('p'):
+                    curr_fz = max(curr_fz - 1, 0)
+                    cv2.setTrackbarPos('z', window_name, curr_fz)
+                elif key in (27, ord('q')):
+                    break
+
+            cv2.destroyWindow(window_name)
+
+            soma_masks[f'DMD{DMDix+1}'] = mask_fastz
+
+            for roi in range(np.max(mask_fastz)):
+                soma_sps[f'DMD{DMDix+1}'].append(np.flatnonzero(mask_fastz[sp_fastz, sp_rows, sp_cols] == roi + 1))
+
     # Get dilation 17 PSF or load in from file
     pattern = f"**/*DMD*-REFERENCE*"
     matching_files = list(Path(dr).glob(pattern))
@@ -731,7 +881,7 @@ def main():
             combined_dims[0] = max(psf[f'DMD{DMDix+1}'].shape[0], combined_dims[0])
             combined_dims[1] = max(psf[f'DMD{DMDix+1}'].shape[1], combined_dims[1])
 
-        psf_combined = np.zeros((nDMDs, combined_dims[0], combined_dims[1]))
+        psf_combined = np.zeros((nDMDs, combined_dims[0], combined_dims[1]), dtype=np.float32)
         for DMDix in range(nDMDs):
             psf_combined[DMDix] = np.pad(psf[f'DMD{DMDix+1}'], (((combined_dims[0] - psf[f'DMD{DMDix+1}'].shape[0])//2,(combined_dims[0] - psf[f'DMD{DMDix+1}'].shape[0])//2), ((combined_dims[1] - psf[f'DMD{DMDix+1}'].shape[1])//2,(combined_dims[1] - psf[f'DMD{DMDix+1}'].shape[1])//2)), constant_values = np.min(psf[f'DMD{DMDix+1}']))
 
@@ -772,49 +922,32 @@ def main():
         numFastZs = fastZ2RefZ[f'DMD{DMDix+1}'].shape[0]
         numSuperPixels = allSuperPixelIDs[f'DMD{DMDix+1}'].shape[0]
 
-        nPixels = dmdPixelsPerColumn * dmdPixelsPerRow
+        nPixels = dmdPixelsPerColumn * dmdPixelsPerRow * numFastZs
 
-        subsampleMatrixInds = np.zeros((numSuperPixels,2))
-        for spIdx in range(numSuperPixels):
-            currSpInds = np.where(sparseMaskInds[f'DMD{DMDix+1}'][:,1] == spIdx+1)[0]
-            currSpOpenPixs = sparseMaskInds[f'DMD{DMDix+1}'][currSpInds,0]-1
-            spRefPix = currSpOpenPixs[np.floor(len(currSpOpenPixs)/2).astype(int)]
-            subsampleMatrixInds[spIdx,0] = spRefPix
-            subsampleMatrixInds[spIdx,1] = spIdx+1
-
-        refPixs = torch.from_numpy(subsampleMatrixInds[:,0])
+        refPixs = torch.from_numpy(subsampleMatrixInds[f'DMD{DMDix+1}'][:,0])
         refD = torch.div(refPixs, (dmdPixelsPerColumn*dmdPixelsPerRow),rounding_mode='floor').int()
         refC = torch.div((refPixs - refD * (dmdPixelsPerColumn*dmdPixelsPerRow)), dmdPixelsPerColumn, rounding_mode='floor').int()
         refR = (refPixs % dmdPixelsPerColumn).int()
 
         filterSize = psf[f'DMD{DMDix+1}'].shape[0]*psf[f'DMD{DMDix+1}'].shape[1]
         
-        sparseHInds = np.zeros((2,numSuperPixels*filterSize))
-        sparseHVals = np.zeros((numSuperPixels*filterSize,))
-        for spIdx in range(subsampleMatrixInds.shape[0]):
-            tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
+        sparseHInds = np.zeros((2,numSuperPixels*filterSize), dtype=np.int32)
+        sparseHVals = np.zeros((numSuperPixels*filterSize,), dtype=np.float32)
+        for spIdx in range(subsampleMatrixInds[f'DMD{DMDix+1}'].shape[0]):
+            tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), dtype=np.float32)
             tmpMap[:] = np.nan
 
             tmpMap[refD[spIdx],
                     refR[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[0]//2+1,
                     refC[spIdx].int()-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx].int()+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
 
-            sparseHInds[0,spIdx*filterSize:(spIdx+1)*filterSize] = subsampleMatrixInds[spIdx,1] - 1
+            sparseHInds[0,spIdx*filterSize:(spIdx+1)*filterSize] = subsampleMatrixInds[f'DMD{DMDix+1}'][spIdx,1] - 1
             sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize] = np.where(~np.isnan(tmpMap.flatten()))[0]
 
             sparseHVals[spIdx*filterSize:(spIdx+1)*filterSize] = tmpMap.flatten()[sparseHInds[1,spIdx*filterSize:(spIdx+1)*filterSize].astype(np.uint32)]
         non_zero_mask = sparseHVals != 0
         sparseHVals = sparseHVals[non_zero_mask]
         sparseHInds = sparseHInds[:, non_zero_mask]
-
-        convMatrix = np.zeros((numSuperPixels,numSuperPixels))
-        for spIdx in range(subsampleMatrixInds.shape[0]):
-            tmpMap = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow))
-            tmpMap[refD[spIdx],
-                    refR[spIdx]-psf[f'DMD{DMDix+1}'].shape[0]//2:refR[spIdx]+psf[f'DMD{DMDix+1}'].shape[0]//2+1,
-                    refC[spIdx]-psf[f'DMD{DMDix+1}'].shape[1]//2:refC[spIdx]+psf[f'DMD{DMDix+1}'].shape[1]//2+1] = torch.from_numpy(psf[f'DMD{DMDix+1}'])
-
-            convMatrix[spIdx,:] = tmpMap[refD,refR,refC]
 
         trial_info = [(i, keepTrials[DMDix,i]) for i in range(nTrials)]
 
@@ -827,7 +960,8 @@ def main():
             fastZ2RefZ=fastZ2RefZ,
             allSuperPixelIDs=allSuperPixelIDs,
             dr=dr,
-            trialTable=trialTable
+            trialTable=trialTable,
+            all_channels=True
         )
 
         data_file = os.path.join(dr, f'lowres_data_DMD{DMDix+1}.npz')
@@ -841,18 +975,20 @@ def main():
             lowResMotionC = data_arrays['lowResMotionC']
             lowResMotionZ = data_arrays['lowResMotionZ']
             lowResTrialID = data_arrays['lowResTrialID']
+            lowResData2 = data_arrays['lowResData2']
+            lowResDataCt2 = data_arrays['lowResDataCt2']
         else:
             with mp.Pool(processes=min(params['max_workers'],min(mp.cpu_count(),len(trial_info)))) as pool:
                 results = list(pool.imap(get_trial_data_partial, trial_info))
 
             lowResData = np.concatenate([r[0] for r in results], axis=1)
             lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
-            # lowResBaseline = np.concatenate([r[2] for r in results], axis=1)
             lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results], axis=0)
             lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results], axis=0)
             lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results], axis=0)
-            # lowResBrightness = np.concatenate([r[2]['brightnessDS'] for r in results], axis=0)
             lowResTrialID = np.concatenate([np.ones_like(r[3])*i for i,r in enumerate(results)], axis=0)
+            lowResData2 = np.concatenate([r[4] for r in results], axis=1)
+            lowResDataCt2 = np.concatenate([r[5] for r in results], axis=1)
 
             # Save data arrays
             data_arrays = {
@@ -861,13 +997,25 @@ def main():
                 'lowResMotionR': lowResMotionR,
                 'lowResMotionC': lowResMotionC,
                 'lowResMotionZ': lowResMotionZ,
-                'lowResTrialID': lowResTrialID
+                'lowResTrialID': lowResTrialID,
+                'lowResData2': lowResData2,
+                'lowResDataCt2': lowResDataCt2
             }
             np.savez(data_file, **data_arrays)
             print(f'Saved low resolution data to {data_file}')
 
+        lowResDataNorm = lowResData / lowResDataCt
+        lowResData2Norm = lowResData2 / lowResDataCt2
+        del lowResData, lowResDataCt, lowResData2, lowResDataCt2
+        
         uniqueMotion, motInds = np.unique(np.round(np.concatenate((lowResMotionR,lowResMotionC,lowResMotionZ),axis=1)),axis=0,return_inverse=True)
         motIndsToKeep = (np.bincount(motInds) > 100).nonzero()[0]
+
+        mean_im = np.full((2,numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), np.nan, dtype=np.float32)
+        most_common_mot = np.argmax(np.bincount(motInds))
+        mean_im[0,refD,refR + int(uniqueMotion[most_common_mot,0]),refC + int(uniqueMotion[most_common_mot,1])] = np.nanmean(lowResDataNorm, axis=1)
+        mean_im[1,refD,refR + int(uniqueMotion[most_common_mot,0]),refC + int(uniqueMotion[most_common_mot,1])] = np.nanmean(lowResData2Norm, axis=1)
+        del lowResData2Norm
 
         uniqueMotionYX = np.unique(uniqueMotion[motIndsToKeep,:2],axis=0)
         uniqueMotionZ = np.unique(uniqueMotion[motIndsToKeep,2],axis=0)
@@ -879,7 +1027,7 @@ def main():
         selPixIdxs = np.flatnonzero(selPixMask)
 
         # Get pixel coordinates for selected pixels
-        pixel_coords = np.zeros((len(selPixIdxs), 3))  # [z, y, x] coordinates
+        pixel_coords = np.zeros((len(selPixIdxs), 3), dtype=np.int32)  # [z, y, x] coordinates
         for i, pixel_idx in enumerate(selPixIdxs):
             # Convert linear index to 3D coordinates
             z = pixel_idx // (dmdPixelsPerColumn * dmdPixelsPerRow)
@@ -894,42 +1042,16 @@ def main():
         # seed sources
         psf_shape = psf[f'DMD{DMDix+1}'].shape
         psf_center = (psf_shape[0] // 2, psf_shape[1] // 2)
-
-        # Convert selected pixel indices to 2D coordinates (vectorized)
-        sel_pixels_2d = np.column_stack([
-            (selPixIdxs % (dmdPixelsPerColumn * dmdPixelsPerRow)) // dmdPixelsPerRow,  # rows
-            (selPixIdxs % (dmdPixelsPerColumn * dmdPixelsPerRow)) % dmdPixelsPerRow    # cols
-        ])
-
-        # Pre-allocate result matrix
-        D = torch.zeros((len(selPixIdxs), len(selPixIdxs)), dtype=torch.float32)
-
-        # Vectorized computation using broadcasting
-        src_rows = sel_pixels_2d[:, 0][np.newaxis, :]  # Shape: (1, n_sources)
-        src_cols = sel_pixels_2d[:, 1][np.newaxis, :]  # Shape: (1, n_sources)
-        tgt_rows = sel_pixels_2d[:, 0][:, np.newaxis]  # Shape: (n_targets, 1)
-        tgt_cols = sel_pixels_2d[:, 1][:, np.newaxis]  # Shape: (n_targets, 1)
-
-        # Calculate relative positions
-        rel_rows = tgt_rows - src_rows + psf_center[0]  # Shape: (n_targets, n_sources)
-        rel_cols = tgt_cols - src_cols + psf_center[1]  # Shape: (n_targets, n_sources)
-
-        # Create mask for valid PSF indices
-        valid_mask = ((rel_rows >= 0) & (rel_rows < psf_shape[0]) & 
-                    (rel_cols >= 0) & (rel_cols < psf_shape[1]))
-
+        
         # Convert PSF to torch tensor and extract values where valid
         psf_tensor = torch.from_numpy(psf[f'DMD{DMDix+1}']).float()
         psf_tensor = psf_tensor / torch.sum(psf_tensor)
-        D[valid_mask] = psf_tensor[rel_rows[valid_mask], rel_cols[valid_mask]]
-        
+
         # Create expanded PSF with 5x resolution, maintaining center alignment
         ex_fac = 5
         psf_tensor_expanded = torch.zeros((psf_shape[0]*ex_fac, psf_shape[1]*ex_fac), dtype=torch.float32)
 
         # Calculate center points
-        orig_center_y = (psf_shape[0] - 1) / 2
-        orig_center_x = (psf_shape[1] - 1) / 2
         expanded_center_y = (psf_shape[0]*ex_fac - 1) / 2
         expanded_center_x = (psf_shape[1]*ex_fac - 1) / 2
 
@@ -939,213 +1061,169 @@ def main():
         expanded_y = torch.linspace(-expanded_center_y, expanded_center_y, psf_shape[0]*ex_fac)
         expanded_x = torch.linspace(-expanded_center_x, expanded_center_x, psf_shape[1]*ex_fac)
 
-        # Create meshgrids
-        orig_Y, orig_X = torch.meshgrid(orig_y, orig_x, indexing='ij')
-        expanded_Y, expanded_X = torch.meshgrid(expanded_y, expanded_x, indexing='ij')
-
         # Interpolate PSF values while maintaining center alignment
         interp_spline = RectBivariateSpline(orig_y.numpy(), orig_x.numpy(), psf_tensor.numpy())
         psf_tensor_expanded = torch.from_numpy(interp_spline(expanded_y.numpy(), expanded_x.numpy())).float()
 
         # Normalize expanded PSF
         psf_tensor_expanded = psf_tensor_expanded / torch.sum(psf_tensor_expanded)
-
-        D_expanded = torch.zeros_like(D)
-
         psf_shape_expanded = psf_tensor_expanded.shape
         psf_center_expanded = (psf_shape_expanded[0] // 2, psf_shape_expanded[1] // 2)
 
-        rel_rows_expanded = tgt_rows - src_rows + psf_center_expanded[0]
-        rel_cols_expanded = tgt_cols - src_cols + psf_center_expanded[1]
+        D = [None] * numFastZs
+        D_expanded = [None] * numFastZs
+        interp_data = np.full((selPixIdxs.shape[0],lowResDataNorm.shape[1]), np.nan, dtype=np.float32)
 
-        valid_mask_expanded = ((rel_rows_expanded >= 0) & (rel_rows_expanded < psf_shape_expanded[0]) & 
-                            (rel_cols_expanded >= 0) & (rel_cols_expanded < psf_shape_expanded[1]))
+        for z in tqdm(range(numFastZs),desc='Computing D matrices for each plane'):
+            zMask = selPixIdxs // (dmdPixelsPerColumn * dmdPixelsPerRow) == z
 
-        D_expanded[valid_mask_expanded] = psf_tensor_expanded[rel_rows_expanded[valid_mask_expanded], rel_cols_expanded[valid_mask_expanded]]
+            # Pre-allocate result matrix
+            D[z] = torch.zeros((len(selPixIdxs[zMask]), len(selPixIdxs[zMask])), dtype=torch.float32)
 
-        lowResDataNorm = lowResData / lowResDataCt
+            # Convert selected pixel indices to 2D coordinates (vectorized)
+            sel_pixels_2d = np.column_stack([
+                    (selPixIdxs[zMask] % (dmdPixelsPerColumn * dmdPixelsPerRow)) // dmdPixelsPerRow,  # rows
+                    (selPixIdxs[zMask] % (dmdPixelsPerColumn * dmdPixelsPerRow)) % dmdPixelsPerRow    # cols
+                ])
 
-        def build_interp_data(data, refR, refC, uniqueMotion, motInds,
-                        H=800, W=1280, dtype=np.float32):
-            # ---- normalize dtypes once
-            refR = np.asarray(refR, dtype=np.int32)
-            refC = np.asarray(refC, dtype=np.int32)
-            uniqueMotion = np.asarray(uniqueMotion, dtype=np.int32)
+            # Vectorized computation using broadcasting
+            src_rows = sel_pixels_2d[:, 0][np.newaxis, :]  # Shape: (1, n_sources)
+            src_cols = sel_pixels_2d[:, 1][np.newaxis, :]  # Shape: (1, n_sources)
+            tgt_rows = sel_pixels_2d[:, 0][:, np.newaxis]  # Shape: (n_targets, 1)
+            tgt_cols = sel_pixels_2d[:, 1][:, np.newaxis]  # Shape: (n_targets, 1)
 
-            # ---- compute windows once (mirrors your logic)
-            windowR = [max(0, refR.min()) + uniqueMotion[:,0].min(),
-                    min(H, refR.max()) + uniqueMotion[:,0].max()]
-            windowC = [max(0, refC.min()) + uniqueMotion[:,1].min(),
-                    min(W, refC.max()) + uniqueMotion[:,1].max()]
-            r0, r1 = int(windowR[0]), int(windowR[1])
-            c0, c1 = int(windowC[0]), int(windowC[1])
+            # Calculate relative positions
+            rel_rows = tgt_rows - src_rows + psf_center[0]  # Shape: (n_targets, n_sources)
+            rel_cols = tgt_cols - src_cols + psf_center[1]  # Shape: (n_targets, n_sources)
 
-            out = np.full((sel_pixels_2d.shape[0],data.shape[1]), np.nan, dtype=dtype)
+            # Create mask for valid PSF indices
+            valid_mask = ((rel_rows >= 0) & (rel_rows < psf_shape[0]) & 
+                        (rel_cols >= 0) & (rel_cols < psf_shape[1]))
 
-            # ---- frames per motion bucket (avoid (motInds==idx) every time)
-            frames_by_motion = {idx: np.flatnonzero(motInds == idx) for idx in np.unique(motInds)}
+            D[z][valid_mask] = psf_tensor[rel_rows[valid_mask], rel_cols[valid_mask]]
 
-            for m_idx in np.unique(motInds):
-                frames = frames_by_motion.get(m_idx)
-                if frames is None or frames.size == 0:
-                    continue
+            D_expanded[z] = torch.zeros_like(D[z], dtype=torch.float32)
 
-                # shift once per motion group
-                dR, dC = int(uniqueMotion[m_idx, 0]), int(uniqueMotion[m_idx, 1])
-                sR = refR + dR
-                sC = refC + dC
+            rel_rows_expanded = tgt_rows - src_rows + psf_center_expanded[0]
+            rel_cols_expanded = tgt_cols - src_cols + psf_center_expanded[1]
 
-                # columns that actually land in our window and have any samples
-                in_win = (sR >= r0) & (sR <= r1) & (sC >= c0) & (sC <= c1)
-                if not np.any(in_win):
-                    continue
-                cols = np.unique(sC[in_win])
+            valid_mask_expanded = ((rel_rows_expanded >= 0) & (rel_rows_expanded < psf_shape_expanded[0]) & 
+                                (rel_cols_expanded >= 0) & (rel_cols_expanded < psf_shape_expanded[1]))
 
-                # ---- precompute per-column row positions and 1D data indices (sorted by row)
-                rows_by_col = {}
-                idxs_by_col = {}
-                selPixIdxs_by_col = {}
-                single_point = []  # track columns with only one sample (no interpolation)
-                remaining_cols = np.unique(sel_pixels_2d[:,1])
-                for c in cols:
-                    mask = (sC == c)
-                    nnz = mask.sum()
-                    if nnz < 2:
-                        if nnz == 1:
-                            single_point.append(int(c))
-                        cols = np.delete(cols, np.flatnonzero(cols == c))
+            D_expanded[z][valid_mask_expanded] = psf_tensor_expanded[rel_rows_expanded[valid_mask_expanded], rel_cols_expanded[valid_mask_expanded]]
+
+            def build_interp_data(data, refR, refC, uniqueMotion, motInds,
+                            H=800, W=1280, dtype=np.float32):
+                # ---- normalize dtypes once
+                refR = np.asarray(refR, dtype=np.int32)
+                refC = np.asarray(refC, dtype=np.int32)
+                uniqueMotion = np.asarray(uniqueMotion, dtype=np.int32)
+
+                # ---- compute windows once (mirrors your logic)
+                windowR = [max(0, refR.min()) + uniqueMotion[:,0].min(),
+                        min(H, refR.max()) + uniqueMotion[:,0].max()]
+                windowC = [max(0, refC.min()) + uniqueMotion[:,1].min(),
+                        min(W, refC.max()) + uniqueMotion[:,1].max()]
+                r0, r1 = int(windowR[0]), int(windowR[1])
+                c0, c1 = int(windowC[0]), int(windowC[1])
+
+                out = np.full((sel_pixels_2d.shape[0],data.shape[1]), np.nan, dtype=dtype)
+
+                # ---- frames per motion bucket (avoid (motInds==idx) every time)
+                frames_by_motion = {idx: np.flatnonzero(motInds == idx) for idx in np.unique(motInds)}
+
+                for m_idx in np.unique(motInds):
+                    frames = frames_by_motion.get(m_idx)
+                    if frames is None or frames.size == 0:
                         continue
-                    rows = sR[mask].astype(np.int32)
-                    data_ix = np.flatnonzero(mask).astype(np.int32)
-                    order = rows.argsort(kind="mergesort")
-                    rows_by_col[int(c)] = rows[order]
-                    idxs_by_col[int(c)]  = data_ix[order]
-                    selPixIdxs_by_col[int(c)] = np.flatnonzero(sel_pixels_2d[:,1] == c)
-                    remaining_cols = np.delete(remaining_cols, np.flatnonzero(remaining_cols == c))
-                
-                closest_col = [None] * len(remaining_cols)
-                for i, c in enumerate(remaining_cols):
-                    closest_col[i] = cols[np.argmin(np.abs(cols - c))]
-                    selPixIdxs_by_col[int(c)] = np.flatnonzero(sel_pixels_2d[:,1] == c)
-                    selPixIdxs_by_col[int(c)] = selPixIdxs_by_col[int(c)][np.isin(sel_pixels_2d[selPixIdxs_by_col[int(c)],0],sel_pixels_2d[selPixIdxs_by_col[int(closest_col[i])],0])]
 
-                # ---- fill frames in this motion bucket
-                for f in tqdm(frames):
-                    yvec = data[:, f].astype(dtype, copy=False)
+                    # shift once per motion group
+                    dR, dC = int(uniqueMotion[m_idx, 0]), int(uniqueMotion[m_idx, 1])
+                    sR = refR + dR
+                    sR = sR.astype(np.int32, copy=False)
+                    sC = refC + dC
+                    sC = sC.astype(np.int32, copy=False)
 
-                    # interpolate only columns that have >= 2 samples
-                    for c, rows in rows_by_col.items():
-                        vals = yvec[idxs_by_col[c]]
-                        colSelPixIdxs = selPixIdxs_by_col[c]
-                        # interpolate just within our row window; outside stays NaN
-                        out[colSelPixIdxs, f] = np.interp(sel_pixels_2d[colSelPixIdxs,0], rows, vals, left=vals[0], right=vals[-1])
+                    # columns that actually land in our window and have any samples
+                    in_win = (sR >= r0) & (sR <= r1) & (sC >= c0) & (sC <= c1)
+                    if not np.any(in_win):
+                        continue
+                    cols = np.unique(sC[in_win])
 
-                    # keep single points (no interpolation), like your original code
-                    for c in single_point:
-                        # (exact row/val for that one sample)
-                        pos = np.flatnonzero((sC == c))[0]
-                        rr = sR[pos]
-                        if r0 <= rr <= r1:
-                            out[np.flatnonzero((sel_pixels_2d[:,1] == c) & (sel_pixels_2d[:,0] == rr)), f] = yvec[pos]
-
+                    # ---- precompute per-column row positions and 1D data indices (sorted by row)
+                    rows_by_col = {}
+                    idxs_by_col = {}
+                    selPixIdxs_by_col = {}
+                    single_point = []  # track columns with only one sample (no interpolation)
+                    remaining_cols = np.unique(sel_pixels_2d[:,1])
+                    for c in cols:
+                        mask = (sC == c)
+                        nnz = mask.sum()
+                        if nnz < 2:
+                            if nnz == 1:
+                                single_point.append(int(c))
+                            cols = np.delete(cols, np.flatnonzero(cols == c))
+                            continue
+                        rows = sR[mask]
+                        data_ix = np.flatnonzero(mask)
+                        order = rows.argsort(kind="mergesort")
+                        rows_by_col[int(c)] = rows[order]
+                        idxs_by_col[int(c)]  = data_ix[order]
+                        selPixIdxs_by_col[int(c)] = np.flatnonzero(sel_pixels_2d[:,1] == c)
+                        remaining_cols = np.delete(remaining_cols, np.flatnonzero(remaining_cols == c))
+                    
+                    closest_col = [None] * len(remaining_cols)
                     for i, c in enumerate(remaining_cols):
-                        closest_col_idx_mask = np.isin(sel_pixels_2d[selPixIdxs_by_col[closest_col[i]],0],sel_pixels_2d[selPixIdxs_by_col[c],0])
-                        out[selPixIdxs_by_col[c], f] = out[selPixIdxs_by_col[closest_col[i]][closest_col_idx_mask], f]
+                        closest_col[i] = cols[np.argmin(np.abs(cols - c))]
+                        selPixIdxs_by_col[int(c)] = np.flatnonzero(sel_pixels_2d[:,1] == c)
+                        selPixIdxs_by_col[int(c)] = selPixIdxs_by_col[int(c)][np.isin(sel_pixels_2d[selPixIdxs_by_col[int(c)],0],sel_pixels_2d[selPixIdxs_by_col[int(closest_col[i])],0])]
 
-            # out has shape: (n_frames, r1-r0+1, c1-c0+1), same as your bg_frame slice
-            return out, (r0, r1), (c0, c1)
+                    # ---- fill frames in this motion bucket
+                    for f in frames:
+                        yvec = data[:, f].astype(dtype, copy=False)
+
+                        # interpolate only columns that have >= 2 samples
+                        for c, rows in rows_by_col.items():
+                            vals = yvec[idxs_by_col[c]]
+                            colSelPixIdxs = selPixIdxs_by_col[c]
+                            # interpolate just within our row window; outside stays NaN
+                            out[colSelPixIdxs, f] = np.interp(sel_pixels_2d[colSelPixIdxs,0], rows, vals, left=vals[0], right=vals[-1])
+
+                        for i, c in enumerate(remaining_cols):
+                            closest_col_idx_mask = np.isin(sel_pixels_2d[selPixIdxs_by_col[closest_col[i]],0],sel_pixels_2d[selPixIdxs_by_col[c],0])
+                            out[selPixIdxs_by_col[c], f] = out[selPixIdxs_by_col[closest_col[i]][closest_col_idx_mask], f]
+
+                        # keep single points (no interpolation), like your original code
+                        for c in single_point:
+                            # (exact row/val for that one sample)
+                            pos = np.flatnonzero((sC == c))[0]
+                            rr = sR[pos]
+                            if r0 <= rr <= r1:
+                                out[np.flatnonzero((sel_pixels_2d[:,1] == c) & (sel_pixels_2d[:,0] == rr)), f] = yvec[pos]
+
+                # out has shape: (n_frames, r1-r0+1, c1-c0+1), same as your bg_frame slice
+                return out, (r0, r1), (c0, c1)
         
-        interp_data, (r0,r1), (c0,c1) = build_interp_data(lowResDataNorm, refR, refC, uniqueMotion, motInds)
-        # validFrames = ~np.all(np.isnan(interp_data),axis=0)
-        # interp_data_valid = interp_data[:,validFrames]
-        # validPix = np.all(~np.isnan(interp_data_valid),axis=1)
-        # interp_data_valid = interp_data_valid[validPix]
+            interp_data[zMask], _, _ = build_interp_data(lowResDataNorm[refD == z], refR[refD == z], refC[refD == z], uniqueMotion, motInds)
 
         baseline_window = int(params['alignHz']*params['baselineWindow_s'])
-        # nan_mask = np.isnan(interp_data)
-        # Fill NaN pixels with median value of each row (vectorized)
-        # row_medians = np.nanmedian(interp_data, axis=1, keepdims=True)
-        # interp_data = np.where(nan_mask, row_medians, interp_data)
+        nan_mask = np.isnan(interp_data)
+        interp_data[nan_mask] = np.nanmedian(interp_data[~nan_mask])
         interp_data_background = ndimage.uniform_filter1d(interp_data, size=baseline_window, axis=1, mode='nearest')
-        # interp_data_background = ndimage.percentile_filter(interp_data, size=(baseline_window,1), mode='nearest', percentile=40)
-        # interp_data_background = np.where(nan_mask,np.nan,interp_data_background)
+        interp_data_background[nan_mask] = np.nan
 
         del interp_data
-        # svd = TruncatedSVD(n_components=1)
-        # U = svd.fit_transform(interp_data_valid)
-        # V = svd.components_
-
-        # U_im = np.zeros((800*1280,))
-        # U_im[:] = np.nan
-
-        # U_im[selPixIdxs] = U[:,0]
-        # U_im = U_im.reshape((800,1280))
-
-        # background_spatial_components = np.zeros((numSuperPixels,len(motIndsToKeep)))
-        # for i in range(len(motIndsToKeep)):
-        #     motion_idx = motIndsToKeep[i]
-        #     dR, dC = int(uniqueMotion[motion_idx, 0]), int(uniqueMotion[motion_idx, 1])
-        #     sR = refR + dR
-        #     sC = refC + dC
-        #     background_spatial_components[:,i] = U_im[sR,sC]
-            # motion_frames = (motInds == motion_idx).nonzero()[0]
-            # background_spatial_components[:,i] = torch.median(data_for_nmf[:, motion_frames],dim=1)[0]
-            # background_spatial_components[:,i] = background_spatial_components[:,i] / torch.norm(background_spatial_components[:,i])
-
-        # precompute H matrices
-        H_mots = [None] * len(motIndsToKeep)
-        for i, motion_idx in enumerate(motIndsToKeep):
-            sparseHIndsShifted = sparseHInds.copy()
-            sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_idx,0].astype(int) * dmdPixelsPerRow + uniqueMotion[motion_idx,1].astype(int)
-
-            sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
-            sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
-            H_mots[i] = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
-        
-        # Pre-compute sparse matrix multiplications with D for all motion indices
-        HD_mots = [None] * len(H_mots)
-        for i in range(len(H_mots)):
-            HD = torch.sparse.mm(H_mots[i], D)
-            HD = HD / torch.sum(HD,dim=0,keepdim=True)
-
-            HD_expanded = torch.sparse.mm(H_mots[i], D_expanded)
-            HD_expanded = HD_expanded / torch.sum(HD_expanded,dim=0,keepdim=True)
-
-            HD_mots[i] = HD - HD_expanded
-
-            validPixMask = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), dtype=bool)
-            validPixMask[refD,refR + int(uniqueMotion[motIndsToKeep[i],0]),refC + int(uniqueMotion[motIndsToKeep[i],1])] = True
-            validPixMask = ndimage.binary_dilation(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]), dtype=bool))
-            validPixMask = ndimage.binary_erosion(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]*2-1), dtype=bool))
-            validPixIdxs = np.flatnonzero(validPixMask)
-
-            HD_mots[i][:,~np.isin(selPixIdxs,validPixIdxs)] = 0
-        
-        # background = np.zeros_like(lowResDataNorm)
-        # background[:] = np.nan
-        # bg_trace = np.full((lowResDataNorm.shape[1],),np.nan)
-        # for i, motion_idx in enumerate(motIndsToKeep):
-        #     motion_frames = (motInds == motion_idx).nonzero()[0]
             
-        #     # Get background component as contiguous vector
-        #     bg_comp = background_spatial_components[:,i]
-            
-        #     # Compute background trace more efficiently
-        #     bg_norm_sq = np.sum(bg_comp * bg_comp)
-        #     bg_trace[motion_frames] = (bg_comp @ lowResDataNorm[:,motion_frames]) / bg_norm_sq
-
-        #     background[:,motion_frames] = np.outer(bg_comp, bg_trace[motion_frames])
-            
-        background = np.zeros_like(lowResDataNorm)
-        background[:] = np.nan
+        background = np.full_like(lowResDataNorm, np.nan, dtype=np.float32)
         
-        for motion_idx in tqdm(np.unique(motInds)):
+        for motion_idx in tqdm(np.unique(motInds),desc='Computing background for all motion indices'):
             motion_frames = (motInds == motion_idx).nonzero()[0]
             dR, dC = int(uniqueMotion[motion_idx, 0]), int(uniqueMotion[motion_idx, 1])
+            sD = refD
             sR = refR + dR
             sC = refC + dC
 
-            shifted_indices = sR * 1280 + sC
+            shifted_indices = sD * (dmdPixelsPerColumn * dmdPixelsPerRow) + sR * dmdPixelsPerRow + sC
             
             # Vectorized operation: create mapping from selPixIdxs to shifted positions
             # This avoids creating the full 800*1280 array for each frame
@@ -1163,13 +1241,65 @@ def main():
         residualFilt = signal.convolve2d(residual,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
         # data_for_nmf = torch.from_numpy(data_for_nmf.astype(np.float32))
 
-            
-        rho = np.zeros((lowResData.shape[1],len(selPixIdxs)))
-        rho[:] = np.nan
+        # precompute H matrices
+        H_mots = [None] * len(motIndsToKeep)
         for i, motion_idx in enumerate(motIndsToKeep):
+            sparseHIndsShifted = sparseHInds.copy()
+            sparseHIndsShifted[1,:] = sparseHIndsShifted[1,:] + uniqueMotion[motion_idx,0].astype(int, copy=False) * dmdPixelsPerRow + uniqueMotion[motion_idx,1].astype(int, copy=False)
+
+            sparseHIndsShiftedSelPix = sparseHIndsShifted.copy()
+            sparseHIndsShiftedSelPix[1] = np.searchsorted(selPixIdxs,sparseHIndsShifted[1])
+            H_mots[i] = torch.sparse_coo_tensor(sparseHIndsShiftedSelPix,sparseHVals,(numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32)
+        
+        # Pre-compute sparse matrix multiplications with D for all motion indices
+        HD_mots = [torch.zeros((numSuperPixels,selPixIdxs.shape[0]),dtype=torch.float32) for _ in range(len(H_mots))]
+        for i in tqdm(range(len(H_mots)),desc='Computing HD matrices for all motion indices'):
+            for z in range(numFastZs):
+                zMask = selPixIdxs // (dmdPixelsPerColumn * dmdPixelsPerRow) == z
+                H_mot = H_mots[i].coalesce()
+                H_idxs = H_mot.indices()
+                H_vals = H_mot.values()
+                nrows, ncols = H_mot.size()
+                keep_mask = zMask[H_idxs[1]]
+                new_ncols = int(zMask.sum().item())
+
+                remap = torch.full((ncols,),-1, dtype=torch.long, device=H_idxs.device)
+                remap[zMask] = torch.arange(new_ncols,device=H_idxs.device)
+
+                new_rows = H_idxs[0, keep_mask]
+                new_cols = remap[H_idxs[1, keep_mask]]
+                new_idxs = torch.stack([new_rows, new_cols], dim=0)
+                new_vals = H_vals[keep_mask]
+
+                H_sub = torch.sparse_coo_tensor(new_idxs, new_vals, (nrows, new_ncols), dtype=torch.float32).coalesce()
+
+                HD = torch.sparse.mm(H_sub, D[z])
+                HD = HD / torch.sum(HD,dim=0,keepdim=True)
+
+                HD_expanded = torch.sparse.mm(H_sub, D_expanded[z])
+                HD_expanded = HD_expanded / torch.sum(HD_expanded,dim=0,keepdim=True)
+
+                HD_mots[i][:,zMask] = HD - HD_expanded
+
+            validPixMask = np.zeros((numFastZs,dmdPixelsPerColumn,dmdPixelsPerRow), dtype=bool)
+            validPixMask[refD,refR + int(uniqueMotion[motIndsToKeep[i],0]),refC + int(uniqueMotion[motIndsToKeep[i],1])] = True
+            validPixMask = ndimage.binary_dilation(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]), dtype=bool))
+            validPixMask = ndimage.binary_erosion(validPixMask, structure=np.ones((1,psf[f'DMD{DMDix+1}'].shape[0],psf[f'DMD{DMDix+1}'].shape[1]*2-1), dtype=bool))
+            validPixIdxs = np.flatnonzero(validPixMask)
+
+            HD_mots[i][:,~np.isin(selPixIdxs,validPixIdxs)] = 0
+        
+            
+        rho = np.zeros((lowResDataNorm.shape[1],len(selPixIdxs)), dtype=np.float32)
+        rho[:] = np.nan
+        for i, motion_idx in tqdm(enumerate(motIndsToKeep),desc='Computing rho for all motion indices'):
             motion_frames = (motInds == motion_idx).nonzero()[0]
             # Use pre-computed HD matrix
             rho[motion_frames,:] = residualFilt[:,motion_frames].T @ HD_mots[i].numpy()
+        
+        del HD_mots
+
+        rho[rho == 0] = np.nan
 
         # Process frames more efficiently by avoiding unnecessary allocations
         n_frames = rho.shape[0]
@@ -1177,17 +1307,25 @@ def main():
         num_batches = int(np.ceil(n_frames / batch_size))
         
         # Pre-compute 2D coordinates once
-        spatial_coords = np.unravel_index(selPixIdxs, (dmdPixelsPerColumn, dmdPixelsPerRow))
-        row_indices = spatial_coords[0][None, :]  # Shape: (1, len(selPixIdxs))
-        col_indices = spatial_coords[1][None, :]  # Shape: (1, len(selPixIdxs))
+        spatial_coords = np.unravel_index(selPixIdxs, (numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow))
+        depth_indices = spatial_coords[0][None, :]
+        row_indices = spatial_coords[1][None, :]  # Shape: (1, len(selPixIdxs))
+        col_indices = spatial_coords[2][None, :]  # Shape: (1, len(selPixIdxs))
         
         # Pre-compute dilation structure
-        dilation_struct = np.ones((1,7,7))
+        dilation_struct = np.ones((3,3), dtype=np.uint8)
         
         # Initialize output array
-        rho_activity = np.zeros((dmdPixelsPerColumn, dmdPixelsPerRow))
+        act_im = np.zeros((numFastZs,dmdPixelsPerColumn, dmdPixelsPerRow), dtype=np.float32)
         temporal_pad = 1
-        
+
+        # Preallocate reusable buffers for the largest needed batch (including temporal padding)
+        prealloc_size = int(min(batch_size + 2*temporal_pad, n_frames))
+        batch_rho = np.empty((prealloc_size, numFastZs, dmdPixelsPerColumn, dmdPixelsPerRow), dtype=np.float32)
+        local_maxima = np.empty_like(batch_rho, dtype=bool)
+        nan_mask = np.empty_like(batch_rho, dtype=bool)
+        time_indices_pre = np.arange(prealloc_size)[:, None]
+
         for batch_idx in tqdm(range(num_batches), desc="Creating activity map"):
             # Calculate batch bounds
             batch_start = batch_idx * batch_size 
@@ -1196,46 +1334,45 @@ def main():
             padded_end = min(n_frames, batch_end + temporal_pad)
             curr_size = padded_end - padded_start
             
-            # Allocate batch arrays - use float32 for memory efficiency
-            batch_rho = np.zeros((curr_size, dmdPixelsPerColumn, dmdPixelsPerRow), dtype=np.float32)
-            
-            # Fill batch data more efficiently using advanced indexing
-            time_indices = np.arange(curr_size)[:, None]
-            batch_rho[time_indices, row_indices, col_indices] = rho[padded_start:padded_end, :].astype(np.float32)
-            batch_rho[batch_rho == 0] = np.nan
+            # Views into preallocated buffers for the current batch
+            br = batch_rho[:curr_size]
+            lm = local_maxima[:curr_size]
+            nm = nan_mask[:curr_size]
+
+            # Reset buffers
+            br.fill(np.nan)
+
+            # Fill batch data and record which voxels were written
+            time_indices = time_indices_pre[:curr_size]
+            br[time_indices, depth_indices, row_indices, col_indices] = rho[padded_start:padded_end, :]
 
             # Handle NaN values
-            nan_mask = np.isnan(batch_rho)
-            batch_rho[nan_mask] = 0
-            dilated_nan_mask = fast_dilation(nan_mask, dilation_struct[0])
+            np.isnan(br, out=nm)
+            br[nm] = 0
+            dilated_nan_mask = fast_dilation(nm, dilation_struct)
 
             # Calculate local maxima directly without intermediate mask array
-            local_maxima = np.zeros_like(batch_rho, dtype=bool)
-            local_maxima[1:-1,1:-1,1:-1] = (batch_rho[1:-1,1:-1,1:-1] > batch_rho[:-2,1:-1,1:-1]) & \
-                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[2:,1:-1,1:-1]) & \
-                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,:-2,1:-1]) & \
-                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,2:,1:-1]) & \
-                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,1:-1,:-2]) & \
-                                          (batch_rho[1:-1,1:-1,1:-1] > batch_rho[1:-1,1:-1,2:])
+            lm.fill(False)
+            lm[1:-1,:,1:-1,1:-1] = (br[1:-1,:,1:-1,1:-1] > br[:-2,:,1:-1,1:-1]) & \
+                                   (br[1:-1,:,1:-1,1:-1] > br[2:,:,1:-1,1:-1]) & \
+                                   (br[1:-1,:,1:-1,1:-1] > br[1:-1,:,:-2,1:-1]) & \
+                                   (br[1:-1,:,1:-1,1:-1] > br[1:-1,:,2:,1:-1]) & \
+                                   (br[1:-1,:,1:-1,1:-1] > br[1:-1,:,1:-1,:-2]) & \
+                                   (br[1:-1,:,1:-1,1:-1] > br[1:-1,:,1:-1,2:])
             
             # Combine conditions and compute activity in one step
-            valid_maxima = local_maxima & ~dilated_nan_mask
-            start_offset = batch_start - padded_start
-            end_offset = start_offset + (batch_end - batch_start)
-            rho_activity += np.sum(np.where(valid_maxima[start_offset:end_offset], 
-                                          batch_rho[start_offset:end_offset]**3, 0), 
-                                 axis=0)
+            lm &= ~dilated_nan_mask
+            act_im += np.sum(lm * (br**3), axis=0, dtype=np.float32)
 
-        act_im = rho_activity.copy()
         nan_mask = (act_im == 0) | (np.isnan(act_im))
         act_im[nan_mask] = np.nan
 
-        med_act_im = ndimage.generic_filter(act_im, np.nanmedian, size=(15,15))
+        med_act_im = ndimage.generic_filter(act_im, np.nanmedian, size=(1,15,15))
         act_im = act_im - med_act_im
         act_im[nan_mask] = np.nan
         
         act_im[nan_mask] = np.nanmedian(act_im.flatten())
-        act_im_filt = ndimage.gaussian_filter(act_im, sigma=[0.5, 0.5])
+        act_im_filt = ndimage.gaussian_filter(act_im, sigma=[0, 0.5, 0.5])
         act_im_filt[nan_mask] = np.nan
         act_im[nan_mask] = np.nan
 
@@ -1247,13 +1384,19 @@ def main():
         nan_mask = np.isnan(explored)
         explored[nan_mask] = -np.inf
 
-        pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=3))
+        pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=(1,3,3)))
         pIM = np.zeros_like(act_im, dtype=bool)
         while np.any(pTmp.flatten()):
             pIM = pIM | pTmp
-            dilated_mask = ndimage.binary_dilation(pTmp, structure=np.ones((7,7))).astype(bool)
+            dilated_mask = ndimage.binary_dilation(pTmp, structure=np.ones((1,7,7))).astype(bool, copy=False)
             explored[dilated_mask] = -np.inf
-            pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=3))
+            pTmp = (explored > 0) & (explored == ndimage.maximum_filter(explored, size=(1,3,3)))
+
+        # Exclude user-marked somata from seed maxima selection (already aligned to fast-Z)
+        if params['select_soma'] and (f'DMD{DMDix+1}' in soma_masks):
+            sm = soma_masks[f'DMD{DMDix+1}']
+            if sm.shape == pIM.shape and np.any(sm):
+                pIM[sm > 0] = False
         # Create a local maximum filter with a footprint of 3x3 pixels
         # local_max = ndimage.maximum_filter(act_im, size=3)
 
@@ -1278,22 +1421,23 @@ def main():
         thresh = np.median(vals_transformed) + 3 * 1.4826 * mad_transformed
         valid_maxima = vals_transformed > thresh
         
-        maxima_coords = (maxima_coords[0][valid_maxima], maxima_coords[1][valid_maxima])
+        maxima_coords = (maxima_coords[0][valid_maxima], maxima_coords[1][valid_maxima], maxima_coords[2][valid_maxima])
         maxima_values = maxima_values[valid_maxima]
         source_seeds = np.array(maxima_coords).T
 
         nSources = source_seeds.shape[0]
 
         def sel_pix_gaussian_profile(gaussian_params):
-            y_means = gaussian_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
-            x_means = gaussian_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
-            y_sigmas = gaussian_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
-            x_sigmas = gaussian_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
-            corr_coef = torch.tanh(gaussian_params[:, 4].unsqueeze(0))  # Shape: [1, nSources]
+            z_planes = gaussian_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
+            y_means = gaussian_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
+            x_means = gaussian_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
+            y_sigmas = gaussian_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
+            x_sigmas = gaussian_params[:, 4].unsqueeze(0)  # Shape: [1, nSources]
+            corr_coef = torch.tanh(gaussian_params[:, 5].unsqueeze(0))  # Shape: [1, nSources]
 
             # Center the coordinates
-            y_centered = (pixel_coords_tensor[:, 1].unsqueeze(1) - y_means)  # Shape: [nPixels, nSources]
-            x_centered = (pixel_coords_tensor[:, 2].unsqueeze(1) - x_means)  # Shape: [nPixels, nSources]
+            y_centered = (pixel_coords_tensor[:, 1].unsqueeze(1) - y_means)  # Shape: [len(selPixIdxs), nSources]
+            x_centered = (pixel_coords_tensor[:, 2].unsqueeze(1) - x_means)  # Shape: [len(selPixIdxs), nSources]
 
             # Compute terms for bivariate Gaussian with correlation
             z_score_y = y_centered / y_sigmas
@@ -1307,27 +1451,28 @@ def main():
             )
 
             profile = torch.exp(exponent)
-            profile = profile * (torch.sqrt(z_score_y**2 + z_score_x**2) <= 3).float()
+            profile = profile * ((torch.sqrt(z_score_y**2 + z_score_x**2) <= 3) & (pixel_coords_tensor[:, 0].unsqueeze(1) == z_planes)).float()
 
             return profile / torch.sum(profile,dim=0,keepdim=True)
 
         def sel_pix_patch_profile(patch_params):
-            y_means = patch_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
-            x_means = patch_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
-            y_radii = patch_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
-            x_radii = patch_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
+            z_planes = patch_params[:, 0].unsqueeze(0)  # Shape: [1, nSources]
+            y_means = patch_params[:, 1].unsqueeze(0)  # Shape: [1, nSources]
+            x_means = patch_params[:, 2].unsqueeze(0)  # Shape: [1, nSources]
+            y_radii = patch_params[:, 3].unsqueeze(0)  # Shape: [1, nSources]
+            x_radii = patch_params[:, 4].unsqueeze(0)  # Shape: [1, nSources]
 
             # Center the coordinates
-            y_centered = (pixel_coords_tensor[:, 1].unsqueeze(1) - y_means)  # Shape: [nPixels, nSources]
-            x_centered = (pixel_coords_tensor[:, 2].unsqueeze(1) - x_means)  # Shape: [nPixels, nSources]
+            y_centered = (pixel_coords_tensor[:, 1].unsqueeze(1) - y_means)  # Shape: [len(selPixIdxs), nSources]
+            x_centered = (pixel_coords_tensor[:, 2].unsqueeze(1) - x_means)  # Shape: [len(selPixIdxs), nSources]
 
-            profile = (torch.abs(y_centered) < y_radii) & (torch.abs(x_centered) < x_radii)
+            profile = (torch.abs(y_centered) < y_radii) & (torch.abs(x_centered) < x_radii) & (pixel_coords_tensor[:, 0].unsqueeze(1) == z_planes)
 
             return profile
         
         source_params = torch.cat([
-            torch.tensor(source_seeds, dtype=torch.float32), # x,y means
-            torch.ones(nSources, 2, dtype=torch.float32), # x,y sigmas
+            torch.tensor(source_seeds, dtype=torch.float32), # z, y, x means
+            torch.ones(nSources, 2, dtype=torch.float32), # y, x sigmas
             torch.zeros(nSources, 1, dtype=torch.float32) # invtanh of correlation / tilt
         ], dim=1)
 
@@ -1341,11 +1486,12 @@ def main():
             X_support_mots[i] = torch.sparse.mm(H_mots[i], A_patches[selPixIdxs,:].float()) > 0
 
         # initialize sources as gaussian blobs
-        A = torch.zeros((nPixels, nSources))
-        A[selPixIdxs,:] = sel_pix_gaussian_profile(source_params * torch.tensor([1, 1, 1, 1, 1]))
+        A = torch.zeros((nPixels, nSources), dtype=torch.float32)
+        A[selPixIdxs,:] = sel_pix_gaussian_profile(source_params * torch.tensor([1, 1, 1, 1, 1, 1]))
         A[~A_patches] = 0
         sources_total_mass = torch.sum(A, dim=0, keepdim=True)
-        A = torch.where(sources_total_mass > 0, A / sources_total_mass, A)
+        sources_total_mass[sources_total_mass <= 0] = 1
+        A /= sources_total_mass
 
         # NMF parameters
         outer_loop_iters = 10
@@ -1361,12 +1507,12 @@ def main():
         # phi_lowRes = torch.zeros(lowResData.shape[1], nSources+1, dtype=torch.float32)
         # phi_lowRes[:] = np.nan
 
-        phi_lowRes = torch.full((lowResData.shape[1], nSources), np.nan, dtype=torch.float32)
+        phi_lowRes = torch.full((lowResDataNorm.shape[1], nSources), np.nan, dtype=torch.float32)
 
         X_mots = [None] * len(motIndsToKeep)
         overall_losses = [0] * (outer_loop_iters+1)
 
-        data_for_nmf = torch.from_numpy(residualFilt.astype(np.float32))
+        data_for_nmf = torch.from_numpy(residualFilt.astype(np.float32, copy=False))
         # data_for_nmf = torch.from_numpy(signal.convolve2d(lowResDataNorm,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same').astype(np.float32))
         # background_spatial_components = torch.from_numpy(background_spatial_components.astype(np.float32)) / torch.norm(background_spatial_components)
         
@@ -1394,7 +1540,11 @@ def main():
                     Xtd
                 ).T
 
-                overall_losses[outer_loop_iter] += torch.sum((data_for_nmf[:, motion_frames] - X @ phi_lowRes[motion_frames,:].T) ** 2).item()
+                loss_contribution = torch.sum((data_for_nmf[:, motion_frames] - X @ phi_lowRes[motion_frames,:].T) ** 2).item()
+                # print(f"Loss contribution for motion {motion_idx}: {loss_contribution}")
+
+                overall_losses[outer_loop_iter] += loss_contribution
+            print(f"Overall loss for outer loop iteration {outer_loop_iter}: {overall_losses[outer_loop_iter]}")
 
             shuffled_indices = torch.randperm(len(motIndsToKeep))
             for idx in tqdm(shuffled_indices,desc=f'Multiplicative NMF per motion displacement'): # loop over all motion displacements in random order
@@ -1462,7 +1612,8 @@ def main():
                     # prev_reconstruction_error = current_error
 
                     if iter_idx % 3 == 0:   # sparsify step
-                        X = X / torch.max(X, dim=0, keepdim=True)[0]
+                        X_max = torch.max(X, dim=0, keepdim=True)[0]
+                        X = torch.where(X_max > 0, X / X_max, X)
                         X = torch.clamp(X, min=params['sparse_fac']) - params['sparse_fac']
 
                         # re-normalize X after sparsification
@@ -1472,9 +1623,9 @@ def main():
                 X_mots[i] = X
             
             # Initialize Adam optimizer
-            optim_loc_params = source_params[:,:2].clone().requires_grad_(True)
-            optim_scale_params = source_params[:,2:4].clone().requires_grad_(True)
-            optim_tilt_params = source_params[:,4].unsqueeze(1).clone().requires_grad_(True)
+            optim_loc_params = source_params[:,1:3].clone().requires_grad_(True)
+            optim_scale_params = source_params[:,3:5].clone().requires_grad_(True)
+            optim_tilt_params = source_params[:,5].unsqueeze(1).clone().requires_grad_(True)
             optimizer = torch.optim.Adam([{'params': optim_loc_params, 'lr': 10 * learning_rate},
                                             {'params': optim_scale_params, 'lr': 0.1 * learning_rate},
                                             {'params': optim_tilt_params, 'lr': 0.1 * learning_rate}])
@@ -1486,10 +1637,12 @@ def main():
                 optimizer.zero_grad()
                 
                 # calculate spatial profile
-                A_step_sel_pix = sel_pix_gaussian_profile(torch.cat([optim_loc_params, optim_scale_params, optim_tilt_params], dim=1))
+                A_step_sel_pix = sel_pix_gaussian_profile(torch.cat([source_params[:,0].unsqueeze(1), optim_loc_params, optim_scale_params, optim_tilt_params], dim=1))
                 A_step_sel_pix = A_step_sel_pix * A_patches[selPixIdxs,:].float()
                 sources_total_mass = torch.sum(A_step_sel_pix, dim=0, keepdim=True)
-                A_step_sel_pix = torch.where(sources_total_mass > 0, A_step_sel_pix / sources_total_mass, A_step_sel_pix)
+                sources_total_mass[sources_total_mass <= 0] = 1
+                A_step_sel_pix /= sources_total_mass
+                # A_step_sel_pix = torch.where(sources_total_mass > 0, A_step_sel_pix / sources_total_mass, A_step_sel_pix)
                 
                 if epoch % len(motIndsToKeep) == 0:
                     shuffled_indices = torch.randperm(len(motIndsToKeep))
@@ -1512,7 +1665,7 @@ def main():
                 # Apply constraints after optimizer step
                 with torch.no_grad():
                     # losses.append(loss.item())
-                    optim_loc_params.clamp_(min=torch.from_numpy(source_seeds - params['dXY']).float(), max=torch.from_numpy(source_seeds + params['dXY']).float())
+                    optim_loc_params.clamp_(min=torch.from_numpy(source_seeds[:,1:3] - params['dXY']).float(), max=torch.from_numpy(source_seeds[:,1:3] + params['dXY']).float())
                     optim_scale_params[:,0].clamp_(min=0.3, max=5)
                     optim_scale_params[:,1].clamp_(min=0.3, max=5)
 
@@ -1533,13 +1686,15 @@ def main():
                         break
 
             # Update parameters
-            source_params = torch.cat([optim_loc_params.detach(), optim_scale_params.detach(), optim_tilt_params.detach()], dim=1)
+            source_params = torch.cat([source_params[:,0].unsqueeze(1), optim_loc_params.detach(), optim_scale_params.detach(), optim_tilt_params.detach()], dim=1)
 
             A = torch.zeros((nPixels, nSources), dtype=torch.float32)            
-            A[selPixIdxs,:] = sel_pix_gaussian_profile(source_params * torch.tensor([1, 1, 1, 1, 1]))
+            A[selPixIdxs,:] = sel_pix_gaussian_profile(source_params * torch.tensor([1, 1, 1, 1, 1, 1]))
             A[~A_patches] = 0
             sources_total_mass = torch.sum(A, dim=0, keepdim=True)
-            A = torch.where(sources_total_mass > 0, A / sources_total_mass, A)
+            sources_total_mass[sources_total_mass <= 0] = 1
+            A /= sources_total_mass
+            # A = torch.where(sources_total_mass > 0, A / sources_total_mass, A)
 
             # get phi_lowRes for current spatial profiles
             for i, motion_idx in enumerate(motIndsToKeep):
@@ -1574,7 +1729,7 @@ def main():
             phi_lowRes = phi_lowRes[:,sortorder]
 
             if (outer_loop_iter+1) % 4 == 3: # prune sources
-                residual = torch.zeros_like(data_for_nmf)
+                residual = torch.zeros_like(data_for_nmf, dtype=torch.float32)
                 residual[:] = np.nan
                 for i in range(len(motIndsToKeep)):
                     motion_frames = (motInds == motIndsToKeep[i]).nonzero()[0]
@@ -1582,8 +1737,8 @@ def main():
                     # X = torch.concat((X,background_spatial_components[:,i].unsqueeze(-1)),dim=1)
                     residual[:,motion_frames] = data_for_nmf[:,motion_frames] - X @ phi_lowRes[motion_frames,:].T
 
-                varExpSource = torch.zeros(nSources)
-                varResidual = torch.zeros(nSources)
+                varExpSource = torch.zeros(nSources, dtype=torch.float32)
+                varResidual = torch.zeros(nSources, dtype=torch.float32)
                 for j in range(nSources-1,-1,-1):
                     # find pixels that correspond to half mass of spatial profile
                     # sorted_vals = torch.sort(A[selPixIdxs,j], descending=True)[0]
@@ -1628,6 +1783,7 @@ def main():
             # X = torch.concat((X,background_spatial_components[:,i].unsqueeze(-1)),dim=1)
 
             overall_losses[outer_loop_iters] += torch.sum((data_for_nmf[:, motion_frames] - X @ phi_lowRes[motion_frames,:].T) ** 2).item()
+        print(f"Final overall loss: {overall_losses[outer_loop_iters]}")
 
         trial_info = [(i, keepTrials[DMDix,i], background[:,lowResTrialID == i]) for i in range(nTrials)]
 
@@ -1636,7 +1792,7 @@ def main():
                                               params=params,
                                               sampFreq=params['analyzeHz'],
                                               refStack=refStack,
-                                              subsampleMatrixInds=subsampleMatrixInds,
+                                              subsampleMatrixInds=subsampleMatrixInds[f'DMD{DMDix+1}'],
                                               fastZ2RefZ=fastZ2RefZ,
                                               sparseHInds=sparseHInds,
                                               sparseHVals=sparseHVals,
@@ -1646,9 +1802,8 @@ def main():
                                               A_final=A,
                                               uniqueMotionDS=uniqueMotion,
                                               motIndsToKeepDS=motIndsToKeep,
-                                              # background=background,
-                                              # background_spatial_components=background_spatial_components,
-                                              psf=psf)
+                                              psf=psf,
+                                              soma_sps=soma_sps[f'DMD{DMDix+1}'])
 
         with mp.Pool(processes=min(params['max_workers'],min(mp.cpu_count(),len(trial_info)))) as pool:
             results = list(pool.imap(get_high_res_traces_partial, trial_info))
@@ -1670,7 +1825,7 @@ def main():
 
             # spatial_group.create_dataset('source_params', data=source_params.numpy())
             spatial_group.create_dataset('profiles', data=A.numpy().reshape(dmdPixelsPerRow,dmdPixelsPerColumn,-1).transpose(2,0,1))
-            spatial_group.create_dataset('coords', data=source_params[:,:2].numpy())
+            spatial_group.create_dataset('coords', data=source_params[:,:3].numpy())
 
             temporal_group = source_group.create_group('temporal')
 
@@ -1680,7 +1835,9 @@ def main():
 
             F0 = compute_f0(F, int(np.ceil(params['denoiseWindow_s']*params['analyzeHz'])), int(np.ceil(params['baselineWindow_s']*params['analyzeHz'])))
             dF = F - F0
+            dFF = dF / np.clip(F0, 1e-4, None)
             temporal_group.create_dataset('dF', data=dF)
+            temporal_group.create_dataset('dFF', data=dFF)
             temporal_group.create_dataset('F0', data=F0)
             # temporal_group.create_dataset('F', data=F)
 
@@ -1708,12 +1865,21 @@ def main():
 
             visualizations = dmd_group.create_group('visualizations')
             visualizations.create_dataset('act_im', data=act_im)
+            visualizations.create_dataset('mean_im', data=np.expand_dims(mean_im, axis=0))
+            
+            if params['select_soma'] and (f'DMD{DMDix+1}' in soma_masks):
+                user_roi_group = dmd_group.create_group('user_rois')
+                masks_by_roi = np.zeros((num_fast_z, *yx_shape, np.max(soma_masks[f'DMD{DMDix+1}'])), dtype=bool)
+                for roi in range(masks_by_roi.shape[3]):
+                    masks_by_roi[:,:,:,roi] = soma_masks[f'DMD{DMDix+1}'] == roi + 1
+                user_roi_group.create_dataset('mask', data=masks_by_roi)
+                user_roi_group.create_dataset('F', data=np.concatenate([r[7] for r in results], axis=0))
 
             ref_stack_channels = trialTable['refStack'][0,DMDix]['channels'][0,0].squeeze().reshape((-1,))
             num_ref_stack_channels = len(ref_stack_channels)
             
             ref_stack = trialTable['refStack'][0,DMDix]['IM'][0,0].T
-            ref_stack_reshaped = np.zeros((num_ref_stack_channels,ref_stack.shape[0] // num_ref_stack_channels,ref_stack.shape[1], ref_stack.shape[2]))
+            ref_stack_reshaped = np.zeros((num_ref_stack_channels,ref_stack.shape[0] // num_ref_stack_channels,ref_stack.shape[1], ref_stack.shape[2]), dtype=np.float32)
             for i in range(ref_stack.shape[0]):
                 c = i % num_ref_stack_channels
                 ref_stack_reshaped[c,i//num_ref_stack_channels,:,:] = ref_stack[i,:,:]
