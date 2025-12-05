@@ -98,7 +98,7 @@ try
     selCh = 1:numChannels;
 catch  % assume 1 channel if there is no metadata (e.g. simulated data)
     numChannels = 1;
-    selCh = 1
+    selCh = 1;
 end
 
 try
