@@ -281,8 +281,7 @@ for DMDix = nDMDs:-1:1
             if strcmpi(params.microscope, 'SLAP2')
                 fls = trialTable.firstLine(DMDix,:);
                 els = trialTable.lastLine(DMDix,:);
-                %processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, params) 
-                E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, params);
+                E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, validTrials, params);
             else %BERGAMO
                 parfor trialIx = 1:nTrials
                     if any(validTrials==trialIx)

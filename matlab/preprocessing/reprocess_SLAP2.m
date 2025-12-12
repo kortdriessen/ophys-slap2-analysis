@@ -17,7 +17,7 @@ if nargin<3 || isempty(sParams)
     sParams.microscope = "SLAP2";
     sParams.drawUserRois = true;
     sParams.nParallelWorkers = 16; %relevant only for the initial reading segment
-    sParams = setParams('summarize_LoCo', sParams, true);
+    sParams = setParams('summarize_LoCo', sParams, ~noGUI);
 end
 
 if redoAlignment

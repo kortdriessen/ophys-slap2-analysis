@@ -20,4 +20,4 @@ end
 multiRoiRegSLAP2(fullPathToTrialTable,aParams)
 
 %summarize
-summarize_NoLoCo(dr, sParams);
+summarize_LoCo(dr, sParams);

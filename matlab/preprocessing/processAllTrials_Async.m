@@ -1,4 +1,4 @@
-function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, params)
+function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, validTrials, params)
 curPool = gcp('nocreate');
 if isempty(curPool) || ~strcmpi(class(curPool), 'parallel.ThreadPool') %  ~strcmpi(class(curPool), 'parallel.ProcessPool') %
     delete(curPool);
@@ -6,26 +6,25 @@ if isempty(curPool) || ~strcmpi(class(curPool), 'parallel.ThreadPool') %  ~strcm
 end
 numDatasets = numel(fls);
 E = cell(numDatasets,1); 
-for i = 1:numDatasets
-    nLoad = i;
+for i = 1:numel(validTrials)
+    nLoad = validTrials(i);
     CD = loadTrial(dr, fns{nLoad},fls(nLoad),els(nLoad),selPix,discardFrames{nLoad}, alignData{nLoad}, mIM{nLoad}, motOutput(:,nLoad), roiData, params);
-    E{i}.ROIs = CD.ROIs; E{i}.global = CD.global;
+    E{nLoad}.ROIs = CD.ROIs; E{nLoad}.global = CD.global;
     if i>1 %we process the previous trial after loading the next, to keep CPU usage up during loading
-        [E{i-1}, B] = processResult(resultsFuture, E{i-1},params);
+        [E{validTrials(i-1)}, B] = processResult(resultsFuture, E{validTrials(i-1)},params);
         doPlot = false;
         if doPlot
-            plotE(E{i-1},Y,B,selPix); %the Y here is from the previous trial
+            plotE(E{validTrials(i-1)},Y,B,selPix); %the Y here is from the previous trial
         end
     end
-    disp(['Processing dataset: ' fns{i}])
+    disp(['Processing dataset: ' fns{nLoad}])
     Y = squeeze(CD.Yobs(:,1,:));
     resultsFuture = extractTrial(Y,CD.Finv, sources, any(selPix,3), params);
     clear CD;
 end
-[E{i}, B] = processResult(resultsFuture,E{i},params);
-
+[E{nLoad}, B] = processResult(resultsFuture,E{nLoad},params);
 if doPlot    
-    plotE(E{i},Y,B,selPix);
+    plotE(E{nLoad},Y,B,selPix);
 end
 
 end
