@@ -7,11 +7,11 @@ RAW DATA structure on aind/scratch
    ┗ 📦######_YYYYMMDD-HHMMSS (Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
      ┣ 📜rig.json
      ┣ 📜session.json
-     ┣ 📜subject.json (created during upload, not on VAST)     
-     ┣ 📜data_description.json (created during upload, not on VAST)
-     ┣ 📜metadata.nd.json (created during upload, not on VAST)
-     ┣ 📜procedures.json (created during upload, not on VAST)
-     ┣ 📜processing.json (created during upload, not on VAST)
+     ┣ 📜subject.json (created during upload to S3, not on VAST)     
+     ┣ 📜data_description.json (created during upload to S3, not on VAST)
+     ┣ 📜metadata.nd.json (created during upload to S3, not on VAST)
+     ┣ 📜procedures.json (created during upload to S3, not on VAST)
+     ┣ 📜processing.json (created during upload to S3, not on VAST)
      ┃
      ┣ 📂behavior/
      ┃ ┣ 📂VCO1_Behavior.harp
