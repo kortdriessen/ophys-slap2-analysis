@@ -1,0 +1,52 @@
+RAW DATA structure on aind/scratch
+
+```
+📂###### (6 digit mouse ID)/
+ ┣ 🖼️vasculature_map_annotated.tiff* (constantly updated)
+ ┗ 📂FOV## (2 digit FOV ID)/
+   ┗ 📦######_YYYYMMDD-HHMMSS (Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
+     ┣ 📜rig.json
+     ┣ 📜session.json
+     ┣ 📜subject.json (created during upload, not on VAST)     
+     ┣ 📜data_description.json (created during upload, not on VAST)
+     ┣ 📜metadata.nd.json (created during upload, not on VAST)
+     ┣ 📜procedures.json (created during upload, not on VAST)
+     ┣ 📜processing.json (created during upload, not on VAST)
+     ┃
+     ┣ 📂behavior/
+     ┃ ┣ 📂VCO1_Behavior.harp
+     ┃ ┃ ┣ 💾Behavior_#.bin (# is the register number)
+     ┃ ┃ ┗ 📜device.yml
+     ┃ ┗ 💾<any stim file name>.csv (useful behavior csv files)
+     ┃
+     ┣ 📂behavior-videos/
+     ┃ ┣ 📂BodyCamera
+     ┃ ┃ ┣ 📹video.mp4 (video.avi for now)
+     ┃ ┃ ┗ 📜metadata.csv (metadata.json for now)
+     ┃ ┣ 📂FaceCamera
+     ┃ ┃ ┣ 📹video.mp4 (video.avi for now)
+     ┃ ┃ ┗ 📜metadata.csv (metadata.json for now)
+     ┃ ┗ 📂EyeCamera
+     ┃   ┣ 📹video.mp4 (video.avi for now)
+     ┃   ┗ 📜metadata.csv (metadata.json for now)
+     ┃
+     ┣ 📂vasculature/
+     ┃ ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
+     ┃ ┗ 🖼️session_vasculature_1p.tif
+     ┃
+     ┗ 📂slap2/
+       ┣ 📂structure_stack
+       ┃ ┣ 📜structure_YYYYMMDD_HHMMSS_DMD#.meta
+       ┃ ┣ 💾structure_YYYYMMDD_HHMMSS_DMD#.dat
+       ┃ ┣ 🖼️structure_YYYYMMDD_HHMMSS_DMD#.tif
+       ┃ ┗ 🖼️structure_YYYYMMDD_HHMMSS_DMD#-REFERENCE.tif
+       ┗ 📂dynamic_data
+         ┣ 📜acquisition_YYYYMMDD_HHMMSS_DMD#.meta
+         ┣ 💾acquisition_YYYYMMDD_HHMMSS_DMD#-TRIAL######(-CYCLE######).dat
+         ┣ 🖼️acquisition_YYYYMMDD_HHMMSS_DMD#-TRIAL######(-CYCLE######).tif (only sometimes there, depending on SLAP2 mode)
+         ┗ 📂reference_stack
+           ┣ 📜refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#).meta
+           ┣ 💾refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#).dat
+           ┣ 🖼️refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#).tif
+           ┗ 🖼️refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#)-REFERENCE.tif
+```
