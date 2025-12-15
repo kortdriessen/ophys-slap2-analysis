@@ -2,7 +2,8 @@ RAW DATA structure on aind/scratch
 
 ```
 📂###### (6 digit mouse ID)/
- ┣ 🖼️vasculature_map_annotated.tiff* (constantly updated)
+ ┣ 🖼️vasculature_map.tif
+ ┣ 🖼️vasculature_map_annotated.tif* (constantly updated)
  ┗ 📂FOV## (2 digit FOV ID)/
    ┣ 📦slap2-stack_######_YYYYMMDD-HHMMSS (for stacks, Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
    ┃ ┣ 📜rig.json
