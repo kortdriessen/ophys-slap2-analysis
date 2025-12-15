@@ -4,7 +4,27 @@ RAW DATA structure on aind/scratch
 📂###### (6 digit mouse ID)/
  ┣ 🖼️vasculature_map_annotated.tiff* (constantly updated)
  ┗ 📂FOV## (2 digit FOV ID)/
-   ┗ 📦######_YYYYMMDD-HHMMSS (Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
+   ┣ 📦slap2-stack_######_YYYYMMDD-HHMMSS (for stacks, Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
+   ┃ ┣ 📜rig.json
+   ┃ ┣ 📜session.json
+   ┃ ┣ 📜subject.json (created during upload to S3, not on VAST)     
+   ┃ ┣ 📜data_description.json (created during upload to S3, not on VAST)
+   ┃ ┣ 📜metadata.nd.json (created during upload to S3, not on VAST)
+   ┃ ┣ 📜procedures.json (created during upload to S3, not on VAST)
+   ┃ ┣ 📜processing.json (created during upload to S3, not on VAST)
+   ┃ ┃
+   ┃ ┣ 📂widefield/
+   ┃ ┃ ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
+   ┃ ┃ ┗ 🖼️session_vasculature_1p.tif
+   ┃ ┃
+   ┃ ┗ 📂slap2/
+   ┃   ┗ 📂structure_stack
+   ┃     ┣ 📜structure_YYYYMMDD_HHMMSS_DMD#.meta
+   ┃     ┣ 💾structure_YYYYMMDD_HHMMSS_DMD#.dat
+   ┃     ┣ 🖼️structure_YYYYMMDD_HHMMSS_DMD#.tif
+   ┃     ┗ 🖼️structure_YYYYMMDD_HHMMSS_DMD#-REFERENCE.tif
+   ┃
+   ┗ 📦slap2-experiment_######_YYYYMMDD-HHMMSS (for experiments, Session ID by Mouse ID and datetime)/ <- this is the folder that will become a data asset on CodeOcean
      ┣ 📜rig.json
      ┣ 📜session.json
      ┣ 📜subject.json (created during upload to S3, not on VAST)     
@@ -30,16 +50,11 @@ RAW DATA structure on aind/scratch
      ┃   ┣ 📹video.mp4 (video.avi for now)
      ┃   ┗ 📜metadata.csv (metadata.json for now)
      ┃
-     ┣ 📂vasculature/
+     ┣ 📂widefield/
      ┃ ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
      ┃ ┗ 🖼️session_vasculature_1p.tif
      ┃
      ┗ 📂slap2/
-       ┣ 📂structure_stack
-       ┃ ┣ 📜structure_YYYYMMDD_HHMMSS_DMD#.meta
-       ┃ ┣ 💾structure_YYYYMMDD_HHMMSS_DMD#.dat
-       ┃ ┣ 🖼️structure_YYYYMMDD_HHMMSS_DMD#.tif
-       ┃ ┗ 🖼️structure_YYYYMMDD_HHMMSS_DMD#-REFERENCE.tif
        ┗ 📂dynamic_data
          ┣ 📜acquisition_YYYYMMDD_HHMMSS_DMD#.meta
          ┣ 💾acquisition_YYYYMMDD_HHMMSS_DMD#-TRIAL######(-CYCLE######).dat
