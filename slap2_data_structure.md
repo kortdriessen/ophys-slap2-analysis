@@ -14,10 +14,6 @@ RAW DATA structure on aind/scratch
    ┃ ┣ 📜procedures.json (created during upload to S3, not on VAST)
    ┃ ┣ 📜processing.json (created during upload to S3, not on VAST)
    ┃ ┃
-   ┃ ┣ 📂widefield/
-   ┃ ┃ ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
-   ┃ ┃ ┗ 🖼️session_vasculature_1p.tif
-   ┃ ┃
    ┃ ┗ 📂slap2/
    ┃   ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
    ┃   ┣ 🖼️session_vasculature_1p.tif
