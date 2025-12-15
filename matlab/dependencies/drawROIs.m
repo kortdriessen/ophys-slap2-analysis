@@ -290,7 +290,9 @@ classdef drawROIs < handle
 
         function setLabel(obj, hROI)
             label = inputdlg('Set a label');
-            set(hROI, 'Label', label{1});
+            if ~isempty(label)
+                set(hROI, 'Label', label{1});
+            end
         end
         function kpf(obj, arg1, arg2)
             switch arg2.Key

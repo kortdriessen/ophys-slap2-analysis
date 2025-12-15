@@ -1,4 +1,4 @@
-function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, mIM, motOutput, roiData, validTrials, params)
+function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params)
 curPool = gcp('nocreate');
 if isempty(curPool) || ~strcmpi(class(curPool), 'parallel.ThreadPool') %  ~strcmpi(class(curPool), 'parallel.ProcessPool') %
     delete(curPool);
@@ -8,7 +8,7 @@ numDatasets = numel(fls);
 E = cell(numDatasets,1); 
 for i = 1:numel(validTrials)
     nLoad = validTrials(i);
-    CD = loadTrial(dr, fns{nLoad},fls(nLoad),els(nLoad),selPix,discardFrames{nLoad}, alignData{nLoad}, mIM{nLoad}, motOutput(:,nLoad), roiData, params);
+    CD = loadTrial(dr, fns{nLoad},fls(nLoad),els(nLoad),selPix,discardFrames{nLoad}, alignData{nLoad}, meanAligned(:,:,:,nLoad), motOutput(:,nLoad), roiData, params);
     E{nLoad}.ROIs = CD.ROIs; E{nLoad}.global = CD.global;
     if i>1 %we process the previous trial after loading the next, to keep CPU usage up during loading
         [E{validTrials(i-1)}, B] = processResult(resultsFuture, E{validTrials(i-1)},params);
@@ -81,15 +81,17 @@ switch params.microscope
         motionR = interp1(alignData.DSframes, alignData.motionDSr, frameLines, 'pchip', 'extrap') + motOutput(1);
         viewC = alignData.viewC(1,:);
         viewR = alignData.viewR(:,1);
-        nPx = numel(selPx2D);
+        
         orderedChannels = [params.activityChannel:numChannels, 1:params.activityChannel-1];
 
+        selPx2D = selPx2D(1:size(alignData.viewC,1), 1:size(alignData.viewC,2));
+        nPx = numel(selPx2D);
+        meanIM = meanIM(1:size(alignData.viewC,1), 1:size(alignData.viewC,2),:);
         labeled = medfilt2(meanIM(:,:,params.activityChannel), [3 3]);
         labeled = ~isnan(meanIM(:,:,params.activityChannel)) & labeled>3*prctile(labeled(~isnan(labeled)), 25); %labeled pixels
-        meanPx = reshape(meanIM, nPx, numChannels);
+        
+        meanPx = reshape(meanIM, numel(labeled), numChannels);
         mLabeled = meanPx(labeled,:);
-
-        selPx2D = selPx2D(1:size(alignData.viewC,1), 1:size(alignData.viewC,2));
 
         blocksize = 600; %number of frames to load at a time; 100 frames ~= 1GB RAM usage
         nBlocks = ceil(nFrames./blocksize);
