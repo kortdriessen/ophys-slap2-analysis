@@ -75,7 +75,7 @@ RAW DATA structure on aind/scratch
    ┃ ┃
    ┃ ┣ 📜trialTable.mat
    ┃ ┃
-   ┃ ┣ 📂motion_correction/
+   ┃ ┣ 📂motion_correction
    ┃ ┃ ┣ 📜E#T#DMD#_ALIGNMENTDATA.mat
    ┃ ┃ ┣ 🖼️E#T#DMD#_REGISTERED_DOWNSAMPLED-##Hz.tif
    ┃ ┃ ┗ ...
@@ -97,9 +97,7 @@ RAW DATA structure on aind/scratch
      ┣ 📜processing.json (updated based on processing pipeline that was run)
      ┣ 📜qc.json (updated based on processing pipeline that was run)
      ┃
-     ┣ 📂<processing step, i.e. annotations>/
-     ┃ ┣ 📜E#T#DMD#_ALIGNMENTDATA.mat
-     ┃ ┣ 🖼️E#T#DMD#_REGISTERED_DOWNSAMPLED-##Hz.tif
+     ┣ 📂<processing step, i.e. annotations>
      ┃ ┗ ...
      ┃
      ┗ 📂qc
