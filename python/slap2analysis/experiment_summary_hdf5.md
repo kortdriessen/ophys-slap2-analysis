@@ -10,6 +10,7 @@
    ┃ ┃ ┣ 📜onlineYshifts (total frames x 1)
    ┃ ┃ ┣ 📜onlineZshifts (total frames x 1)
    ┃ ┃ ┣ 📜trial_num_frames (trials x 1)
+   ┃ ┃ ┣ 📜frame_line_idxs (total frames x 1)
    ┃ ┃ ┗ 📜discard_frames (total frames x 1)
    ┃ ┣ 📂visualizations/
    ┃ ┃ ┣ 📜mean_im (channels x fastz x rows x cols)
