@@ -150,7 +150,7 @@ end
 %initialize B
 params.denoiseWindow_samps = ceil(params.denoiseWindow_s.*params.analyzeHz);
 %denoised = smoothdata(Y_obs,2,"movmean",,'omitmissing');
-B_est = max(params.lambda/10, splitFreq(Y_obs, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
+B_est = max(params.lambda/10, splitFreq(Y_obs, params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
 
 %medRes = median(denoised-LP,2);
 typicalX = sqrt(mean((Y_obs(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
@@ -319,26 +319,26 @@ for pxIx = size(Y,1):-1:1
 end
 end
 
-function [LP,HP] = splitFreq(A, nSamps, LPfactor)
-nPages= floor(size(A,2)./nSamps);
-totSamps = nPages*nSamps;
+function [LP,HP] = splitFreq(A, denoiseWindow, LPfactor)
+nPages= floor(size(A,2)./denoiseWindow);
+totSamps = nPages*denoiseWindow;
 t = 1:size(A,2);
 
-a = reshape(A(:,1:totSamps), size(A,1), nSamps, nPages);
-Ma = mean(a,2);
-SMa = smoothdata(Ma,3, 'lowess',LPfactor, 'omitmissing');
-doLoop = true; loopIx = 0;
-while doLoop && loopIx<6
-    resid = Ma-SMa;
-    sigma = std(resid, 0,3, 'omitmissing');
-    ZMa = resid./sigma;
-    setNan = ZMa>2; doLoop = any(setNan(:)); loopIx = loopIx+1;
-    Ma(setNan) = nan;
-    SMa = smoothdata(Ma,3, 'lowess',LPfactor, 'omitmissing');
-    %Ma(setNan) = SMa(setNan);
+a = reshape(A(:,1:totSamps), size(A,1), denoiseWindow, nPages); % #pixels x #samps/page x #pages
+Ma = squeeze(mean(a,2, 'omitmissing'));
+SMa = smoothdata(Ma,2, 'lowess',LPfactor, 'omitmissing');
+resid = Ma-SMa;
+lowVals = resid<=ordfilt2(resid, ceil(0.15*LPfactor), ones([1 LPfactor]));
+Ma(~lowVals) = nan;
+SMa = Ma;
+for iter = 1:3
+    if any(isnan(SMa(:)))
+        SMa = smoothdata(SMa,2, 'lowess',LPfactor, 'omitmissing');
+    else
+        break
+    end
 end
-
-tDS = (nSamps+1)/2 + (nSamps).*(0:size(SMa,3)-1);
+tDS = (denoiseWindow+1)/2 + (denoiseWindow).*(0:size(SMa,2)-1);
 LP = nan(size(A));
 for pxIx = 1:size(LP,1)
     LP(pxIx,:) = interp1(tDS,SMa(pxIx,:)',t,'linear','extrap');

@@ -33,7 +33,7 @@ params.selRadius = 2*params.dXY;
 params.nmfIter = 2;
 params.sigma_px = 1.33;
 params.baselineWindow_Glu_s = 4;
-params.denoiseWindow_s = 0.25;
+params.denoiseWindow_s = 0.1;
 params.analyzeHz = 90;
 params = setParamsExtractTrial(params);
 
