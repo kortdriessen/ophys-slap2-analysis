@@ -140,12 +140,14 @@ switch params.microscope
         %perform SVD on user ROIs to denoise
         CD.ROIs.Fsvd = nan(length(roiData), numChannels, nFrames);
         for rix = 1:length(roiData)
-            for cix = 1:numel(orderedChannels)
-                Dtmp = squeeze(double(Fpx{rix}(:,cix,:)));
-                [UU,SS,VV,bg] = nansvd(Dtmp,3, 10, params.nanThresh);
-                roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
-                [~,selPC] = max(roiLikeness);
-                CD.ROIs.Fsvd(rix,cix,:) = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
+            if ~isempty(Fpx{rix}) && ~all(isnan(Fpx{rix}(:)))
+                for cix = 1:numel(orderedChannels)
+                    Dtmp = squeeze(double(Fpx{rix}(:,cix,:)));
+                    [UU,SS,VV,bg] = nansvd(Dtmp,3, 10, params.nanThresh);
+                    roiLikeness = (abs(mean(UU,1, 'omitnan'))./sqrt(mean(UU.^2,1, 'omitnan')))*SS;
+                    [~,selPC] = max(roiLikeness);
+                    CD.ROIs.Fsvd(rix,cix,:) = mean(bg+(UU(:,selPC)*SS(selPC,selPC)*VV(:,selPC)'),1, 'omitnan');
+                end
             end
         end
 
