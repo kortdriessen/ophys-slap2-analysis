@@ -165,7 +165,7 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
     trialIx, keepTrial = trial_info
     
     if not keepTrial:
-        return [], [], []
+        return None
 
     dmdPixelsPerColumn = refStack[f'DMD{DMDix+1}'].shape[2]
     dmdPixelsPerRow = refStack[f'DMD{DMDix+1}'].shape[3]
@@ -300,7 +300,7 @@ def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsample
                         np.full((0,),np.nan), \
                             (np.full((0,),np.nan), np.full((0,),np.nan), np.full((0,),np.nan)), \
                                 (np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16), np.full((0,),0,dtype=np.int16)), \
-                                    np.full((0,len(soma_sps[f'DMD{DMDix+1}'])),np.nan,dtype=np.float32)
+                                    np.full((0,len(soma_sps)),np.nan,dtype=np.float32)
 
     data_file = os.path.join(dr, f'trial_data_DMD{DMDix+1}_trial{trialIx}.npz')
     if os.path.exists(data_file):
@@ -652,7 +652,7 @@ def main():
     if not np.any(keepTrials):
         raise RuntimeError('All trials were rejected due to missing alignment files!')
 
-    firstValidTrial = np.where(keepTrials)[1][0]
+    firstValidTrial = np.where(np.all(keepTrials,axis=0))[0][0]
 
     # Create ExperimentSummary directory if it doesn't exist
     savedr = os.path.join(dr, 'ExperimentSummary')
@@ -661,10 +661,10 @@ def main():
     output_h5_filename = os.path.join(savedr, f'experiment_summary_{datetime.now().strftime("%Y%m%d-%H%M%S")}.h5')
 
     # Load aData file
-    aData = spio.loadmat(trialTable['fnAdataInt'][0,firstValidTrial][0])['aData'][0,0]
+    # aData = spio.loadmat(trialTable['fnAdataInt'][0,firstValidTrial][0])['aData'][0,0]
 
-    params['numChannels'] = aData['numChannels'][0,0]
-    params['alignHz'] = aData['alignHz'][0,0]
+    # params['numChannels'] = aData['numChannels'][0,0]
+    # params['alignHz'] = aData['alignHz'][0,0]
 
     # Get the lookup file path
     lookupFile = trialTable['lookupFile'][0]
@@ -750,11 +750,14 @@ def main():
     # Optional manual soma selection on reference images (scroll through fast-Z planes)
     soma_masks = {}
     soma_sps = {}
+    params['alignHz'] = {}
     if params['select_soma']:
         print('Manually select soma mask on each DMD based on the reference image')
         print('Controls: E=edit/add ROIs on current plane, N/P=next/prev plane, ESC/Q=finish DMD')
         for DMDix in range(nDMDs):
             aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,firstValidTrial][0])['aData'][0,0]
+            params['numChannels'] = aData['numChannels'][0,0]
+            params['alignHz'][f'DMD{DMDix+1}'] = aData['alignHz'][0,0]
 
             avg_motionR = int(np.nanmedian(np.round(aData['motionDSr'].T[0])))
             avg_motionC = int(np.nanmedian(np.round(aData['motionDSc'].T[0])))
@@ -955,7 +958,7 @@ def main():
             get_trial_data,
             DMDix=DMDix,
             params=params,
-            sampFreq=params['alignHz'],
+            sampFreq=params['alignHz'][f'DMD{DMDix+1}'],
             refStack=refStack,
             fastZ2RefZ=fastZ2RefZ,
             allSuperPixelIDs=allSuperPixelIDs,
@@ -981,14 +984,14 @@ def main():
             with mp.Pool(processes=min(params['max_workers'],min(mp.cpu_count(),len(trial_info)))) as pool:
                 results = list(pool.imap(get_trial_data_partial, trial_info))
 
-            lowResData = np.concatenate([r[0] for r in results], axis=1)
-            lowResDataCt = np.concatenate([r[1] for r in results], axis=1)
-            lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results], axis=0)
-            lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results], axis=0)
-            lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results], axis=0)
-            lowResTrialID = np.concatenate([np.ones_like(r[3])*i for i,r in enumerate(results)], axis=0)
-            lowResData2 = np.concatenate([r[4] for r in results], axis=1)
-            lowResDataCt2 = np.concatenate([r[5] for r in results], axis=1)
+            lowResData = np.concatenate([r[0] for r in results if r is not None], axis=1)
+            lowResDataCt = np.concatenate([r[1] for r in results if r is not None], axis=1)
+            lowResMotionR = np.concatenate([r[2]['motionDSr'] for r in results if r is not None], axis=0)
+            lowResMotionC = np.concatenate([r[2]['motionDSc'] for r in results if r is not None], axis=0)
+            lowResMotionZ = np.concatenate([r[2]['motionDSz'] for r in results if r is not None], axis=0)
+            lowResTrialID = np.concatenate([np.ones_like(r[3])*i for i,r in enumerate(results) if r is not None], axis=0)
+            lowResData2 = np.concatenate([r[4] for r in results if r is not None], axis=1)
+            lowResDataCt2 = np.concatenate([r[5] for r in results if r is not None], axis=1)
 
             # Save data arrays
             data_arrays = {
@@ -1206,7 +1209,7 @@ def main():
         
             interp_data[zMask], _, _ = build_interp_data(lowResDataNorm[refD == z], refR[refD == z], refC[refD == z], uniqueMotion, motInds)
 
-        baseline_window = int(params['alignHz']*params['baselineWindow_s'])
+        baseline_window = int(params['alignHz'][f'DMD{DMDix+1}']*params['baselineWindow_s'])
         nan_mask = np.isnan(interp_data)
         interp_data[nan_mask] = np.nanmedian(interp_data[~nan_mask])
         interp_data_background = ndimage.uniform_filter1d(interp_data, size=baseline_window, axis=1, mode='nearest')
@@ -1236,7 +1239,7 @@ def main():
         residual = lowResDataNorm - background
         del interp_data_background
 
-        decayTau_frames = params['decayTau_s']*params['alignHz']
+        decayTau_frames = params['decayTau_s']*params['alignHz'][f'DMD{DMDix+1}']
         decay_kernel = np.exp(np.linspace(-np.ceil(decayTau_frames*3),0,int(np.ceil(decayTau_frames*3)+1))/decayTau_frames)
         residualFilt = signal.convolve2d(residual,np.expand_dims(decay_kernel / np.sum(decay_kernel),0),mode='same')
         # data_for_nmf = torch.from_numpy(data_for_nmf.astype(np.float32))
@@ -1869,7 +1872,7 @@ def main():
             
             if params['select_soma'] and (f'DMD{DMDix+1}' in soma_masks):
                 user_roi_group = dmd_group.create_group('user_rois')
-                masks_by_roi = np.zeros((num_fast_z, *yx_shape, np.max(soma_masks[f'DMD{DMDix+1}'])), dtype=bool)
+                masks_by_roi = np.zeros((numFastZs, *yx_shape, np.max(soma_masks[f'DMD{DMDix+1}'])), dtype=bool)
                 for roi in range(masks_by_roi.shape[3]):
                     masks_by_roi[:,:,:,roi] = soma_masks[f'DMD{DMDix+1}'] == roi + 1
                 user_roi_group.create_dataset('mask', data=masks_by_roi)
