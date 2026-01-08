@@ -266,16 +266,39 @@ medianIndices = cellfun(@(x) x(round(length(x)/2)), splitPixels);
 zcolors = turbo(max(lookupTable.fastZ2RefZ{DMD_ix})-min(lookupTable.fastZ2RefZ{DMD_ix})+1);
 
 planeBorder = single(zeros(dmdPixelsPerColumn,dmdPixelsPerRow,3));
+planeMasks = single(zeros(dmdPixelsPerColumn,dmdPixelsPerRow));
 for planeIx = 1:numFastZs
     tmp = false(dmdPixelsPerColumn,dmdPixelsPerRow);
     activeInds = sub2ind([dmdPixelsPerColumn,dmdPixelsPerRow],spRows(spPlanes == planeIx),spCols(spPlanes == planeIx));
     tmp(activeInds) = true;
     planeMask = imerode(imdilate(tmp,ones(9,3),'same'),ones(1,3),'same');
+    planeMasks = planeMasks | planeMask;
     borderMask = single(imdilate(planeMask,ones(5,5),'same') & ~planeMask);
     borderMask = borderMask .* reshape(zcolors(lookupTable.fastZ2RefZ{DMD_ix}(planeIx)-min(lookupTable.fastZ2RefZ{DMD_ix})+1,:),[1 1 3]);
     planeBorder(borderMask > 0) = borderMask(borderMask > 0);
     clear tmp;
 end
+
+emptyMask = ~planeMasks & ~any(planeBorder,3);
+[emptyR,emptyC] = ind2sub([dmdPixelsPerColumn, dmdPixelsPerRow], find(emptyMask));
+
+refStackMIP = max(trialTable.refStack{DMD_ix}.IM(:,:,1:2:end),[],3)';
+summary_image_1 = clip(refStackMIP,0,prctile(refStackMIP(:),99.9)) ./ prctile(refStackMIP(:),99.9);
+summary_image_1 = repmat(summary_image_1,[1 1 3]);
+for i = 1:length(emptyR)
+    summary_image_1(emptyR(i),emptyC(i),:) = summary_image_1(emptyR(i),emptyC(i),:) * 0.75 + reshape(0.25*[0 0.5 0.75],[1 1 3]);
+end
+
+summary_image_1(planeBorder > 0) = planeBorder(planeBorder > 0);
+
+refStackMIP = max(trialTable.refStack{DMD_ix}.IM(:,:,2:2:end),[],3)';
+summary_image_2 = clip(refStackMIP,0,prctile(refStackMIP(:),99.9)) ./ prctile(refStackMIP(:),99.9);
+summary_image_2 = repmat(summary_image_2,[1 1 3]);
+for i = 1:length(emptyR)
+    summary_image_2(emptyR(i),emptyC(i),:) = summary_image_2(emptyR(i),emptyC(i),:) * 0.75 + reshape(0.25*[0 0.5 0.75],[1 1 3]);
+end
+
+summary_image_2(planeBorder > 0) = planeBorder(planeBorder > 0);
 
 saveFailed = false;
 fprintf("Saving each frame...\n")
@@ -283,9 +306,15 @@ tic
 
 img_lims = [0 1];
 open(video);
+for i = 1:round(alignHz*2)
+    writeVideo(video,summary_image_1)
+end
 if numChannels==2
     img_lims2 = [0 1];
     open(video2);
+    for i = 1:round(alignHz*2)
+        writeVideo(video2,summary_image_2)
+    end
 end
 for DSframeIx = 1:nDSframes
     timeWindow = max(1,floor(DSframes(DSframeIx)-2*dt)):min(ceil(DSframes(DSframeIx)+2*dt),hLowLevelDataFile.totalNumLines);
