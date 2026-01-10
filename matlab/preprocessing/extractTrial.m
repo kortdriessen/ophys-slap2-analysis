@@ -4,7 +4,15 @@ Y_obs = double(Y_obs);
 Finv = double(Finv);
 sz = size(selPix);
 
-params.lambda = prctile(mean(Y_obs,2),5);
+if isempty(params.lambda) %If not provided, estimate the standard deviation of a dim pixel
+    pxSTD = nan(1,size(Y_obs,1));
+    mY = nan(1,size(Y_obs,1));
+    for pxIx = 1:size(Y_obs,1)
+        [pxSTD(pxIx), mY(pxIx)] = std(Y_obs(pxIx,:),1./Finv(pxIx,:),2,'omitmissing');
+    end
+    sel = mY(:)<prctile(mY,20);
+    params.lambda = 4*prctile(pxSTD(sel),90)
+end
 
 %break the problem into separable chunks, i.e. nonoverlap sets
 zones = false(sz); zones(sub2ind(sz,sources.R,sources.C)) = true;
@@ -155,8 +163,10 @@ B_est = max(params.lambda/10, splitFreq(Y_obs, params.denoiseWindow_samps, ceil(
 %medRes = median(denoised-LP,2);
 typicalX = sqrt(mean((Y_obs(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
 
+dFls = H_est\(Y_obs-B_est);
+
 %initialize S
-S_est = typicalX.*rand(num_sources,num_time_points);
+S_est = max(0, dFls - [zeros(size(dFls,1),1) dFls(:,1:end-1)])./params.k(floor(end/2)+1);
 
 %overwrite with GT for testing?
 % B_est = GT.B;
@@ -230,7 +240,7 @@ for outerLoop = 1:params.nmfIter
     residVar = sum(resid.^2.*residWeights,2)./sum(residWeights,2);
     W = diag(1./residVar);
     covX = inv(H_est' * W * H_est); %uncertainty estimate for X
-    Xnoise = sqrt(diag(covX));
+    Xnoise = sqrt(diag(covX)./params.tau_full);
     Xsnr = std(X_est_new, 0,2)./Xnoise;
 
     if outerLoop==params.nmfIter
@@ -238,7 +248,7 @@ for outerLoop = 1:params.nmfIter
     end
 
     Xfloor = computeFloor(X_est_new, params.denoiseWindow_samps, params.baselineWindow_samps);
-    X_est_new = max(0, X_est_new - Xfloor - 2*Xnoise);
+    X_est_new = max(0, X_est_new - Xfloor - Xnoise);
 
     %SOLVE FOR B
     if doFitB
@@ -274,9 +284,9 @@ for outerLoop = 1:params.nmfIter
     S_est_new = S_est_new.*normFac';
 
     %update with new values
-    S_est = S_est_new;
     H_est = H_est_new;
     Hs_est = Hs_est_new;
+    S_est = S_est_new;
 end
 
 %fit least squares
@@ -297,6 +307,7 @@ function B = fitB(B0,Y,X, H, Finv, selPix, params)
 %estimate of the activity, HX
 num_time_points = size(Y,2);
 [~, HP] = splitFreq(Y-H*X, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps));
+HP(isnan(HP)) = 0;
 HPsurround = getSurround(HP,selPix,params);
 sinePreds = sinePredictors(num_time_points,params.baselineWindow_samps);
 %sqrtF = sqrt(1./Finv);
@@ -328,12 +339,14 @@ a = reshape(A(:,1:totSamps), size(A,1), denoiseWindow, nPages); % #pixels x #sam
 Ma = squeeze(mean(a,2, 'omitmissing'));
 SMa = smoothdata(Ma,2, 'lowess',LPfactor, 'omitmissing');
 resid = Ma-SMa;
-lowVals = resid<=ordfilt2(resid, ceil(0.15*LPfactor), ones([1 LPfactor]));
+lowVals = resid<=ordfilt2(resid, max(2,ceil(0.15*LPfactor)), ones([1 LPfactor]));
 Ma(~lowVals) = nan;
-SMa = Ma;
+SMa = smoothdata(Ma,2, 'lowess',LPfactor, 'omitmissing');
 for iter = 1:3
-    if any(isnan(SMa(:)))
-        SMa = smoothdata(SMa,2, 'lowess',LPfactor, 'omitmissing');
+    selNans = isnan(SMa);
+    if any(selNans(:))
+        tmp = smoothdata(SMa,2, 'lowess',LPfactor, 'omitmissing');
+        SMa(selNans) = tmp(selNans); 
     else
         break
     end
@@ -577,6 +590,6 @@ end
 function Xfloor = computeFloor(X, denoiseWindow, baseline)
  ord = ceil(0.1*baseline); % a percentile filter to remove overfit small spikes during iterations
  Xmed = medfilt2(X, [1 2*ceil(denoiseWindow)+1],"symmetric");
- Xmed_min = ordfilt2(Xmed, ord, ones(1,baseline));
- Xfloor = smoothdata(Xmed_min, 2,"movmean",baseline,"omitmissing");
+ Xmed_min = ordfilt2(Xmed, ord, ones(1,ceil(baseline)), 'symmetric');
+ Xfloor = smoothdata(Xmed_min, 2,"movmean",ceil(baseline),"omitmissing");
 end

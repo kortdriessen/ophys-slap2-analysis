@@ -247,7 +247,7 @@ for DMDix = nDMDs:-1:1
         k = length(sources.R);
     end
 
-    %Generate IMsel; the data only in the selected region, aligned across movies
+    %select regions near synapses, aligned across movies
     selPix = false([sz(1:2) k]);
     params.selRadius = ceil(2*params.dXY);
     for sourceIx = k:-1:1
@@ -283,12 +283,9 @@ for DMDix = nDMDs:-1:1
                 els = trialTable.lastLine(DMDix,:);
                 E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params);
             else %BERGAMO
-                parfor trialIx = 1:nTrials
-                    if any(validTrials==trialIx)
-                        fnRaw = fns{trialIx};
-                        E{trialIx} = processTrial_vIM(dr, fnRaw, [], [], selPix, sources, discardFrames{trialIx}, alignData{trialIx}, mIM{trialIx}, motOutput(:,trialIx), roiData, params);
-                    end
-                end
+                fls = cell(1,numel(fns)); %first frame; leave empty for most uses
+                els = cell(1,numel(fns)); %last frame; leave empty for most uses
+                E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params);
             end
 
         %per-trial images

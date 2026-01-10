@@ -7,7 +7,7 @@
 %   add regressors?
 %
 % NaN handling!!
-%clear all;
+clear GT params;
 rng(0);
 
 doParallel = false;
@@ -20,21 +20,26 @@ end
 sz = [200,200];
 num_sources = 100;
 num_pixels = prod(sz);
-num_time_points = 1000;
-tau = 3; %used for generating GT
-k = [zeros(1, 6*tau) exp(-(0:6*tau)/tau)];
+num_time_points = 3000;
+gen_Hz = 90;
+tau_s = 0.03;
+tau = gen_Hz*tau_s; %used for generating GT
+k = [zeros(1, ceil(6*tau)) exp(-(0:(ceil(6*tau)))/tau)];
+k = k./sum(k);
 
 %inference parameters
-params.tau_full = 3;
-params.denoiseWindow_samps = 5;
-params.baselineWindow_samps = 101;
+params.microscope = 'simulation';
+params.tau_full = tau;
 params.dXY = 3;
 params.selRadius = 2*params.dXY;
 params.nmfIter = 2;
 params.sigma_px = 1.33;
 params.baselineWindow_Glu_s = 4;
 params.denoiseWindow_s = 0.1;
-params.analyzeHz = 90;
+params.analyzeHz = gen_Hz;
+params.denoiseWindow_samps = params.denoiseWindow_s.*params.analyzeHz;
+params.baselineWindow_samps = params.baselineWindow_Glu_s .* params.analyzeHz;
+
 params = setParamsExtractTrial(params);
 
 %simulate background
@@ -77,23 +82,32 @@ for ix = num_sources:-1:1
 end
 
 %simulate spikes
-GT.S = (2^5) .* max(0, rand(num_sources,num_time_points).^8 - 0.5);
+spikeprob = smoothdata(rand(num_sources,num_time_points),2, 'movmean', params.denoiseWindow_samps);
+spikeprob = max(0,(spikeprob./mean(spikeprob) - 1));
+spikeprob =0.1.*spikeprob./max(spikeprob(:));
+spikes = rand(size(spikeprob)).*(rand(size(spikeprob))<spikeprob);
+GT.S = 100*spikes;
 %GT.S = 0.*GT.S; %!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
 %normalize H to maintain scale
 normFac = sum(GT.H, 1);
 GT.H = GT.H./normFac;
 GT.Hs = GT.Hs./normFac;
-GT.S = GT.S.*normFac';
 
 GT.B = reshape(GT.B, [],num_time_points); GT.B = GT.B(selPix(:),:);
 GT.X = convn(GT.S, k, 'same');
 GT.Y = GT.B + GT.H*GT.X;
 
 %simulate observations
-F = 1000.*(1+10*rand(size(GT.Y,1),1)) .* (1+rand(size(GT.Y))); %F=Freshness; a weighting factor proportional to the number of independent observations averaged into a measurement
+F = 5.*(1+10*rand(size(GT.Y,1),1)) .* (1+rand(size(GT.Y))); %F=Freshness; a weighting factor proportional to the number of independent observations averaged into a measurement
 Y_obs = poissrnd(F.*GT.Y)./F; %F=Freshness
 
+%add in photon multiplier
+mult = 700;
+Y_obs = Y_obs.*mult;
+GT.B = GT.B.*mult;
+GT.X = GT.X.*mult;
+GT.S = GT.S.*mult;
 %SOLVE!
 if doParallel
     resultFuture = extractTrial(Y_obs,1./F, sources, selPix, params,GT);

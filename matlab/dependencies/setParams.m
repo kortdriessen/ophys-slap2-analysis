@@ -28,9 +28,9 @@ switch fnName
         params.microscope = { '''SLAP2''' , '''bergamo'''};          tooltips.scope = 'SLAP2 or bergamo';
         params.includeIntegrationROIs = false; tooltips.includeIntegrationROIs = 'Use integration ROIs for trace extraction?';
         params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
-        params.sparseFac = 0.5;          tooltips.sparseFac = 'sparsity factor for shrinking activity, 0-1, higher numbers are sparser';
         params.nmfIter = 2;              tooltips.nmfIter = 'number of iterations of NMF refinement';
         params.dXY = 3;                  tooltips.dXY = 'how large sources can be (radius), pixels';
+        params.lambda = [];              tooltips.lambda = 'regularizer; roughly the standard deviation of noise in a dim pixel at the analysis framerate; leave empty for microscope-dependent default';
         params.denoiseWindow_s = 0.2;   tooltips.denoiseWindow_s= 'the timescale on which signals can be smoothed when denoising, seconds';
         params.baselineWindow_Glu_s = 4; tooltips.baselineWindow_Glu_s= 'timescale for calculating F0 in glutamate channel, seconds';
         params.baselineWindow_Ca_s = 4;  tooltips.baselineWindow_Ca_s= 'timescale for calculating F0 in calcium channel, seconds';
@@ -42,10 +42,9 @@ switch fnName
         params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
         params.nanThresh = 0.33;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
-%        params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
         params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
         params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
-        params.makeJSON = false;             tooltips.makeJSON = 'run python script to create processing.json';        
+        params.makeJSON = false;             tooltips.makeJSON = 'run python script to create processing.json';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 50; tooltips.maxshift = 'Maximum frame offset,in pixels';
