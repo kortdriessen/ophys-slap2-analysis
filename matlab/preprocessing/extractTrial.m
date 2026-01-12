@@ -14,6 +14,16 @@ if isempty(params.lambda) %If not provided, estimate the standard deviation of a
     params.lambda = 4*prctile(pxSTD(sel),90)
 end
 
+%rescale data
+Y_obs = Y_obs./params.lambda;
+if nargin>5
+    GT.B = GT.B./params.lambda;
+    GT.S = GT.S./params.lambda;
+    GT.X = GT.X./params.lambda;
+    GT.Y = GT.Y./params.lambda;
+end
+params.lambda = 1; %after the above normalization, setting this higher than 1 (e.g. 2) encourages sparsity
+
 %break the problem into separable chunks, i.e. nonoverlap sets
 zones = false(sz); zones(sub2ind(sz,sources.R,sources.C)) = true;
 zones = imdilate(zones, strel('disk', ceil(1.5*params.sigma_px+(size(params.validKernel,1)-1)/2)));

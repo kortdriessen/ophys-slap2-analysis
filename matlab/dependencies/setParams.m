@@ -30,7 +30,7 @@ switch fnName
         params.sigma_px = 1.33;          tooltips.sigma_px = 'Estimated radius of the PSF (gaussian sigma)';
         params.nmfIter = 2;              tooltips.nmfIter = 'number of iterations of NMF refinement';
         params.dXY = 3;                  tooltips.dXY = 'how large sources can be (radius), pixels';
-        params.lambda = [];              tooltips.lambda = 'regularizer; roughly the standard deviation of noise in a dim pixel at the analysis framerate; leave empty for microscope-dependent default';
+        params.lambda = [];              tooltips.lambda = 'regularizer; roughly the single-photon amplitude. Leave empty to use default/estimate from data.';
         params.denoiseWindow_s = 0.2;   tooltips.denoiseWindow_s= 'the timescale on which signals can be smoothed when denoising, seconds';
         params.baselineWindow_Glu_s = 4; tooltips.baselineWindow_Glu_s= 'timescale for calculating F0 in glutamate channel, seconds';
         params.baselineWindow_Ca_s = 4;  tooltips.baselineWindow_Ca_s= 'timescale for calculating F0 in calcium channel, seconds';

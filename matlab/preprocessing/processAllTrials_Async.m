@@ -1,6 +1,4 @@
 function E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params)
-doPlot = false;
-
 curPool = gcp('nocreate');
 if isempty(curPool) || ~strcmpi(class(curPool), 'parallel.ThreadPool') %  ~strcmpi(class(curPool), 'parallel.ProcessPool') %
     delete(curPool);
@@ -15,9 +13,8 @@ for i = 1:numel(validTrials)
     E{nLoad}.discardFrames = CD.discardFrames;
     if i>1 %we process the previous trial after loading the next, to keep CPU usage up during loading
         [E{validTrials(i-1)}, B] = processResult(resultsFuture, E{validTrials(i-1)},params);
-        
-        if doPlot
-            plotE(E{validTrials(i-1)},Y,B,selPix); %the Y here is from the previous trial
+        if isempty(E{nLoad})
+            disp(['Error processing trial: ' int2str(nLoad) '\n Continuing...'])
         end
     end
     disp(['Processing dataset: ' fns{nLoad}])
@@ -25,13 +22,15 @@ for i = 1:numel(validTrials)
     resultsFuture = extractTrial(Y,CD.Finv, sources, any(selPix,3), params);
     clear CD;
 end
+
 [E{nLoad}, B] = processResult(resultsFuture,E{nLoad},params);
-if doPlot    
-    plotE(E{nLoad},Y,B,selPix);
+if isempty(E{nLoad})
+    disp(['Error processing trial: ' int2str(nLoad) '\n Continuing...'])
 end
+
 end
 % ---------------- Helper Functions ----------------
-function plotE(E, Y,B,selPix)
+function plotE(E, Y,B,selPix) %debugging helper only
     %generate activity movie, baseline movie, and residual
     sel2D = any(selPix,3);
     Ht = reshape(E.footprints,numel(sel2D),[]);
@@ -43,22 +42,27 @@ function plotE(E, Y,B,selPix)
     render = zeros([size(sel2D) 500]);
     render(repmat(sel2D,1,1,500)) = B(:,501:1000);
 end
+
 function [E, B] = processResult(resultsFuture, E, params)
-        [H,B,S,LS,F0,SNR] = fetchOutputs(resultsFuture);
-        discard = E.discardFrames;
-        E.footprints = H;
-        %E.baseline = single(B); %This is a huge variable and currently unused.
-        E.dF.events = S; 
-        E.dF.events(:,discard) = nan;
+try
+    [H,B,S,LS,F0,SNR] = fetchOutputs(resultsFuture);
+    discard = E.discardFrames;
+    E.footprints = H;
+    %E.baseline = single(B); %This is a huge variable and currently unused.
+    E.dF.events = S;
+    E.dF.events(:,discard) = nan;
 
-        E.dF.denoised = convn(S,params.k,'same');
-        E.dF.denoised(:,discard) = nan;
+    E.dF.denoised = convn(S,params.k,'same');
+    E.dF.denoised(:,discard) = nan;
 
-        E.dF.ls = LS;
-        E.dF.ls(:,discard) = nan;
+    E.dF.ls = LS;
+    E.dF.ls(:,discard) = nan;
 
-        E.F0 = F0;
-        E.SNR = SNR;
+    E.F0 = F0;
+    E.SNR = SNR;
+catch
+    B = [];
+end
 end
 
 function CD = loadTrial(dr, fn, startLine, endLine, selPix, discardFrames, alignData, meanIM, motOutput, roiData, params)

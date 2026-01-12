@@ -21,7 +21,7 @@ sz = [200,200];
 num_sources = 100;
 num_pixels = prod(sz);
 num_time_points = 3000;
-gen_Hz = 90;
+gen_Hz = 400;
 tau_s = 0.03;
 tau = gen_Hz*tau_s; %used for generating GT
 k = [zeros(1, ceil(6*tau)) exp(-(0:(ceil(6*tau)))/tau)];
@@ -99,11 +99,11 @@ GT.X = convn(GT.S, k, 'same');
 GT.Y = GT.B + GT.H*GT.X;
 
 %simulate observations
-F = 5.*(1+10*rand(size(GT.Y,1),1)) .* (1+rand(size(GT.Y))); %F=Freshness; a weighting factor proportional to the number of independent observations averaged into a measurement
+F = 0.5.*(1+10*rand(size(GT.Y,1),1)) .* (1+rand(size(GT.Y))); %F=Freshness; a weighting factor proportional to the number of independent observations averaged into a measurement
 Y_obs = poissrnd(F.*GT.Y)./F; %F=Freshness
 
 %add in photon multiplier
-mult = 700;
+mult = 70;
 Y_obs = Y_obs.*mult;
 GT.B = GT.B.*mult;
 GT.X = GT.X.*mult;

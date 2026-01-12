@@ -27,15 +27,13 @@ params.baselineWindow_samps =  params.baselineWindow_Glu_s .*params.analyzeHz;
 params.denoiseWindow_samps = params.denoiseWindow_s .* params.analyzeHz;
 
 if ~isfield(params, 'lambda') || isempty(params.lambda)
-    % switch params.microscope
-    %     case 'SLAP2'
-    %         params.lambda = 10;
-    %     case 'bergamo'
-    %         params.lambda = 70;
-    %     otherwise
+    switch params.microscope
+        case 'SLAP2'
+            params.lambda = 100; % true photon scale
+        otherwise
             warning('params.lambda not supplied; extractTrial will estimate it independently for each recording. This may cause trial-to-trial baseline and scaling variations')
             params.lambda = [];
-    % end
+    end
 end
 
 end
