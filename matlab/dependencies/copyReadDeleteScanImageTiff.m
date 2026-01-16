@@ -59,7 +59,23 @@ assert(exist(remotepath, 'file'));
 randName = [int2str(round(1e10*rand+0.1)) '.tif'];
 localpath = [localDir  filesep   randName];
 disp(localpath)
-copyfile(remotepath, localpath);
+
+
+success = false; retries = 0;
+while ~success
+    try
+        copyfile(remotepath, localpath);
+        success = true;
+    catch ME
+        if retries<10 %we sometimes get system resource errors
+            pause(5);
+            retries = retries+1;
+        else
+            rethrow(ME)
+        end
+    end
+end
+
 [data, desc, meta] = networkScanImageTiffReader(localpath);
 delete(localpath);
 end
