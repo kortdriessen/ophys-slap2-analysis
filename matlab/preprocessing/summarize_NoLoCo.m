@@ -182,6 +182,9 @@ for DMDix = nDMDs:-1:1
     actValidPix = squeeze(mean(~isnan(actAligned(:,:,1,:)), [1 2]));
     validTrials= find(ccf(:)>corrThresh & actValidPix(:)>mean(actValidPix)/2);
     exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
+    if isempty(exptSummary.meanIM{DMDix})
+        exptSummary.meanIM{DMDix} = meanIM
+    end
     actIM = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
     nanFrac = mean(isnan(actAligned(:,:,:,validTrials)), 4);
     actIM(nanFrac>0.6) = nan;

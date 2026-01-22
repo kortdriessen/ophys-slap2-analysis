@@ -116,10 +116,15 @@ for DMDix = nDMDs:-1:1
         end
         
         firstValidTrial = find(keepTrials(DMDix,:),1,"first");
-        dd = dir(trialTable.fnRegDS{DMDix, firstValidTrial});
+        dd = dir([dr filesep trialTable.fnRegDS{DMDix, firstValidTrial}]);
         fileSize = dd.bytes;
-        userMemInfo = memory;
-        memAvailable = userMemInfo.MemAvailableAllArrays;
+        if ispc
+            userMemInfo = memory;
+            memAvailable = userMemInfo.MemAvailableAllArrays;
+        else
+            [~, result] = unix('grep MemAvailable /proc/meminfo | awk ''{print $2}''');
+            memAvailable = str2double(result) * 1024;  % Convert KB to bytes
+        end
         maxWorkers = min(size(trialTable.filename,2), floor(0.13*memAvailable/fileSize));
         nWorkers = min(params.nParallelWorkers, maxWorkers);
         

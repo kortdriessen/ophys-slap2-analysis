@@ -259,7 +259,9 @@ exptSummary.dF.ls(:,:,1) = sum(W,1)'.*H5; %[source#, time, channel] LEAST SQUARE
 exptSummary.F0(:,:,1) = F0;
 exptSummary.footprints = single(Wfull);
 exptSummary.discardFrames = discard;
-exptSummary.frameLines = frameLines;
+if params.microscope == "SLAP2"
+    exptSummary.frameLines = frameLines;
+end
 
 
 %populate dF/F and noise estimation;
@@ -272,9 +274,17 @@ for fnix = 1:length(fnames)
     exptSummary.noiseEst.dFF.(fnames{fnix}) = nan(size(tmpDFF,1),1);
     for sourceIx =1:size(tmpDF,1)
         tmp = tmpDF(sourceIx, ~isnan(tmpDF(sourceIx,:)));
-        exptSummary.noiseEst.dF.(fnames{fnix})(sourceIx) = estimatenoise(tmp(1:ceil(params.tau_full):end));
+        try
+            exptSummary.noiseEst.dF.(fnames{fnix})(sourceIx) = estimatenoise(tmp(1:ceil(params.tau_full):end));
+        catch
+            exptSummary.noiseEst.dF.(fnames{fnix})(sourceIx) = NaN;
+        end
         tmp = tmpDFF(sourceIx, ~isnan(tmpDFF(sourceIx,:)));
-        exptSummary.noiseEst.dFF.(fnames{fnix})(sourceIx) = estimatenoise(tmp(1:ceil(params.tau_full):end));
+        try
+            exptSummary.noiseEst.dFF.(fnames{fnix})(sourceIx) = estimatenoise(tmp(1:ceil(params.tau_full):end));
+        catch
+            exptSummary.noiseEst.dFF.(fnames{fnix})(sourceIx) = NaN;
+        end
     end
 end
 

@@ -101,7 +101,7 @@ p = summaryEroded(peaks);
 sortedP = sort(p, 'descend');
 totalPix = sum(~isnan(summaryEroded(:)));
 
-if totalPix<10
+if totalPix<10 || sum(peaks(:))==0
     P.row = [];
     P.col = [];
     P.val = [];

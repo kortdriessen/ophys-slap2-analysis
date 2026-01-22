@@ -80,7 +80,7 @@ disp(['Aligning: ' [dr filesep fn]])
 
 if endsWith(fn, '.h5')
     desc = h5info([dr filesep fn]);
-    Ad = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
+    Ad = single(h5read([dr filesep fn], ['/', desc.Datasets.Name]));
 else
     [Ad, desc, meta] = networkScanImageTiffReader([dr filesep fn]);
 end
