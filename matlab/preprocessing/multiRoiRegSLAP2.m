@@ -81,10 +81,10 @@ lastLine = trialTable.lastLine(DMD_ix, f_ix);
 aData = params;
 
 disp(['Aligning: ' [dr filesep fn]])
-fnwrite = [dr filesep fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
-fnAdata = [dr filesep fnW '_ALIGNMENTDATA.mat'];
+fnwrite = [fnW '_REGISTERED_DOWNSAMPLED-' int2str(aData.alignHz) 'Hz.tif'];
+fnAdata = [fnW '_ALIGNMENTDATA.mat'];
 
-if ~params.overwriteExisting && exist(fnAdata, 'file') && exist(fnwrite, 'file')
+if ~params.overwriteExisting && exist([dr filesep fnAdata], 'file') && exist([dr filesep fnwrite], 'file')
     disp([fn ' is already aligned; skipping' newline 'To force realign, pass TRUE as second argument']);
     return
 end
@@ -245,7 +245,7 @@ aErrorDS = nan(1,nDSframes); %alignment error output by dftregistration
 
 %output TIF
 pixelscale = 4e4; %PIXEL SIZE IN DOTS PER CM; 250nm
-fTIF = Fast_BigTiff_Write(fnwrite,pixelscale,0);
+fTIF = Fast_BigTiff_Write([dr filesep fnwrite],pixelscale,0);
 
 V1 = nan(size(viewC,1),size(viewC,2),nDSframes,'single'); %variance factor; multiply the image value by this to get variance
 registrationFailed = false;
@@ -398,7 +398,7 @@ aData.viewR = viewR;%used to remap images from the datafile into the space of th
 %  sz = size(Ytrimmed);
 %  Yshifted = interp2(1:sz(2), 1:sz(1), Ytrimmed,aData.viewC+motionC, aData.viewR+motionR, 'linear', nan);
 
-save(fnAdata, 'aData', '-v7.3');
+save([dr filesep fnAdata], 'aData', '-v7.3');
 end
 
 function meta = loadMetadata(datFilename)

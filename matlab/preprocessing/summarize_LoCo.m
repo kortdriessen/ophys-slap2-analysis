@@ -38,7 +38,6 @@ copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel 
 %end
 nDMDs = size(trialTable.filename,1); %the trial table has size #DMDs x # trials; Bergamo is treated as '1 DMD'
 nTrials = size(trialTable.filename,2);
-firstValidTrial = find(all(keepTrials,1),1,'first');
 
 %parameters that depend only on the microscope, hidden from GUI
 switch params.microscope
@@ -70,6 +69,7 @@ if params.drawUserRois
     else
         for DMDix = 1:nDMDs
             %load image data
+            firstValidTrial = find(keepTrials(DMDix,:),1,"first");
             [~, fn, ext] = fileparts(trialTable.fnRegDS{DMDix,firstValidTrial});
             IM = copyReadDeleteScanImageTiff([dr filesep fn ext]);
             IM = squeeze(mean(IM,[3 4], 'omitnan'));
@@ -90,8 +90,9 @@ end
 %PROCESS DATA
 for DMDix = nDMDs:-1:1
     %load some metadata
-    [~, fn, ext] = fileparts(trialTable.fnAdata{DMDix,firstValidTrial});
-    load([dr filesep fn ext], 'aData');
+    firstValidTrial = find(keepTrials(DMDix,:),1,"first");
+    fn = trialTable.fnAdata{DMDix,firstValidTrial};
+    load([dr filesep fn], 'aData');
     numChannels = aData.numChannels;
     params.numChannels = numChannels;
     params.alignHz = aData.alignHz;
@@ -114,10 +115,12 @@ for DMDix = nDMDs:-1:1
         else
             poolsize = p.NumWorkers;
         end
-        
-        firstValidTrial = find(keepTrials(DMDix,:),1,"first");
         dd = dir([dr filesep trialTable.fnRegDS{DMDix, firstValidTrial}]);
-        fileSize = dd.bytes;
+        try
+            fileSize = dd.bytes;
+        catch
+            error(['Error loading registered tiff:' trialTable.fnRegDS{DMDix, firstValidTrial} '\n' 'Are paths in your trial table valid?']);
+        end
         if ispc
             userMemInfo = memory;
             memAvailable = userMemInfo.MemAvailableAllArrays;
@@ -142,8 +145,7 @@ for DMDix = nDMDs:-1:1
     fns = trialTable.fnRegDS(DMDix, :);
     parfor trialIx = 1:nTrials
         if keepTrials(DMDix,trialIx)
-            [~,fn, ext] = fileparts(fns{trialIx}); fn = [fn ext];
-            [~, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks{trialIx}, discardFrames{trialIx}]= loadAndProcessTrialAsync(dr, fn, numChannels, params); %rawIMs{trialIx}
+            [~, mIM{trialIx}, aIM{trialIx}, alignData{trialIx}, peaks{trialIx}, discardFrames{trialIx}]= loadAndProcessTrialAsync(dr, fns{trialIx}, numChannels, params); %rawIMs{trialIx}
         end
     end
     %Assemble same-sized mean images from different-sized trial means
