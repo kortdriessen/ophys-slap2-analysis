@@ -121,8 +121,13 @@ for DMDix = nDMDs:-1:1
         catch
             error(['Error loading registered tiff:' trialTable.fnRegDS{DMDix, firstValidTrial} '\n' 'Are paths in your trial table valid?']);
         end
-        userMemInfo = memory;
-        memAvailable = userMemInfo.MemAvailableAllArrays;
+        if ispc
+            userMemInfo = memory;
+            memAvailable = userMemInfo.MemAvailableAllArrays;
+        else
+            [~, result] = unix('grep MemAvailable /proc/meminfo | awk ''{print $2}''');
+            memAvailable = str2double(result) * 1024;  % Convert KB to bytes
+        end
         maxWorkers = min(size(trialTable.filename,2), floor(0.13*memAvailable/fileSize));
         nWorkers = min(params.nParallelWorkers, maxWorkers);
         

@@ -167,7 +167,12 @@ switch params.microscope
     case 'bergamo'
         baseline = prctile(reshape(meanIM, [], numChannels), 10,1);
 
-        IM = networkScanImageTiffReader([dr filesep fn]); %Raw movie
+        if endsWith(fn, '.h5')
+            desc = h5info([dr filesep fn]);
+            IM = h5read([dr filesep fn], ['/', desc.Datasets.Name]);
+        else
+            IM = networkScanImageTiffReader([dr filesep fn]); %Raw movie
+        end
         IM = double(IM);
 
         %rearrange into correct dimensions
