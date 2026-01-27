@@ -1,7 +1,11 @@
 function [E, footprints]= loadAndProcessVoltage(dr, fn, firstLine, lastLine, aData, masks, params)
 
 hSlap2DataFile = slap2.Slap2DataFile([dr filesep fn]);
-hLowLevelDataFile = hSlap2DataFile.hDataFile;
+if isprop(hSlap2DataFile, 'hDataFile')
+    hLowLevelDataFile = hSlap2DataFile.hDataFile;
+else
+    hLowLevelDataFile = hSlap2DataFile.hMultiDataFiles;
+end
 numLinesPerCycle = hLowLevelDataFile.header.linesPerCycle;
 % totalCycles = hLowLevelDataFile.numCycles;
 % totalLines = totalCycles*numLinesPerCycle;
@@ -26,7 +30,7 @@ tmp = -tmp./(min(-0.005, prctile(tmp,5))); %normalize to the median-to-5th prcti
 thresh = params.motionThresh; %decrease thresh to be more stringent on motion correction
 window = 2*ceil(0.1*aData.alignHz)+1;% a window in time to censor aronud motion events, ~0.2 seconds;
 discard = imclose(imdilate(tmp>thresh, ones(window,1)) | (tmp>(thresh/2) & imdilate(tmp>thresh, ones(2*window+1,1))), ones(window,1));
-E.discardFrames = logical(interp1(linspace(firstLine, lastLine, nDSframes),single(discard), lineIxs));  %resample discardFrames to the sample times
+E.discardFrames = logical(interp1(linspace(firstLine, lastLine, nDSframes),single(discard), lineIxs, 'nearest','extrap'));  %resample discardFrames to the sample times
 
 %upsample motion and recNegErr
 fieldNames = {'onlineXshift', 'onlineYshift', 'onlineZshift', 'recNegErr', 'motionDSc', 'motionDSr', 'aError'};

@@ -19,7 +19,7 @@ if ~exist(fullPathToTrialTable, 'file')
 end
 
 %align files
-%multiRoiRegSLAP2(fullPathToTrialTable,aParams)
+multiRoiRegSLAP2(fullPathToTrialTable,aParams)
 
 %summarize
 summarize_Voltage(dr, sParams);
