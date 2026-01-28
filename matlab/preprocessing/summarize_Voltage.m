@@ -146,7 +146,7 @@ for DMDix = [1 2]
     for trialIx = 1:nTrials
         disp(['Processing Trial ' int2str(trialIx)]);
         if keepTrials(DMDix,trialIx)
-            S = load([dr fnA{trialIx}], 'aData'); %LOAD ALIGNMENT DATA
+            S = load([dr filesep fnA{trialIx}], 'aData'); %LOAD ALIGNMENT DATA
             aData{trialIx} = S.aData;
             [~,fn, ext] = fileparts(fns{trialIx});
             if isempty(summary.footprints{DMDix})
