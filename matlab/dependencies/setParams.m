@@ -22,7 +22,7 @@ switch fnName
         params.nanThresh = 0.33;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
         params.roiHz = 50;               tooltips.roiHz = 'Frame rate for extracting ROI signals, including soma';
         params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
-        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
+        params.operator = 'KD';       tooltips.operator = 'person running the analysis';
         params.makeJSON = false;             tooltips.makeJSON = 'run python script to create processing.json';
     case 'summarize_LoCo'
         params.microscope = { '''SLAP2''' , '''bergamo'''};          tooltips.scope = 'SLAP2 or bergamo';
@@ -34,7 +34,7 @@ switch fnName
         params.denoiseWindow_s = 0.2;   tooltips.denoiseWindow_s= 'the timescale on which signals can be smoothed when denoising, seconds';
         params.baselineWindow_Glu_s = 4; tooltips.baselineWindow_Glu_s= 'timescale for calculating F0 in glutamate channel, seconds';
         params.baselineWindow_Ca_s = 4;  tooltips.baselineWindow_Ca_s= 'timescale for calculating F0 in calcium channel, seconds';
-        params.activityChannel = 1;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
+        params.activityChannel = 2;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
         params.tau_s = 0.03;             tooltips.tau_s = 'decay time constant of glutamate signal';
         params.tau2_s = 0.15;            tooltips.tau2_s = 'decay time constant of 2nd channel signal at synapses (usually spine calcium)';
         params.poissBasedStdIM = 0;      tooltips.poissBasedStdIM = 'use Poisson model to estimate stdIM';
@@ -49,19 +49,19 @@ switch fnName
         params.analyzeHz = 200;          tooltips.analyzeHz = 'frame rate used for analysis (SLAP2 only)';
         params.nanThresh = 0.33;         tooltips.nanThresh = 'Max fraction of samples that can be NaN for including a pixel in analysis';
         params.discardInitial_s = 0;     tooltips.discardInitial_s = 'time in seconds to remove from analysis at the start of each trial, to accound for warmup';
-        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
+        params.operator = 'KD';       tooltips.operator = 'person running the analysis';
         params.makeJSON = false;             tooltips.makeJSON = 'run python script to create processing.json';
     case 'multiRoiRegSLAP2'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshift = 40; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.clipShift = 5; tooltips.clipShift = 'Maximum allowable shift per frame';
         params.alpha = 0.005; tooltips.alpha = 'exponential decay of template per frame';%exponential time constant for template
-        params.nWorkers = 86; tooltips.nWorkers = 'number of parallel workers';
+        params.nWorkers = 64; tooltips.nWorkers = 'number of parallel workers';
         params.overwriteExisting = false; tooltips.overwriteExisting = 'Realign and overwrite any existing files?';
-        params.refStackTemplate = true; tooltips.refStackTemplate = 'Use ref stack as template';
+        params.refStackTemplate = false; tooltips.refStackTemplate = 'Use ref stack as template';
         params.isReVolt = false; tooltips.isReVolt = 'select true for recordings with simultaneous red 1P imaging';
         params.includeIntegrationROIs = false; tooltips.includeIntegrationROIs = 'Use integration ROIs for alignment and TIFF generation?';
-        params.operator = 'Maria Goeppert Mayer';       tooltips.operator = 'person running the analysis';
+        params.operator = 'KD';       tooltips.operator = 'person running the analysis';
     case 'integrationRegistration'
         params.alignHz = 80; tooltips.alignHz = 'Frequency for generating downsampled aligned tiffs';
         params.maxshiftXY = 25; tooltips.maxshift = 'Maximum frame offset,in pixels';

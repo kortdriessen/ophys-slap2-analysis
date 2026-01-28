@@ -3,20 +3,20 @@ if isempty(remotepath) %PASS EMPTY MATRIX TO INITIALIZE
     thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
     if ~exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
         try
-            localDir = '/nvme/sorting/slap_scratch/temp';
+            localDir = '/data/temp';
             if ~exist(localDir, 'dir')
                 warning('User canceled setting local directory. defaulting to C:/temp on Windows else /scratch')
                 if ispc
                     localDir = 'C:\temp';
                 else
-                    localDir = '/nvme/sorting/slap_scratch/temp';
+                    localDir = '/data/temp';
                 end
             end
         catch
             if ispc
                 localDir = 'C:\temp';
             else
-                localDir = '/nvme/sorting/slap_scratch/temp';
+                localDir = '/data/temp';
             end
         end
         save([thisDir filesep 'pathToFastDrive.mat'], 'localDir');
