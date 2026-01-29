@@ -17,7 +17,7 @@ RAW DATA structure on aind/scratch
    ┃ ┗ 📂slap2/
    ┃   ┣ 🖼️vasculature_map_annotated.tif (copied from * upon upload to VAST)
    ┃   ┣ 🖼️session_vasculature_1p.tif
-   ┃   ┗ 📂structure_stack
+   ┃   ┗ 📂static_data
    ┃     ┣ 📜structure_YYYYMMDD_HHMMSS_DMD#.meta
    ┃     ┣ 💾structure_YYYYMMDD_HHMMSS_DMD#.dat
    ┃     ┣ 🖼️structure_YYYYMMDD_HHMMSS_DMD#.tif
