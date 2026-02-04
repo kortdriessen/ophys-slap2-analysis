@@ -276,12 +276,12 @@ def get_trial_data(trial_info, DMDix, params, sampFreq, refStack, fastZ2RefZ, al
                     dataCt2[matching_indices, DSframeIx] += weight
 
     aData = spio.loadmat(trialTable['fnAdataInt'][DMDix,trialIx][0])['aData'][0,0]
-    aData['DSframes'] = aData['DSframes'] * hDataFile.metaData.linePeriod_s
+    # aData['DSframes'] = aData['DSframes'] * hDataFile.metaData.linePeriod_s
     
     if all_channels:
-        return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s, data2/100, dataCt2
+        return data/100, dataCt, aData, DSframes, data2/100, dataCt2
     else:
-        return data/100, dataCt, aData, DSframes * hDataFile.metaData.linePeriod_s
+        return data/100, dataCt, aData, DSframes
 
 def get_high_res_traces(trial_info, DMDix, params, sampFreq, refStack, subsampleMatrixInds, fastZ2RefZ, sparseHInds, sparseHVals, 
                 allSuperPixelIDs, dr, trialTable, A_final, uniqueMotionDS, motIndsToKeepDS, psf, soma_sps):
@@ -1367,6 +1367,8 @@ def main():
             lm &= ~dilated_nan_mask
             act_im += np.sum(lm * (br**3), axis=0, dtype=np.float32)
 
+        del rho, lm, br, batch_rho
+
         nan_mask = (act_im == 0) | (np.isnan(act_im))
         act_im[nan_mask] = np.nan
 
@@ -1851,6 +1853,7 @@ def main():
             # frame_group.create_dataset('trial_start_idxs', data=trial_start_idxs)
             frame_group.create_dataset('trial_num_frames', data=trial_num_frames)
             frame_group.create_dataset('discard_frames', data=np.any(np.isnan(F), axis=1))
+            frame_group.create_dataset('frame_line_idxs', data=np.concatenate([r[2] for r in results], axis=0))
 
             frame_group.create_dataset('offlineXshifts', data=np.concatenate([r[5][1] for r in results], axis=0))
             frame_group.create_dataset('offlineYshifts', data=np.concatenate([r[5][0] for r in results], axis=0))
@@ -1905,7 +1908,7 @@ def main():
     p = Processing.create_with_sequential_process_graph(
         pipelines=[
             Code(
-                name="SLAP2 multi-band integration processing pipeline (Python)",
+                name="SLAP2 band scanning processing pipeline (Python)",
                 url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/",
                 version=version,
             ),
@@ -1913,7 +1916,7 @@ def main():
         data_processes=[
             DataProcess(
                 process_type=ProcessName.VIDEO_MOTION_CORRECTION,
-                pipeline_name="SLAP2 multi-band integration processing pipeline (Python)",
+                pipeline_name="SLAP2 band scanning processing pipeline (Python)",
                 experimenters=[align_params.get('operator', 'Unknown')],
                 stage=ProcessStage.PROCESSING,
                 start_date_time=datetime.fromisoformat(align_params.get('startTime', datetime.now(timezone.utc).astimezone().isoformat())),
@@ -1932,7 +1935,7 @@ def main():
                 start_date_time=start_time,
                 end_date_time=end_time,
                 output_path=".",
-                pipeline_name="SLAP2 multi-band integration processing pipeline (Python)",
+                pipeline_name="SLAP2 band scanning processing pipeline (Python)",
                 code=Code(
                     url="https://github.com/AllenNeuralDynamics/ophys-slap2-analysis/blob/main/python/slap2analysis/extractSLAP2IntegrationSources.py",
                     version=version,
