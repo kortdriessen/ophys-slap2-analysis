@@ -7,6 +7,7 @@ tau = params.tau_s.*params.alignHz; %time constant in frames
 params.tau_frames = tau;
 sigma = params.sigma_px; %space constant in pixels
 baselineWindow = ceil(params.baselineWindow_Glu_s.*params.alignHz);
+denoiseWindow = ceil(params.denoiseWindow_s.*params.alignHz);
 nans = isnan(IM);
 
 sz = size(IM);
@@ -38,16 +39,31 @@ IMs(incomplete,:) = smoothdata(IMf(incomplete,:), 2, 'movmean', baselineWindow, 
 IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf))); clear IMs
 IMf = reshape(IMf, sz(1),sz(2), []);
 
-if isempty(vIM) %for raster imaging
-    vIM = ones(sz(1:2));
-end
-varIM(nanFrac>0.4) = nan;
-Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to electronic and dark noise
-IMb = smoothdata(IMf, 3, 'movmean', baselineWindow, 'omitnan');
+% IMb = reshape(computeF0(reshape(smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan'),[],size(IMf,3))',denoiseWindow,baselineWindow),size(IMf));
+% IMb = smoothdata(smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan'), 3, 'movmedian', baselineWindow, 'omitnan');  
 
-stdIM = sqrt((100*IMb+Vb).*vIM); %compute standard deviation
-%Highpass filter in time; This must occur before DoG to avoid edge artifacts
-IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan'); 
+if params.microscope == "SLAP2"
+    %Highpass filter in time; This must occur before DoG to avoid edge artifacts
+    IMb = smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+    IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+
+    if isempty(vIM) %for raster imaging
+        vIM = ones(sz(1:2));
+    end
+    varIM(nanFrac>0.4) = nan;
+    
+    Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to electronic and dark noise
+
+    stdIM = sqrt((100*IMb+Vb).*vIM); %compute standard deviation
+else
+    IMf = smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan');
+    %Highpass filter in time; This must occur before DoG to avoid edge artifacts
+    IMb = smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+    IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+
+    % MAD-based robust standard deviation estimate
+    stdIM = movmad(IMf,baselineWindow,3,'omitmissing') ./ 0.6741891400433162;
+end
 %divide by uncertainty to get a Z-score
 IMf = IMf./stdIM;
 clear IMb
