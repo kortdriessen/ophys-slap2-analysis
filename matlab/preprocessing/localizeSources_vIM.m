@@ -99,7 +99,7 @@ for fr = size(IMf,3)-ceil(1.5*tau):-1:2 %ceil(tau) because the filtering is unce
     % sel = IMfr(maxinds)>0 & IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
     % %sel = IMpre(maxinds)<=IMfr(maxinds) & IMpost(maxinds)<=IMfr(maxinds);
     % maxinds = maxinds(sel);
-    skIm(selMax) = skIm(selMax) + IMfr(selMax).^2; 
+    skIm(IMlocalMax(:,:,fr)) = skIm(IMlocalMax(:,:,fr)) + IMfr(IMlocalMax(:,:,fr)).^2; 
 end
 
 
