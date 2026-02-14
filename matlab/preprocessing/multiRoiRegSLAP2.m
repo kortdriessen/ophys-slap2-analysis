@@ -103,7 +103,7 @@ meta = loadMetadata([dr filesep fn]);
 linerateHz = 1/meta.linePeriod_s;
 dt = linerateHz/aData.alignHz;
 numChannels = S2data.numChannels;
-minSamps = 10; %minimimum number of samples to include in template
+minSamps = 15; %minimimum number of samples to include in template
 
 if params.isReVolt
     numChannels = 1;
@@ -276,7 +276,7 @@ try
             Ttmp = mean(cat(3, T0,template),3, 'omitnan');
             T = Ttmp(aData.maxshift-initR + (1:sz(1)), aData.maxshift-initC+(1:sz(2)));
             %[motOutput, corrCoeff] = xcorr2_nans(M, T, [0 ; 0], aData.clipShift);
-            [motOutput, corrCoeff] = xcorr2_nans_weighted(M, freshness, T, [0 ; 0], aData.clipShift);
+            [motOutput, corrCoeff] = xcorr2_nans_weighted(M, freshness, T, [0 ; 0], max(abs([initC initR aData.clipShift])));
         end
 
         motionDSr(DSframeIx) = initR+motOutput(1);
@@ -329,12 +329,14 @@ try
         template(sel) = sqrt(tSum(sel)./tN(sel));
         template(tN<minSamps) = nan;
 
-        initR = round(motionDSr(DSframeIx));
-        initC = round(motionDSc(DSframeIx));
+        initR = max(-aData.maxshift,min(aData.maxshift, round(motionDSr(DSframeIx))));
+        initC = max(-aData.maxshift,min(aData.maxshift,round(motionDSc(DSframeIx))));
     end
 catch ME
     disp(ME);
-    registrationFailed = true;
+    aData.registrationFailed = true;
+    disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
+    return
 end
 
 fTIF.close;
@@ -356,12 +358,11 @@ for chunkIx = 1:length(chunkEdges)-1
 end
 
 if std(motionDSc)>1.5 || std(motionDSr)>1.5
-    registrationFailed = true;
+    aData.registrationFailed = true;
     warning(['Too much motion in file: ' fn]);
-end
-if registrationFailed
-    disp(['REGISTRATION ERROR OCCURRED FOR FILE: ' fn newline 'YOU MAY NEED TO QC THIS FILE!' newline 'CONTINUING...'])
     return
+else
+    aData.registrationFailed = false;
 end
 
 %save alignment metadata

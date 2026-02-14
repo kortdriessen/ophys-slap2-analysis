@@ -163,7 +163,8 @@ for DMDix = nDMDs:-1:1
     disp('Making template for aligning across trials...')
     maxshift = 5;
     M = squeeze(sum(meanIM, 3));
-    template = makeTemplateMultiRoi(M(:,:,keepTrials(DMDix,:)), maxshift);
+    samples = find(keepTrials(DMDix,:)); samples = samples(unique(round(linspace(1,length(samples),20))));
+    template = makeTemplateMultiRoi(M(:,:,keepTrials(DMDix,samples)), maxshift);
 
     %align all mean images to template
     disp('Aligning across trials...')
@@ -174,13 +175,18 @@ for DMDix = nDMDs:-1:1
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
     clear M
+
+    fillval = min(template(:),[], 'omitnan')-1;
+    tFFT = fft2(max(template, fillval));
     for trialIx = nTrials:-1:1
         if ~keepTrials(DMDix,trialIx) || all(isnan(activIM(:,:,1,trialIx)), 'all')
             disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
             continue %skip
         end
         disp(['trial: ' int2str(trialIx)])
-        mot1 = xcorr2_nans(Mpad(:,:,trialIx), template, [0 ; 0], maxshift);
+        
+        output1 = dftregistration_clipped(tFFT, fft2(max(Mpad(:,:,trialIx), fillval)),1,80);
+        mot1 = [-output1(3) -output1(4)]; %xcorr2_nans(Mpad(:,:,trialIx), template, [-output1(3) ; -output1(4)], maxshift);
         [motOutput(:,trialIx), corrCoeff(trialIx)] = xcorr2_nans(Mpad(:,:,trialIx), template, round(mot1'), maxshift);
         [rr,cc] = ndgrid(1:size(meanIM,1), 1:size(meanIM,2));
 
