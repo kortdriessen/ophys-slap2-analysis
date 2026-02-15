@@ -56,13 +56,13 @@ if params.microscope == "SLAP2"
 
     stdIM = sqrt((100*IMb+Vb).*vIM); %compute standard deviation
 else
-    IMf = smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan');
+    IMfden = smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan');
     %Highpass filter in time; This must occur before DoG to avoid edge artifacts
-    IMb = smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+    IMb = smoothdata(IMfden, 3, 'movmedian', baselineWindow, 'omitnan');
     IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
 
     % MAD-based robust standard deviation estimate
-    stdIM = movmad(IMf,baselineWindow,3,'omitmissing') ./ 0.6741891400433162;
+    stdIM = movmad(IMfden - IMb,baselineWindow,3,'omitmissing') ./ 0.6741891400433162.*denoiseWindow;
 end
 %divide by uncertainty to get a Z-score
 IMf = IMf./stdIM;
