@@ -105,6 +105,7 @@ end
 
 %summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3); %.*IMgamma; 
 summaryEroded = skIm;
+valid = valid & (skIm ~= 0);
 summaryEroded(~valid) = nan;
 summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
 summaryEroded = summaryEroded - medfilt2(summaryEroded, [5 5]);
