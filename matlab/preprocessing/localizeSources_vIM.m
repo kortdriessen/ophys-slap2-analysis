@@ -22,39 +22,49 @@ if nargin<4
     doPlot = false;
 end
 
-firstValidFrames = find(any(~isnan(IM), [1 2]),400, 'first');
-varIM = var(IM(:,:,firstValidFrames),0,3,"omitmissing");
-
 %initialize filtered image
 IMf = IM; clear IM;
 IMf(repmat(~valid, 1, 1, nTimePoints)) = nan;
 nans = isnan(IMf);
+nanFrac = mean(nans,3);
+vIM(nans) = nan; %1000*mean(vIM(:,:, 1:min(end,400)), 'all', 'omitnan');
 
-%fill in missing values
-IMf= reshape(IMf, sz(1)*sz(2), []);
-nanFrac = mean(isnan(IMf),2);
-incomplete = nanFrac>0 & nanFrac<1;
-IMs = nan(size(IMf));
-IMs(incomplete,:) = smoothdata(IMf(incomplete,:), 2, 'movmean', baselineWindow, 'omitnan');
-IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf))); clear IMs
-IMf = reshape(IMf, sz(1),sz(2), []);
+% %fill in missing values
+% IMf= reshape(IMf, sz(1)*sz(2), []);
+% incomplete = nanFrac>0 & nanFrac<1;
+% IMs = nan(size(IMf));
+% IMs(incomplete(:),:) = smoothdata(IMf(incomplete(:),:), 2, 'movmean', baselineWindow, 'omitnan');
+% IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf))); clear IMs
+% IMf = reshape(IMf, sz(1),sz(2), []);
 
-% IMb = reshape(computeF0(reshape(smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan'),[],size(IMf,3))',denoiseWindow,baselineWindow),size(IMf));
-% IMb = smoothdata(smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan'), 3, 'movmedian', baselineWindow, 'omitnan');  
+if isempty(vIM) %for raster imaging
+    vIM = ones(sz(1:2));
+end
 
 if params.microscope == "SLAP2"
-    %Highpass filter in time; This must occur before DoG to avoid edge artifacts
+    %smooth the data at a timescale on which fluctuations look more gaussian
+    IMf = smoothdata(IMf./vIM, 3, 'movmean', ceil(denoiseWindow/2), 'omitnan');
+    vIM = smoothdata(vIM, 3, 'movmean', ceil(denoiseWindow/2), 'omitnan');
+    IMf = IMf.*vIM;
+
+    %baseline estimate
     IMb = smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
-    IMf = IMf - IMb;   %- smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
 
-    if isempty(vIM) %for raster imaging
-        vIM = ones(sz(1:2));
-    end
+    %estimate Vb and Vk, parameters for estimating variance from baseline brightness
+    % Vb: the variance of a 'dim' pixel due to electronic and dark noise
+    % Vk: the slope of the variance-brightness relationship
+    firstValidFrames = find(any(~nans, [1 2]),500, 'first');
+    varIM = var(IMf(:,:,firstValidFrames),0,3,"omitmissing");
     varIM(nanFrac>0.4) = nan;
-    
-    Vb = prctile(varIM, 1, 'all'); %estimate the variance of a 'dim' pixel, due to electronic and dark noise
+    Vb = prctile(varIM, 1, 'all');
+    varPred = mean(IMb(:,:,firstValidFrames),3,'omitmissing').* mean(vIM(:,:,firstValidFrames),3,'omitmissing');
+    selBright = varPred>prctile(varPred(:), 90);
+    Vk = prctile(varIM(selBright)./varPred(selBright), 10);
 
-    stdIM = sqrt((100*IMb+Vb).*vIM); %compute standard deviation
+    %Highpass filter in time; This must occur before DoG to avoid edge artifacts
+    IMf = IMf - IMb; 
+
+    stdIM = sqrt(Vk.*IMb.*vIM+Vb); %compute standard deviation
 else
     IMfden = smoothdata(IMf, 3, 'movmean', denoiseWindow, 'omitnan');
     %Highpass filter in time; This must occur before DoG to avoid edge artifacts
@@ -66,7 +76,7 @@ else
 end
 %divide by uncertainty to get a Z-score
 IMf = IMf./stdIM;
-clear IMb
+clear IMb vIM
 
 %time matched filter
 gamma = exp(-1/tau);
@@ -85,7 +95,6 @@ IMf(nans) = 0;
 IMf = imgaussfilt(IMf, [sigma sigma]);
 IMf = IMf - imgaussfilt(IMf, 5*[sigma sigma]);
 IMf(nans) = nan;
-clear nans
 
 %nonmax suppression- find maxima
 skIm = zeros(sz(1:2));
@@ -101,14 +110,15 @@ for fr = size(IMf,3)-ceil(1.5*tau):-1:2 %ceil(tau) because the filtering is unce
     % maxinds = maxinds(sel);
     skIm(IMlocalMax(:,:,fr)) = skIm(IMlocalMax(:,:,fr)) + IMfr(IMlocalMax(:,:,fr)).^2; 
 end
-
+skIm = skIm./(300+sum(~nans(:,:,2:end-ceil(1.5*tau)),3)); %normalize to # observations w regularizer
+clear nans
 
 %summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3); %.*IMgamma; 
 summaryEroded = skIm;
-valid = valid & (skIm ~= 0);
 summaryEroded(~valid) = nan;
-summaryEroded(isnan(summaryEroded)) = median(summaryEroded,'all', 'omitmissing');
-summaryEroded = summaryEroded - medfilt2(summaryEroded, [5 5]);
+mfSummary = nanmedfilt2(summaryEroded, [7 7]);
+summaryEroded = summaryEroded - mfSummary;
+%valid = valid & (skIm ~= 0);
 summaryEroded(~valid) = nan;
 
 %find local maxima
