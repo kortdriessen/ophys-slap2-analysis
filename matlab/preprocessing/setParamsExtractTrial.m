@@ -23,6 +23,10 @@ params.Bfilter(:,:,3) = params.Bfilter(:,:,1).*mask';
 params.k = [zeros(1, ceil(6*params.tau_full)) exp(-(0:ceil(6*params.tau_full))/params.tau_full)];
 params.k = params.k./sum(params.k);
 
+params.tau2_samps = params.tau2_s*params.analyzeHz;
+params.k2 = [zeros(1, ceil(6*params.tau2_samps)) exp(-(0:ceil(6*params.tau2_samps))/params.tau2_samps)];
+params.k2 = params.k2./sum(params.k2);
+
 params.baselineWindow_samps =  params.baselineWindow_Glu_s .*params.analyzeHz;
 params.denoiseWindow_samps = params.denoiseWindow_s .* params.analyzeHz;
 

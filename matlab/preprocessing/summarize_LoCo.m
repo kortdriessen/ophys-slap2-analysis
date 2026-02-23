@@ -164,7 +164,7 @@ for DMDix = nDMDs:-1:1
     maxshift = 5;
     M = squeeze(sum(meanIM, 3));
     samples = find(keepTrials(DMDix,:)); samples = samples(unique(round(linspace(1,length(samples),20))));
-    template = makeTemplateMultiRoi(M(:,:,keepTrials(DMDix,samples)), maxshift);
+    template = makeTemplateMultiRoi(M(:,:,samples), maxshift);
 
     %align all mean images to template
     disp('Aligning across trials...')
@@ -174,7 +174,7 @@ for DMDix = nDMDs:-1:1
     motOutput = nan(2,nTrials);
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
-    clear M
+    %clear M
 
     fillval = min(template(:),[], 'omitnan')-1;
     tFFT = fft2(max(template, fillval));
@@ -195,7 +195,7 @@ for DMDix = nDMDs:-1:1
         end
         actAligned(:,:,1,trialIx) = interp2(activIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
-    clear Mpad activIM
+    %clear Mpad activIM
 
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;

@@ -42,21 +42,22 @@ if isempty(vIM) %for raster imaging
 end
 
 if params.microscope == "SLAP2"
-    %smooth the data at a timescale on which fluctuations look more gaussian
-    IMf = smoothdata(IMf./vIM, 3, 'movmean', ceil(denoiseWindow/2), 'omitnan');
+    %smooth the data at a timescale on which fluctuations look more
+    %gaussian, for computing variances
+    IMs = smoothdata(IMf./vIM, 3, 'movmean', ceil(denoiseWindow/2), 'omitnan');
     vIM = smoothdata(vIM, 3, 'movmean', ceil(denoiseWindow/2), 'omitnan');
-    IMf = IMf.*vIM;
+    IMs = IMs.*vIM;
 
     %baseline estimate
-    IMb = smoothdata(IMf, 3, 'movmedian', baselineWindow, 'omitnan');
+    IMb = smoothdata(IMs, 3, 'movmedian', baselineWindow, 'omitnan');
 
     %estimate Vb and Vk, parameters for estimating variance from baseline brightness
     % Vb: the variance of a 'dim' pixel due to electronic and dark noise
     % Vk: the slope of the variance-brightness relationship
     firstValidFrames = find(any(~nans, [1 2]),500, 'first');
-    varIM = var(IMf(:,:,firstValidFrames),0,3,"omitmissing");
+    varIM = var(IMs(:,:,firstValidFrames),0,3,"omitmissing");
     varIM(nanFrac>0.4) = nan;
-    Vb = prctile(varIM, 1, 'all');
+    Vb = 20*prctile(varIM, 10, 'all');
     varPred = mean(IMb(:,:,firstValidFrames),3,'omitmissing').* mean(vIM(:,:,firstValidFrames),3,'omitmissing');
     selBright = varPred>prctile(varPred(:), 90);
     Vk = prctile(varIM(selBright)./varPred(selBright), 10);

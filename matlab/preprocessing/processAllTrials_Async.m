@@ -18,7 +18,8 @@ for i = 1:numel(validTrials)
         end
     end
     disp(['Processing dataset: ' fns{nLoad}])
-    Y = squeeze(CD.Yobs(:,1,:));
+    %Y = squeeze(CD.Yobs(:,1,:));
+    Y = permute(CD.Yobs, [1 3 2]);
     resultsFuture = extractTrial(Y,CD.Finv, sources, any(selPix,3), params);
     clear CD;
 end
@@ -52,15 +53,18 @@ try
     E.dF.events = S;
     E.dF.events(:,discard) = nan;
 
-    E.dF.denoised = convn(S,params.k,'same');
-    E.dF.denoised(:,discard) = nan;
+    E.dF.denoised(:,:,1) = convn(S(:,:,1),params.k,'same');
+    if size(S,3)>1
+        E.dF.denoised(:,:,2) = convn(S(:,:,2),params.k2,'same');
+    end
+    E.dF.denoised(:,discard,:) = nan;
 
     E.dF.ls = LS;
-    E.dF.ls(:,discard) = nan;
+    E.dF.ls(:,discard,:) = nan;
 
     E.F0 = F0;
     E.SNR = SNR;
-catch
+catch ME
     B = [];
 end
 end

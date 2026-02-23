@@ -8,7 +8,7 @@ if isempty(params.lambda) %If not provided, estimate the standard deviation of a
     pxSTD = nan(1,size(Y_obs,1));
     mY = nan(1,size(Y_obs,1));
     for pxIx = 1:size(Y_obs,1)
-        [pxSTD(pxIx), mY(pxIx)] = std(Y_obs(pxIx,:),1./Finv(pxIx,:),2,'omitmissing');
+        [pxSTD(pxIx), mY(pxIx)] = std(Y_obs(pxIx,:,1),1./Finv(pxIx,:),2,'omitmissing');
     end
     sel = mY(:)<prctile(mY,20);
     params.lambda = 4*prctile(pxSTD(sel),90)
@@ -22,7 +22,7 @@ if nargin>5
     GT.X = GT.X./params.lambda;
     GT.Y = GT.Y./params.lambda;
 end
-params.lambda = 1; %after the above normalization, setting this higher than 1 (e.g. 2) encourages sparsity
+params.lambda = 1; %after the above normalization, setting this higher than 1 (e.g. 2) encourages sparsity of activity
 
 %break the problem into separable chunks, i.e. nonoverlap sets
 zones = false(sz); zones(sub2ind(sz,sources.R,sources.C)) = true;
@@ -58,7 +58,7 @@ for problemIx = 1:nProblems %9
     selPix_p = imdilate(selPix_p, strel('disk',params.selRadius)) & selPix;
     pxList_p{problemIx} = find(selPix_p(:));
 
-    Y_p = squeeze(Y_obs(selIdxs(pxList_p{problemIx}),:)); %observations
+    Y_p = Y_obs(selIdxs(pxList_p{problemIx}),:,:); %observations
     F_inv_p = Finv(selIdxs(pxList_p{problemIx}),:); % inverse freshness
 
     %crop, to reduce memory and improve visualization
@@ -106,15 +106,18 @@ function [H,B,S,LS,F0,SNR] = assembleResults(analysisFutures, pxList_p, selIdxs,
 %sz = CC.ImageSize;
 nFutures = length(analysisFutures);
 %H = nan([sz nSources], 'single');
-H = nan(nnz(selIdxs>0),nSources, 'single');
-B = nan(nnz(selIdxs>0), nTimepoints);
-S = nan(nSources, nTimepoints);
-LS = nan(nSources, nTimepoints);
-F0 = nan(nSources, nTimepoints);
-SNR = nan(nSources,1);
-
 for j = 1:nFutures
     [idx, Hi,Si,Bi, LSi, SNRi] = fetchNext(analysisFutures);
+    if j==1
+        nChan = size(Bi,3);
+        H = nan(nnz(selIdxs>0),nSources, 'single');
+        B = nan(nnz(selIdxs>0), nTimepoints, nChan);
+        S = nan(nSources, nTimepoints, nChan);
+        LS = nan(nSources, nTimepoints, nChan);
+        F0 = nan(nSources, nTimepoints, nChan);
+        SNR = nan(nSources,1);
+    end
+
     %nj = size(Hi,2); %number of sources in this subproblem
     pxList = pxList_p{idx};
     
@@ -122,11 +125,13 @@ for j = 1:nFutures
     %tmp(pxList,:) = Hi;
     %H(:,:,sourceList{idx}) = reshape(tmp, [sz nj]); %footprints
     H(selIdxs(pxList),sourceList{idx}) = Hi;
-    B(selIdxs(pxList),:) = Bi; %background
+    B(selIdxs(pxList),:,:) = Bi; %background
     
-    S(sourceList{idx},:) = Si; %spikes
-    LS(sourceList{idx},:) = LSi; %least squares estimate
-    F0(sourceList{idx},:) = (Hi'*Bi)./sum(Hi.^2,1)'; %F0 is weighted background
+    S(sourceList{idx},:,:) = Si; %spikes
+    LS(sourceList{idx},:,:) = LSi; %least squares estimate
+    for chIx = 1:size(Bi,3)
+        F0(sourceList{idx},:,chIx) = (Hi'*Bi(:,:,chIx))./sum(Hi.^2,1)'; %F0 is weighted background
+    end
     SNR(sourceList{idx}) = SNRi;
 end
 end
@@ -145,6 +150,14 @@ function [H_est,S_est_new, B_est, dFls, Xsnr, errFinal] = extractSources(Y_obs, 
 
 %outputs the superresolution source estimate (Hs), the superresolution
 %spikes (S), and the baseline (B)
+
+num_channels = size(Y_obs,3);
+if num_channels>1
+    Y2 = Y_obs(:,:,2);
+    Y_obs = Y_obs(:,:,1);
+else
+    Y2 = [];
+end
 
 sz = size(selPix);
 num_sources = numel(sources.R);
@@ -301,6 +314,44 @@ end
 
 %fit least squares
 dFls = H_est\(Y_obs-B_est);
+
+if ~isempty(Y2) % two-channel recording, process calcium data with same source footprints
+    %fit initial baseline
+    B2 = max(params.lambda/10, splitFreq(Y2, params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
+    opts.HessianMultiplyFcn = @(hinfo, v, flag) hessmult_S_wrapper(hinfo, Y2, H_est, B2, params.k2, Finv, params.lambda, v); %hessmult_S_wrapper takes (Svec, Z, H, B, k, F, lambda, v)
+    opts.MaxIterations = 15;
+    LS2 = H_est\(Y2-B2);
+    objS = @(x) objfun_S_wrapper(x, Y2, H_est, B2, params.k2, Finv, params.lambda);
+    [S2, ~] = fmincon(objS, LS2, [], [], [], [], problemS.lb, problemS.ub, [], opts);
+    
+    %X2 = convn(S2, params.k2, 'same'); %update X2
+    
+    % %estimate noise,SNR
+    % resid = Y2- (B2 + H_est*X2);
+    % residWeights = 1./Finv;
+    % residWeights(resid>=0) = 0;
+    % residVar = sum(resid.^2.*residWeights,2)./sum(residWeights,2);
+    % W = diag(1./residVar);
+    % covX = inv(H_est' * W * H_est); %uncertainty estimate for X
+    % X2noise = sqrt(diag(covX)./params.tau2_samps);
+    % X2snr = std(X2, 0,2)./X2noise;
+    % X2floor = computeFloor(X2, params.denoiseWindow_samps, params.baselineWindow_samps);
+    % X2 = max(0, X2 - X2floor - X2noise);
+    % 
+    % %Refit
+    % B2 = fitB(B2, Y2,X2,H_est, Finv, selPix, params); %(Y,X, H, Finv, selPix, params)
+    % LS2 = H_est\(Y2-B2);
+    % objS = @(x) objfun_S_wrapper(x, Y2, H_est, B2, params.k2, Finv, params.lambda);
+    % [S2, ~] = fmincon(objS, LS2, [], [], [], [], problemS.lb, problemS.ub, [], opts);
+    % X2 = convn(S2, params.k2, 'same'); %update X2
+
+    %append channel 2 S,B,LS, and SNR as additional dimension
+    S_est_new = cat(3, S_est_new, S2);
+    B_est = cat(3, B_est, B2); 
+    dFls = cat(3, dFls, LS2); 
+    %Xsnr = cat(2, Xsnr, X2snr);
+end
+
 end
 
 
