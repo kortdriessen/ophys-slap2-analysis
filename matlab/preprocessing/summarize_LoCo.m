@@ -9,7 +9,7 @@ else
     params = setParams('summarize_LoCo');
 end
 if ~nargin
-    [trialTablefn, dr] = uigetfile('*trialTable*.mat');
+    [trialTablefn, dr] =  uigetfile('*.mat', 'Select a trialTable file', '*trialTable*.mat' );
 else
     %parse dr
     %_or_pathToTrialTable
