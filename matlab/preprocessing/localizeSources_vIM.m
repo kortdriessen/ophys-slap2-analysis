@@ -117,7 +117,7 @@ clear nans
 %summary = skewness(IMf(:,:, 1:end-3*ceil(tau)), 1,3); %.*IMgamma; 
 summaryEroded = skIm;
 summaryEroded(~valid) = nan;
-mfSummary = nanmedfilt2(summaryEroded, [7 7]);
+mfSummary = nanmedfilt2(summaryEroded, [5 5]);
 summaryEroded = summaryEroded - mfSummary;
 %valid = valid & (skIm ~= 0);
 summaryEroded(~valid) = nan;
