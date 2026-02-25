@@ -7,14 +7,14 @@ if isempty(remotepath) %PASS EMPTY MATRIX TO INITIALIZE
             if ~exist(localDir, 'dir')
                 warning('User canceled setting local directory. defaulting to C:/temp on Windows else /scratch')
                 if ispc
-                    localDir = 'C:\temp';
+                    localDir = '/data/temp';
                 else
                     localDir = '/data/temp';
                 end
             end
         catch
             if ispc
-                localDir = 'C:\temp';
+                localDir = '/data/temp';
             else
                 localDir = '/data/temp';
             end
@@ -37,16 +37,16 @@ if nargin<2
             else
                 warning('User canceled setting local directory. defaulting to C:/temp on Windows else /scratch')
                 if ispc
-                    localDir = 'C:\temp\';
+                    localDir = '/data/temp';
                 else
-                    localDir = '/scratch';
+                    localDir = '/data/temp';
                 end
             end
         catch
             if ispc
-                localDir = 'C:\temp\';
+                localDir = '/data/temp';
             else
-                localDir = '/scratch';
+                localDir = '/data/temp';
             end
         end
     end

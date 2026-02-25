@@ -7,3 +7,6 @@ __pycache__/
 *.pyo
 matlab/slap2/pathdef.m
 Copy_of_+ScanImageTiffReader
+
+dev_materials/
+.vscode/
