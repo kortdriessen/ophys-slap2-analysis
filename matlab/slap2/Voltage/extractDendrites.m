@@ -122,7 +122,11 @@ for tix = 1:nTrials
     clear futures
     for DMDix = 1:nDMDs
         %create a datafile object
-        hDataFile = slap2.util.DataFile([dr filesep trialTable.filename{DMDix,tix}]);
+        if contains(trialTable.filename{DMDix,tix}, '-CYCLE-')
+            hDataFile = slap2.util.MultiDataFiles([dr filesep trialTable.filename{DMDix,tix}]);
+        else
+            hDataFile = slap2.util.DataFile([dr filesep trialTable.filename{DMDix,tix}]);
+        end
         for rix =  1:nAnalysisROIs(DMDix)
             rTot = rTot+1;
             hTrace = slap2.util.datafile.trace.Trace(hDataFile,zIdx,params.chIdx);
@@ -140,7 +144,8 @@ for tix = 1:nTrials
         for rix = 1:nAnalysisROIs(DMDix)
             rS = rS+1;
             tmp = futures(rS).fetchOutputs();
-            ydata(:,rS) = tmp(trialTable.firstLine(DMDix, tix):trialTable.lastLine(DMDix, tix));
+            tmp = tmp(trialTable.firstLine(DMDix, tix):min(length(tmp),trialTable.lastLine(DMDix, tix)));
+            ydata(1:length(tmp),rS) = tmp;
         end
     end
     summary.traces{tix} = ydata;
