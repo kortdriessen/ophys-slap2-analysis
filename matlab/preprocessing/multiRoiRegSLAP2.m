@@ -95,7 +95,7 @@ while retry<10
         S2data = slap2.Slap2DataFile([dr filesep fn]);
         retry = 10;
     catch
-        retry = retry+1
+        retry = retry+1;
         continue
     end
 end
