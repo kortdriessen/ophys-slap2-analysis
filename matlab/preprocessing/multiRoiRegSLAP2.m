@@ -1,7 +1,7 @@
 function multiRoiRegSLAP2(fullPathToTrialTable, paramsIn)
 
 if ~nargin
-    [fn, dr] = uigetfile('*trialTable*.mat');
+    [fn, dr] = uigetfile('*.mat', 'Select a trialTable file', '*trialTable*.mat' );
 else
     [dr, fn, ext] = fileparts(fullPathToTrialTable); fn = [fn ext];
 end
