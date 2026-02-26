@@ -22,6 +22,10 @@ if nargin<4
     doPlot = false;
 end
 
+if isempty(vIM) %for raster imaging
+    vIM = ones(sz);
+end
+
 %initialize filtered image
 IMf = IM; clear IM;
 IMf(repmat(~valid, 1, 1, nTimePoints)) = nan;
@@ -36,10 +40,6 @@ vIM(nans) = nan; %1000*mean(vIM(:,:, 1:min(end,400)), 'all', 'omitnan');
 % IMs(incomplete(:),:) = smoothdata(IMf(incomplete(:),:), 2, 'movmean', baselineWindow, 'omitnan');
 % IMf(reshape(nans, size(IMf))) = IMs(reshape(nans, size(IMf))); clear IMs
 % IMf = reshape(IMf, sz(1),sz(2), []);
-
-if isempty(vIM) %for raster imaging
-    vIM = ones(sz(1:2));
-end
 
 if params.microscope == "SLAP2"
     %smooth the data at a timescale on which fluctuations look more
@@ -57,10 +57,11 @@ if params.microscope == "SLAP2"
     firstValidFrames = find(any(~nans, [1 2]),500, 'first');
     varIM = var(IMs(:,:,firstValidFrames),0,3,"omitmissing");
     varIM(nanFrac>0.4) = nan;
-    Vb = 20*prctile(varIM, 10, 'all');
+    VIF=2;
+    Vb = VIF*prctile(varIM, 10, 'all');
     varPred = mean(IMb(:,:,firstValidFrames),3,'omitmissing').* mean(vIM(:,:,firstValidFrames),3,'omitmissing');
     selBright = varPred>prctile(varPred(:), 90);
-    Vk = prctile(varIM(selBright)./varPred(selBright), 10);
+    Vk = prctile((varIM(selBright)-(Vb/VIF))./varPred(selBright), 10);
 
     %Highpass filter in time; This must occur before DoG to avoid edge artifacts
     IMf = IMf - IMb; 
