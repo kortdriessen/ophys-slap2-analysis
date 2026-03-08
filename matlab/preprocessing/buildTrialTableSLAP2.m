@@ -10,7 +10,7 @@ import ScanImageTiffReader.ScanImageTiffReader
 
 %parameters
 lineDiffThresh = 2000; %difference threshold for calling two recordings the same length, in lines. ~0.2 seconds
-multiCycleLinesPerTrial = 300000; % Break up continuous acquisitoins into blocks of this many lines
+multiCycleLinesPerTrial = 100000; % Break up continuous acquisitoins into blocks of this many lines
 
 %get a list of dat files in a given folder
 if ~nargin

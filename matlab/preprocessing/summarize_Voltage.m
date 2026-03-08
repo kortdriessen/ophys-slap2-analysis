@@ -147,7 +147,7 @@ for DMDix = [1 2]
         disp(['Processing Trial ' int2str(trialIx)]);
         if keepTrials(DMDix,trialIx)
             S = load([dr filesep fnA{trialIx}], 'aData'); %LOAD ALIGNMENT DATA
-            aData{trialIx} = S.aData;
+            aData{trialIx} = rmfield(S.aData, 'varFacDS');
             [~,fn, ext] = fileparts(fns{trialIx});
             if isempty(summary.footprints{DMDix})
                 [E{trialIx}, summary.footprints{DMDix}]= loadAndProcessVoltage(dr, [fn ext], fls(trialIx), els(trialIx), aData{trialIx}, masks, params);

@@ -128,7 +128,7 @@ for DMDix = nDMDs:-1:1
             [~, result] = unix('grep MemAvailable /proc/meminfo | awk ''{print $2}''');
             memAvailable = str2double(result) * 1024;  % Convert KB to bytes
         end
-        maxWorkers = min(size(trialTable.filename,2), floor(0.13*memAvailable/fileSize));
+        maxWorkers = max(1,min(size(trialTable.filename,2), floor(0.13*memAvailable/fileSize)));
         nWorkers = min(params.nParallelWorkers, maxWorkers);
         
         if poolsize~=nWorkers ||  ~strcmpi(class(p), 'parallel.ProcessPool')
