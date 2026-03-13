@@ -62,7 +62,7 @@ RAW DATA structure on aind/scratch
  ┃       ┣ 🖼️refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#).tif
  ┃       ┗ 🖼️refStack_YYYYMMDD_HHMMSS_DMD#(_CONFIG#)-REFERENCE.tif
  ┃
- ┣ 📦######_YYYY-MM-DD_HH-MM-SS_slap2_YYYY-MM-DD_HH-MM-SS (first datetime corresponds to the original session data asset, second datetime corresponds to time of starting processing)
+ ┣ 📦######_YYYY-MM-DD_HH-MM-SS_processed_YYYY-MM-DD_HH-MM-SS (first datetime corresponds to the original session data asset, second datetime corresponds to time of starting processing)
  ┃ ┣ 📜rig.json (carried over from raw data)
  ┃ ┣ 📜session.json (carried over from raw data)
  ┃ ┣ 📜subject.json (carried over from raw data)  
