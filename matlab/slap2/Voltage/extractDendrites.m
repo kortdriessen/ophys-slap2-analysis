@@ -139,12 +139,12 @@ for tix = 1:nTrials
     end
     waitfor(futures);
     rS = 0;
-    ydata = nan(trialTable.lastLine(1, tix)-trialTable.firstLine(1, tix)+1, rTot);
+    ydata = nan(round(trialTable.lastLine(1, tix)-trialTable.firstLine(1, tix)+1), rTot);
     for DMDix = 1:nDMDs
         for rix = 1:nAnalysisROIs(DMDix)
             rS = rS+1;
             tmp = futures(rS).fetchOutputs();
-            tmp = tmp(trialTable.firstLine(DMDix, tix):min(length(tmp),trialTable.lastLine(DMDix, tix)));
+            tmp = tmp(uint32(trialTable.firstLine(DMDix, tix)):min(length(tmp),uint32(trialTable.lastLine(DMDix, tix))));
             ydata(1:length(tmp),rS) = tmp;
         end
     end
