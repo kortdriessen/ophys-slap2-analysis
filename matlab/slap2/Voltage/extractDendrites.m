@@ -29,7 +29,7 @@ end
 load([dr filesep trialTablefn], 'trialTable');
 
 %use the trial table to make sure dat files have not been merged
-numworkers = 24; %we won't make this a parameter because large is always good here, I think
+numworkers = 4; %we won't make this a parameter because large is always good here, I think
 pp = gcp('nocreate');
 if isempty(pp) || pp.NumWorkers~=numworkers
     delete(pp);
