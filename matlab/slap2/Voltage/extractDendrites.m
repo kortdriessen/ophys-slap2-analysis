@@ -29,7 +29,7 @@ end
 load([dr filesep trialTablefn], 'trialTable');
 
 %use the trial table to make sure dat files have not been merged
-numworkers = 4; %we won't make this a parameter because large is always good here, I think
+numworkers = 16; %we won't make this a parameter because large is always good here, I think
 pp = gcp('nocreate');
 if isempty(pp) || pp.NumWorkers~=numworkers
     delete(pp);
@@ -114,6 +114,31 @@ for DMDix = 1:nDMDs
     imshow(maskImage{DMDix},[]); colormap('jet')
     drawnow
 end
+
+
+%if continuous acquisition
+if contains(trialTable.filename{1}, '-CYCLE-')
+    ydata = nan(0, sum(nAnalysisROIs)); 
+    r0 = 0;
+    for DMDix = 1:nDMDs
+            clear futures
+            hDataFile = slap2.util.MultiDataFiles([dr filesep trialTable.filename{DMDix,1}]);
+            for rix =  1:nAnalysisROIs(DMDix)
+                hTrace = slap2.util.datafile.trace.Trace(hDataFile,zIdx,params.chIdx);
+                pixelMask = summary.masks{DMDix}(:,:,rix);  % false(800,1280);
+                rasterPixels = pixelMask;
+                integrationPixels = pixelMask;
+                hTrace.setPixelIdxs(rasterPixels,integrationPixels);
+                futures(rix) = hTrace.processAsync(params.windowWidth_lines,params.expectedWindowWidth_lines);
+            end
+            for rix = 1:nAnalysisROIs(DMDix)
+                tmp = futures(rix).fetchOutputs();
+                ydata(1:length(tmp),r0+rix) = tmp;
+            end
+            r0 = r0 + nAnalysisROIs(DMDix);
+    end
+    summary.traces = ydata;
+else
 %for each trial
 nTrials = size(trialTable.filename, 2);
 for tix = 1:nTrials
@@ -121,12 +146,7 @@ for tix = 1:nTrials
     rTot = 0;
     clear futures
     for DMDix = 1:nDMDs
-        %create a datafile object
-        if contains(trialTable.filename{DMDix,tix}, '-CYCLE-')
-            hDataFile = slap2.util.MultiDataFiles([dr filesep trialTable.filename{DMDix,tix}]);
-        else
-            hDataFile = slap2.util.DataFile([dr filesep trialTable.filename{DMDix,tix}]);
-        end
+        hDataFile = slap2.util.DataFile([dr filesep trialTable.filename{DMDix,tix}]);
         for rix =  1:nAnalysisROIs(DMDix)
             rTot = rTot+1;
             hTrace = slap2.util.datafile.trace.Trace(hDataFile,zIdx,params.chIdx);
@@ -156,6 +176,7 @@ for tix = 1:nTrials
     sNorm = sNorm./std(sNorm,0,1, 'omitnan');
     figure(99), imagesc(sNorm')
     title(['Trial' int2str(tix)])   
+end
 end
 summary.nAnalysisROIs = nAnalysisROIs;
 save([dr filesep 'dendriticVoltageSummary-' datestr(now, 'YYmmDD-HHMMSS') '.mat'], 'summary', '-v7.3');
