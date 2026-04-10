@@ -21,7 +21,7 @@ else
     params = setParams('summarize_LoCo');
 end
 if ~nargin
-    [trialTablefn, dr] = uigetfile('*trialTable*.mat');
+    [trialTablefn, dr] =  uigetfile('*.mat', 'Select a trialTable file', '*trialTable*.mat' );
 else
     %parse dr
     %_or_pathToTrialTable
@@ -175,7 +175,8 @@ for DMDix = nDMDs:-1:1
     disp('Making template for aligning across trials...')
     maxshift = 5;
     M = squeeze(sum(meanIM, 3));
-    template = makeTemplateMultiRoi(M(:,:,keepTrials(DMDix,:)), maxshift);
+    samples = find(keepTrials(DMDix,:)); samples = samples(unique(round(linspace(1,length(samples),20))));
+    template = makeTemplateMultiRoi(M(:,:,samples), maxshift);
 
     %align all mean images to template
     disp('Aligning across trials...')
@@ -185,14 +186,19 @@ for DMDix = nDMDs:-1:1
     motOutput = nan(2,nTrials);
     Mpad = nan([size(template) size(M,3)]);
     Mpad(maxshift+(1:size(M,1)), maxshift+(1:size(M,2)),:) = M;
-    clear M
+    %clear M
+
+    fillval = min(template(:),[], 'omitnan')-1;
+    tFFT = fft2(max(template, fillval));
     for trialIx = nTrials:-1:1
         if ~keepTrials(DMDix,trialIx) || all(isnan(activIM(:,:,1,trialIx)), 'all')
             disp(['skipping trial, dmd:' int2str(trialIx) ' ' int2str(DMDix)])
             continue %skip
         end
         disp(['trial: ' int2str(trialIx)])
-        mot1 = xcorr2_nans(Mpad(:,:,trialIx), template, [0 ; 0], maxshift);
+
+        output1 = dftregistration_clipped(tFFT, fft2(max(Mpad(:,:,trialIx), fillval)),1,80);
+        mot1 = [-output1(3) -output1(4)]; %xcorr2_nans(Mpad(:,:,trialIx), template, [-output1(3) ; -output1(4)], maxshift);
         [motOutput(:,trialIx), corrCoeff(trialIx)] = xcorr2_nans(Mpad(:,:,trialIx), template, round(mot1'), maxshift);
         [rr,cc] = ndgrid(1:size(meanIM,1), 1:size(meanIM,2));
 
@@ -201,7 +207,7 @@ for DMDix = nDMDs:-1:1
         end
         actAligned(:,:,1,trialIx) = interp2(activIM(:,:,1,trialIx), cc+motOutput(2,trialIx), rr+motOutput(1,trialIx));
     end
-    clear Mpad activIM
+    %clear Mpad activIM
 
     %identify outliers in alignment quality to determine valid trials
     ccf = corrCoeff;
@@ -209,7 +215,7 @@ for DMDix = nDMDs:-1:1
     actValidPix = squeeze(mean(~isnan(actAligned(:,:,1,:)), [1 2]));
     validTrials= find(ccf(:)>corrThresh & actValidPix(:)>mean(actValidPix)/2);
     exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
-    actIM = mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
+    actIM = prctile(actAligned(:,:,:,validTrials),80,4);  %mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
     nanFrac = mean(isnan(actAligned(:,:,:,validTrials)), 4);
     actIM(nanFrac>0.6) = nan;
     exptSummary.actIM{DMDix} = actIM;
