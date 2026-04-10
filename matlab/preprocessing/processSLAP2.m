@@ -6,6 +6,7 @@ end
 aParams = setParams('multiRoiRegSLAP2');
 sParams.microscope = "SLAP2";
 sParams.drawUserRois = true;
+sParams.batchSize = 100;
 
 %sParams.nParallelWorkers = 8;
 sParams = setParams('summarize_LoCo', sParams, true);
@@ -23,4 +24,4 @@ log_header_timestamps(dr)
 multiRoiRegSLAP2(fullPathToTrialTable,aParams)
 
 %summarize
-summarize_LoCo(dr, sParams);
+summarize_LoCo_ISOLATED(dr, sParams);
