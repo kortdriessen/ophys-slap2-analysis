@@ -1,0 +1,998 @@
+function summary = extractDendrites_new(dr_or_pathToTrialTable, paramsIn)
+%EXTRACTDENDRITES Extract SLAP2 dendritic voltage traces with bounded memory use.
+%
+%   summary = extractDendrites(dr_or_pathToTrialTable, paramsIn)
+%
+%   This refactored version keeps the existing SLAP2 Trace backend but avoids
+%   holding all ROI traces in memory at once. Each ROI or small ROI batch is
+%   processed, cast to the requested precision, optionally sliced by trial line
+%   ranges, and written to an HDF5 file immediately.
+%
+%   Recommended default usage:
+%
+%       params.outputMode = 'trial';      % 'trial', 'continuous', or 'both'
+%       params.storageMode = 'h5';        % currently recommended
+%       params.precision = 'single';
+%       params.numWorkers = 4;
+%       params.maxConcurrentROIs = 2;
+%       params.makePlots = false;
+%       % By default, outputs are saved in a subfolder beside trialTable.mat.
+%       % Override params.outputDir to choose a custom location.
+%       summary = extractDendrites(sessionDir, params);
+%
+%   HDF5 output schema:
+%
+%       /traces/trial_0001         [nLinesThisTrial x nTotalROIs]
+%       /traces/trial_0002         [nLinesThisTrial x nTotalROIs]
+%       ...
+%
+%       /traces/continuous/DMD1    [nLinesDMD1 x nROIsDMD1]
+%       /traces/continuous/DMD2    [nLinesDMD2 x nROIsDMD2]
+%
+%   The lightweight MAT summary stores masks, metadata, ROI mappings, line
+%   ranges, output paths, and extraction status. Large traces are stored in HDF5.
+%
+%   Notes:
+%       - The SLAP2 DataFile/loadParsePlan method must be compatible with the
+%         metadata format saved by the acquisition software. For newer metadata
+%         files where AcquisitionContainer.AcquisitionPlan is empty but
+%         AcquisitionContainer.ParsePlan is populated, replace loadParsePlan.m
+%         with the companion patched version included with this file.
+%       - This is a conservative memory-safety refactor. It does not yet rewrite
+%         the underlying SLAP2 Trace/TracePixel backend to process all ROIs in a
+%         single pass through the .dat file.
+
+import ScanImageTiffReader.ScanImageTiffReader
+
+if nargin < 1 || isempty(dr_or_pathToTrialTable)
+    [trialTablefn, dr] = uigetfile({'*.mat', 'MAT-files (*.mat)'}, 'Select trialTable.mat');
+    assert(~isnumeric(trialTablefn), 'No trialTable file selected.');
+else
+    [dr, trialTablefn] = resolveTrialTablePath(dr_or_pathToTrialTable);
+end
+
+if nargin < 2
+    % No params input: open the setParams/optionsGUI dialog.
+    params = initializeParams();
+else
+    % Params input supplied: merge with defaults without opening the GUI.
+    params = initializeParams(paramsIn);
+end
+
+timestamp = datestr(now, 'YYmmDD-HHMMSS');
+
+if isempty(params.outputDir)
+    if params.useOutputSubfolder
+        if params.timestampOutputSubfolder
+            params.outputDir = fullfile(dr, [params.outputSubfolderName '-' timestamp]);
+        else
+            params.outputDir = fullfile(dr, params.outputSubfolderName);
+        end
+    else
+        params.outputDir = dr;
+    end
+end
+if ~exist(params.outputDir, 'dir')
+    mkdir(params.outputDir);
+end
+
+summaryPath = fullfile(params.outputDir, ['dendriticVoltageSummary-' timestamp '.mat']);
+h5Path = fullfile(params.outputDir, ['dendriticVoltageTraces-' timestamp '.h5']);
+if strcmpi(params.storageMode, 'h5') && exist(h5Path, 'file') && ~params.resume
+    delete(h5Path);
+end
+
+fprintf('Loading trial table: %s\n', fullfile(dr, trialTablefn));
+S = load(fullfile(dr, trialTablefn), 'trialTable');
+trialTable = S.trialTable;
+clear S
+
+trialInfo = buildTrialInfo(trialTable);
+nDMDs = size(trialInfo.filename, 1);
+nTrials = size(trialInfo.filename, 2);
+isContinuousAcq = any(contains(trialInfo.allFilenames, '-CYCLE-', 'IgnoreCase', true));
+
+fprintf('Detected %d DMD(s), %d trial(s), continuous acquisition: %d\n', ...
+    nDMDs, nTrials, isContinuousAcq);
+
+if strcmpi(params.storageMode, 'memory')
+    warning(['storageMode="memory" is provided only for compatibility and may ' ...
+        'reintroduce memory pressure. Prefer storageMode="h5".']);
+end
+
+summary = struct();
+summary.createdAt = char(datetime('now'));
+summary.sourceTrialTable = fullfile(dr, trialTablefn);
+summary.sessionDir = dr;
+summary.params = params;
+summary.outputMode = params.outputMode;
+summary.storageMode = params.storageMode;
+summary.outputDir = params.outputDir;
+summary.outputH5 = h5Path;
+summary.summaryPath = summaryPath;
+summary.isContinuousAcquisition = isContinuousAcq;
+summary.nDMDs = nDMDs;
+summary.nTrials = nTrials;
+summary.trialTable = trialInfo.minimal;
+summary.trialLineRanges = trialInfo.lineRanges;
+summary.masks = cell(1, nDMDs);
+summary.maskImages = cell(1, nDMDs);
+summary.refIM = cell(1, nDMDs);
+summary.dmd = repmat(struct(), 1, nDMDs);
+
+nAnalysisROIs = zeros(1, nDMDs);
+roiRecords = struct('globalRoiIdx', {}, 'dmdIdx', {}, 'localRoiIdx', {}, ...
+    'sourceRoiIdx', {}, 'nPixels', {}, 'isManual', {});
+
+fprintf('Discovering ROIs and reference images...\n');
+for dmdIdx = 1:nDMDs
+    firstValidTrial = findFirstValidTrial(trialInfo.filename, dmdIdx);
+    firstDatFile = resolveDataFilePath(dr, trialInfo.filename{dmdIdx, firstValidTrial});
+
+    fprintf('  DMD%d metadata: %s\n', dmdIdx, firstDatFile);
+    hMDF = slap2.util.MultiDataFiles(firstDatFile);
+    validateParsePlanCompatibility(hMDF, dmdIdx);
+
+    dmdMeta = getDmdMetadata(hMDF);
+    summary.dmd(dmdIdx).metadata = dmdMeta;
+    summary.dmd(dmdIdx).firstDatFile = firstDatFile;
+    summary.dmd(dmdIdx).totalNumLines = hMDF.totalNumLines;
+    summary.dmd(dmdIdx).nCycles = hMDF.numCycles;
+    summary.dmd(dmdIdx).linesPerCycle = hMDF.header.linesPerCycle;
+
+    [masks, maskImage, sourceRoiIdx] = getIntegrationMasks(hMDF);
+    [refIM, outlines] = loadReferenceImage(dr, dmdIdx, hMDF, masks, params);
+
+    if params.manualROIs
+        assert(~isempty(refIM), ['manualROIs=true requires a reference image. ' ...
+            'Set saveRefImages/loadRefImages to true or provide a compatible reference TIFF.']);
+        refFn = findReferenceTiff(dr, dmdIdx);
+        hROIs = drawROIs(refIM, dr, refFn.name, outlines);
+        waitfor(hROIs.hF);
+        [masks, maskImage, sourceRoiIdx] = masksFromManualROIs(hROIs, hMDF, dmdIdx);
+    end
+
+    nAnalysisROIs(dmdIdx) = size(masks, 3);
+    summary.masks{dmdIdx} = masks;
+    summary.maskImages{dmdIdx} = maskImage;
+    if params.saveRefImages
+        summary.refIM{dmdIdx} = refIM;
+    end
+
+    if params.makePlots
+        plotDmdPreview(dmdIdx, refIM, maskImage);
+    end
+
+    for localRoiIdx = 1:nAnalysisROIs(dmdIdx)
+        globalRoiIdx = numel(roiRecords) + 1;
+        roiRecords(globalRoiIdx).globalRoiIdx = globalRoiIdx;
+        roiRecords(globalRoiIdx).dmdIdx = dmdIdx;
+        roiRecords(globalRoiIdx).localRoiIdx = localRoiIdx;
+        roiRecords(globalRoiIdx).sourceRoiIdx = sourceRoiIdx(localRoiIdx);
+        roiRecords(globalRoiIdx).nPixels = nnz(masks(:, :, localRoiIdx));
+        roiRecords(globalRoiIdx).isManual = logical(params.manualROIs);
+    end
+
+    delete(hMDF);
+    clear hMDF
+end
+
+summary.nAnalysisROIs = nAnalysisROIs;
+summary.nTotalROIs = sum(nAnalysisROIs);
+summary.roiTable = struct2table(roiRecords);
+summary.roiGlobalOffsets = [0, cumsum(nAnalysisROIs(1:end-1))];
+summary.extractionStatus = initializeStatus(summary.roiTable);
+
+if strcmpi(params.storageMode, 'h5')
+    initializeH5Outputs(h5Path, summary, trialInfo, params);
+end
+
+save(summaryPath, 'summary', '-v7.3');
+fprintf('Initialized summary: %s\n', summaryPath);
+if strcmpi(params.storageMode, 'h5')
+    fprintf('Initialized trace HDF5: %s\n', h5Path);
+end
+
+% Configure the parallel pool only after metadata/ROI discovery and HDF5
+% initialization succeed. This avoids launching workers for runs that fail
+% early because of path or metadata-parser problems.
+params = configureParallelPool(params);
+summary.params = params;
+save(summaryPath, 'summary', '-v7.3');
+
+if isContinuousAcq
+    summary = extractContinuousAcquisition(summary, trialInfo, dr, params, summaryPath, h5Path);
+else
+    summary = extractTrialFiles(summary, trialInfo, dr, params, summaryPath, h5Path);
+end
+
+summary.completedAt = char(datetime('now'));
+summary.complete = true;
+save(summaryPath, 'summary', '-v7.3');
+fprintf('Extraction complete. Summary saved to:\n  %s\n', summaryPath);
+if strcmpi(params.storageMode, 'h5')
+    fprintf('Trace data saved to:\n  %s\n', h5Path);
+end
+end
+
+% -------------------------------------------------------------------------
+% Main extraction branches
+% -------------------------------------------------------------------------
+
+function summary = extractContinuousAcquisition(summary, trialInfo, dr, params, summaryPath, h5Path)
+nDMDs = summary.nDMDs;
+
+for dmdIdx = 1:nDMDs
+    firstValidTrial = findFirstValidTrial(trialInfo.filename, dmdIdx);
+    firstDatFile = resolveDataFilePath(dr, trialInfo.filename{dmdIdx, firstValidTrial});
+    fprintf('\nExtracting continuous traces for DMD%d from %s\n', dmdIdx, firstDatFile);
+
+    hMDF = slap2.util.MultiDataFiles(firstDatFile);
+    localRois = 1:summary.nAnalysisROIs(dmdIdx);
+    batches = makeBatches(localRois, params.maxConcurrentROIs);
+
+    for batchIdx = 1:numel(batches)
+        batch = batches{batchIdx};
+        fprintf('  DMD%d batch %d/%d: ROI(s) %s\n', ...
+            dmdIdx, batchIdx, numel(batches), mat2str(batch));
+
+        [batchTraces, batchWeights, batchErrors] = extractRoiBatch( ...
+            hMDF, summary.masks{dmdIdx}, batch, params);
+
+        for j = 1:numel(batch)
+            localRoiIdx = batch(j);
+            globalRoiIdx = summary.roiGlobalOffsets(dmdIdx) + localRoiIdx;
+            statusIdx = globalRoiIdx;
+            summary.extractionStatus(statusIdx).startedAt = char(datetime('now'));
+
+            if ~isempty(batchErrors{j})
+                summary.extractionStatus(statusIdx).status = 'failed';
+                summary.extractionStatus(statusIdx).errorMessage = batchErrors{j};
+                if params.stopOnError
+                    error('extractDendrites:ROIExtractionFailed', ...
+                        'DMD%d ROI%d failed: %s', dmdIdx, localRoiIdx, batchErrors{j});
+                end
+                continue
+            end
+
+            trace = castTrace(batchTraces{j}, params.precision);
+            summary.extractionStatus(statusIdx).nSamplesExtracted = numel(trace);
+            summary.extractionStatus(statusIdx).weightClass = class(batchWeights{j});
+            summary.extractionStatus(statusIdx).weightSize = sizeToString(size(batchWeights{j}));
+
+            if wantsContinuous(params.outputMode)
+                writeContinuousTrace(summary, h5Path, trace, dmdIdx, localRoiIdx, params);
+            end
+            if wantsTrial(params.outputMode)
+                writeTrialSlices(summary, trialInfo, h5Path, trace, dmdIdx, globalRoiIdx, params);
+            end
+
+            summary.extractionStatus(statusIdx).status = 'complete';
+            summary.extractionStatus(statusIdx).finishedAt = char(datetime('now'));
+            summary.extractionStatus(statusIdx).errorMessage = '';
+
+            clear trace
+        end
+
+        clear batchTraces batchWeights batchErrors
+        if params.saveSummaryAfterEachBatch
+            save(summaryPath, 'summary', '-v7.3');
+        end
+    end
+
+    delete(hMDF);
+    clear hMDF
+end
+end
+
+function summary = extractTrialFiles(summary, trialInfo, dr, params, summaryPath, h5Path)
+if wantsContinuous(params.outputMode)
+    warning(['Continuous output for non-CYCLE trial-file acquisitions is not implemented. ' ...
+        'Only trial-sliced output will be written.']);
+end
+
+nDMDs = summary.nDMDs;
+nTrials = summary.nTrials;
+
+for trialIdx = 1:nTrials
+    fprintf('\nExtracting trial %d/%d\n', trialIdx, nTrials);
+    for dmdIdx = 1:nDMDs
+        if isempty(trialInfo.filename{dmdIdx, trialIdx})
+            continue
+        end
+        datFile = resolveDataFilePath(dr, trialInfo.filename{dmdIdx, trialIdx});
+        fprintf('  DMD%d trial %d file: %s\n', dmdIdx, trialIdx, datFile);
+
+        hMDF = slap2.util.MultiDataFiles(datFile);
+        localRois = 1:summary.nAnalysisROIs(dmdIdx);
+        batches = makeBatches(localRois, params.maxConcurrentROIs);
+
+        for batchIdx = 1:numel(batches)
+            batch = batches{batchIdx};
+            fprintf('    batch %d/%d: ROI(s) %s\n', ...
+                batchIdx, numel(batches), mat2str(batch));
+
+            [batchTraces, batchWeights, batchErrors] = extractRoiBatch( ...
+                hMDF, summary.masks{dmdIdx}, batch, params);
+
+            for j = 1:numel(batch)
+                localRoiIdx = batch(j);
+                globalRoiIdx = summary.roiGlobalOffsets(dmdIdx) + localRoiIdx;
+                statusIdx = globalRoiIdx;
+                summary.extractionStatus(statusIdx).startedAt = char(datetime('now'));
+
+                if ~isempty(batchErrors{j})
+                    summary.extractionStatus(statusIdx).status = 'failed';
+                    summary.extractionStatus(statusIdx).errorMessage = batchErrors{j};
+                    if params.stopOnError
+                        error('extractDendrites:ROIExtractionFailed', ...
+                            'Trial %d DMD%d ROI%d failed: %s', ...
+                            trialIdx, dmdIdx, localRoiIdx, batchErrors{j});
+                    end
+                    continue
+                end
+
+                trace = castTrace(batchTraces{j}, params.precision);
+                summary.extractionStatus(statusIdx).nSamplesExtracted = ...
+                    summary.extractionStatus(statusIdx).nSamplesExtracted + numel(trace);
+                summary.extractionStatus(statusIdx).weightClass = class(batchWeights{j});
+                summary.extractionStatus(statusIdx).weightSize = sizeToString(size(batchWeights{j}));
+
+                writeOneTrialSlice(summary, trialInfo, h5Path, trace, ...
+                    dmdIdx, trialIdx, globalRoiIdx, params);
+
+                summary.extractionStatus(statusIdx).status = 'in_progress';
+                summary.extractionStatus(statusIdx).finishedAt = char(datetime('now'));
+                summary.extractionStatus(statusIdx).errorMessage = '';
+                clear trace
+            end
+
+            clear batchTraces batchWeights batchErrors
+            if params.saveSummaryAfterEachBatch
+                save(summaryPath, 'summary', '-v7.3');
+            end
+        end
+
+        delete(hMDF);
+        clear hMDF
+    end
+end
+
+for idx = 1:numel(summary.extractionStatus)
+    if strcmp(summary.extractionStatus(idx).status, 'in_progress')
+        summary.extractionStatus(idx).status = 'complete';
+    end
+end
+end
+
+% -------------------------------------------------------------------------
+% ROI extraction
+% -------------------------------------------------------------------------
+
+function [batchTraces, batchWeights, batchErrors] = extractRoiBatch(hMDF, masks, batch, params)
+batchTraces = cell(1, numel(batch));
+batchWeights = cell(1, numel(batch));
+batchErrors = cell(1, numel(batch));
+
+if params.useParallel
+    futures = cell(1, numel(batch));
+    hTraces = cell(1, numel(batch));
+
+    for j = 1:numel(batch)
+        try
+            localRoiIdx = batch(j);
+            hTrace = slap2.util.datafile.trace.Trace(hMDF, params.zIdx, params.chIdx);
+            pixelMask = masks(:, :, localRoiIdx);
+            hTrace.setPixelIdxs(pixelMask, pixelMask);
+            futures{j} = hTrace.processAsync(params.windowWidth_lines, ...
+                params.expectedWindowWidth_lines);
+            hTraces{j} = hTrace;
+        catch ME
+            batchErrors{j} = getReport(ME, 'extended', 'hyperlinks', 'off');
+        end
+    end
+
+    for j = 1:numel(batch)
+        if ~isempty(batchErrors{j}) || isempty(futures{j})
+            continue
+        end
+        try
+            % Some installed SLAP2 Trace.processAsync variants return only
+            % trace, while newer variants may also return weight. Fetch only
+            % the first output for compatibility; weight is optional metadata.
+            trace = fetchOutputs(futures{j});
+            batchTraces{j} = trace;
+            batchWeights{j} = [];
+        catch ME
+            batchErrors{j} = getReport(ME, 'extended', 'hyperlinks', 'off');
+        end
+    end
+
+    clear futures hTraces
+else
+    for j = 1:numel(batch)
+        try
+            localRoiIdx = batch(j);
+            hTrace = slap2.util.datafile.trace.Trace(hMDF, params.zIdx, params.chIdx);
+            pixelMask = masks(:, :, localRoiIdx);
+            hTrace.setPixelIdxs(pixelMask, pixelMask);
+            % Some installed SLAP2 Trace.process variants return only trace,
+            % while newer variants may also return weight. Request only one
+            % output so this wrapper works with both APIs.
+            trace = hTrace.process(params.windowWidth_lines, ...
+                params.expectedWindowWidth_lines);
+            batchTraces{j} = trace;
+            batchWeights{j} = [];
+            clear hTrace
+        catch ME
+            batchErrors{j} = getReport(ME, 'extended', 'hyperlinks', 'off');
+        end
+    end
+end
+end
+
+% -------------------------------------------------------------------------
+% HDF5 initialization/writes
+% -------------------------------------------------------------------------
+
+function initializeH5Outputs(h5Path, summary, trialInfo, params)
+if wantsTrial(params.outputMode)
+    for trialIdx = 1:summary.nTrials
+        dset = trialDatasetName(trialIdx);
+        nRows = trialInfo.maxTrialLines(trialIdx);
+        nCols = summary.nTotalROIs;
+        createH5DatasetIfNeeded(h5Path, dset, [nRows, nCols], params);
+        h5writeatt(h5Path, dset, 'description', ...
+            'Trial-sliced traces. Columns are global ROI indices from summary.roiTable.');
+        h5writeatt(h5Path, dset, 'trialIdx', trialIdx);
+        h5writeatt(h5Path, dset, 'firstLineByDmd', trialInfo.firstLine(:, trialIdx));
+        h5writeatt(h5Path, dset, 'lastLineByDmd', trialInfo.lastLine(:, trialIdx));
+    end
+end
+
+if wantsContinuous(params.outputMode)
+    for dmdIdx = 1:summary.nDMDs
+        dset = continuousDatasetName(dmdIdx);
+        nRows = summary.dmd(dmdIdx).totalNumLines;
+        nCols = summary.nAnalysisROIs(dmdIdx);
+        createH5DatasetIfNeeded(h5Path, dset, [nRows, nCols], params);
+        h5writeatt(h5Path, dset, 'description', ...
+            'Continuous traces for one DMD. Columns are local ROI indices for this DMD.');
+        h5writeatt(h5Path, dset, 'dmdIdx', dmdIdx);
+        h5writeatt(h5Path, dset, 'globalRoiIdx', ...
+            summary.roiGlobalOffsets(dmdIdx) + (1:summary.nAnalysisROIs(dmdIdx)));
+    end
+end
+
+h5writeatt(h5Path, '/', 'createdAt', char(datetime('now')));
+h5writeatt(h5Path, '/', 'sourceTrialTable', summary.sourceTrialTable);
+h5writeatt(h5Path, '/', 'outputMode', params.outputMode);
+h5writeatt(h5Path, '/', 'precision', params.precision);
+end
+
+function createH5DatasetIfNeeded(h5Path, dset, dims, params)
+if h5DatasetExists(h5Path, dset)
+    return
+end
+
+chunkLines = min(dims(1), params.h5ChunkLines);
+chunkSize = [max(chunkLines, 1), 1];
+
+args = {h5Path, dset, dims, 'Datatype', params.precision, ...
+    'ChunkSize', chunkSize, 'FillValue', cast(NaN, params.precision)};
+if params.h5Deflate > 0
+    args = [args, {'Deflate', params.h5Deflate}]; %#ok<AGROW>
+end
+h5create(args{:});
+end
+
+function tf = h5DatasetExists(h5Path, dset)
+tf = false;
+if ~exist(h5Path, 'file')
+    return
+end
+try
+    h5info(h5Path, dset);
+    tf = true;
+catch
+    tf = false;
+end
+end
+
+function writeContinuousTrace(summary, h5Path, trace, dmdIdx, localRoiIdx, params)
+if strcmpi(params.storageMode, 'h5')
+    dset = continuousDatasetName(dmdIdx);
+    nWrite = min(numel(trace), summary.dmd(dmdIdx).totalNumLines);
+    h5write(h5Path, dset, trace(1:nWrite), [1, localRoiIdx], [nWrite, 1]);
+else
+    error('extractDendrites:MemoryStorageUnsupported', ...
+        'Memory storage is not supported for continuous traces in this refactor. Use storageMode="h5".');
+end
+end
+
+function writeTrialSlices(summary, trialInfo, h5Path, trace, dmdIdx, globalRoiIdx, params)
+for trialIdx = 1:summary.nTrials
+    writeOneTrialSlice(summary, trialInfo, h5Path, trace, ...
+        dmdIdx, trialIdx, globalRoiIdx, params);
+end
+end
+
+function writeOneTrialSlice(summary, trialInfo, h5Path, trace, dmdIdx, trialIdx, globalRoiIdx, params)
+firstLine = trialInfo.firstLine(dmdIdx, trialIdx);
+lastLine = trialInfo.lastLine(dmdIdx, trialIdx);
+if isnan(firstLine) || isnan(lastLine) || firstLine <= 0 || lastLine < firstLine
+    return
+end
+
+startIdx = max(1, round(firstLine));
+stopIdx = min(numel(trace), round(lastLine));
+if stopIdx < startIdx
+    return
+end
+
+seg = trace(startIdx:stopIdx);
+nWrite = numel(seg);
+
+if strcmpi(params.storageMode, 'h5')
+    dset = trialDatasetName(trialIdx);
+    h5write(h5Path, dset, seg(:), [1, globalRoiIdx], [nWrite, 1]);
+else
+    error('extractDendrites:MemoryStorageUnsupported', ...
+        'Memory storage is not implemented for trial-sliced writes. Use storageMode="h5".');
+end
+end
+
+function dset = trialDatasetName(trialIdx)
+dset = sprintf('/traces/trial_%04d', trialIdx);
+end
+
+function dset = continuousDatasetName(dmdIdx)
+dset = sprintf('/traces/continuous/DMD%d', dmdIdx);
+end
+
+% -------------------------------------------------------------------------
+% ROI and reference image helpers
+% -------------------------------------------------------------------------
+
+function [masks, maskImage, sourceRoiIdx] = getIntegrationMasks(hMDF)
+meta = hMDF.metaData;
+imagingRois = meta.AcquisitionContainer.ROIs.rois;
+if ~iscell(imagingRois)
+    imagingRois = num2cell(imagingRois);
+end
+
+isIntegration = false(1, numel(imagingRois));
+for idx = 1:numel(imagingRois)
+    roi = imagingRois{idx};
+    if isstruct(roi) && isfield(roi, 'imagingMode')
+        isIntegration(idx) = strcmpi(char(roi.imagingMode), 'Integrate');
+    elseif isobject(roi) && isprop(roi, 'imagingMode')
+        isIntegration(idx) = strcmpi(char(roi.imagingMode), 'Integrate');
+    end
+end
+
+sourceRoiIdx = find(isIntegration);
+integrationRois = imagingRois(isIntegration);
+nRois = numel(integrationRois);
+
+nRows = double(meta.dmdPixelsPerColumn);
+nCols = double(meta.dmdPixelsPerRow);
+masks = false(nRows, nCols, nRois);
+maskImage = -1 .* ones(nRows, nCols, 'single');
+
+for roiIdx = 1:nRois
+    roi = integrationRois{roiIdx};
+    shape = roi.shapeData;
+    tmp = false(nRows, nCols);
+    tmp(sub2ind(size(tmp), shape(:, 1), shape(:, 2))) = true;
+    masks(:, :, roiIdx) = tmp;
+    maskImage(tmp) = roiIdx;
+end
+end
+
+function [masks, maskImage, sourceRoiIdx] = masksFromManualROIs(hROIs, hMDF, dmdIdx) %#ok<INUSD>
+nRows = double(hMDF.metaData.dmdPixelsPerColumn);
+nCols = double(hMDF.metaData.dmdPixelsPerRow);
+nRois = numel(hROIs.roiData);
+masks = false(nRows, nCols, nRois);
+maskImage = -1 .* ones(nRows, nCols, 'single');
+sourceRoiIdx = nan(1, nRois);
+for roiIdx = 1:nRois
+    masks(:, :, roiIdx) = logical(hROIs.roiData{roiIdx}.mask);
+    maskImage(masks(:, :, roiIdx)) = roiIdx;
+end
+end
+
+function [refIM, outlines] = loadReferenceImage(dr, dmdIdx, hMDF, masks, params)
+refIM = [];
+outlines = {};
+
+for roiIdx = 1:size(masks, 3)
+    outlines = cat(1, outlines, bwboundaries(masks(:, :, roiIdx))); %#ok<AGROW>
+end
+
+if ~params.saveRefImages && ~params.manualROIs && ~params.makePlots
+    return
+end
+
+try
+    refFn = findReferenceTiff(dr, dmdIdx);
+catch ME
+    warning('Could not find reference TIFF for DMD%d: %s', dmdIdx, ME.message);
+    return
+end
+
+try
+    A = ScanImageTiffReader(fullfile(refFn.folder, refFn.name));
+    IDs = A.descriptions;
+    z = zeros(numel(IDs), 1);
+    ch = zeros(numel(IDs), 1);
+    for imIdx = 1:numel(IDs)
+        js = jsondecode(IDs{imIdx});
+        z(imIdx) = double(js.z);
+        ch(imIdx) = double(js.channel);
+    end
+    nChan = numel(unique(ch));
+    Zs = unique(z);
+    stack = A.data();
+    stack = reshape(stack, size(stack, 1), size(stack, 2), nChan, []);
+
+    if isfield(hMDF.metaData.AcquisitionContainer, 'ParsePlan') && ...
+            isfield(hMDF.metaData.AcquisitionContainer.ParsePlan, 'zs')
+        metaZ = double(hMDF.metaData.AcquisitionContainer.ParsePlan.zs);
+    elseif ~isempty(hMDF.fastZs)
+        metaZ = double(hMDF.fastZs(1));
+    else
+        metaZ = Zs(1);
+    end
+
+    [~, bestZix] = min(abs(Zs - metaZ));
+    bestZix = bestZix(1);
+    refIM = permute(stack(:, :, :, bestZix), [2, 1, 3]);
+    clear stack A
+catch ME
+    warning('Failed to load reference image for DMD%d: %s', dmdIdx, ME.message);
+    refIM = [];
+end
+end
+
+function refFn = findReferenceTiff(dr, dmdIdx)
+refFn = dir(fullfile(dr, '**', sprintf('*DMD%d*REFERENCE*.tif', dmdIdx)));
+assert(numel(refFn) == 1, ...
+    'Expected exactly one DMD%d reference TIFF; found %d.', dmdIdx, numel(refFn));
+end
+
+function plotDmdPreview(dmdIdx, refIM, maskImage)
+if ~isempty(refIM)
+    figure('Name', sprintf('Reference Image for DMD%d', dmdIdx));
+    imshow(refIM(:, :, 1), []);
+end
+figure('Name', sprintf('Masks for DMD%d', dmdIdx));
+imshow(maskImage, []);
+colormap('jet');
+drawnow;
+end
+
+% -------------------------------------------------------------------------
+% Metadata and trial table helpers
+% -------------------------------------------------------------------------
+
+function [dr, trialTablefn] = resolveTrialTablePath(dr_or_pathToTrialTable)
+if exist(dr_or_pathToTrialTable, 'dir')
+    dr = char(dr_or_pathToTrialTable);
+    trialTablefn = 'trialTable.mat';
+else
+    [dr, name, ext] = fileparts(char(dr_or_pathToTrialTable));
+    if isempty(dr)
+        dr = pwd;
+    end
+    trialTablefn = [name, ext];
+end
+end
+
+function trialInfo = buildTrialInfo(trialTable)
+filename = trialTable.filename;
+if isstring(filename)
+    filename = cellstr(filename);
+end
+if ~iscell(filename)
+    error('extractDendrites:InvalidTrialTable', ...
+        'trialTable.filename must be a cell array or string array.');
+end
+
+firstLine = double(trialTable.firstLine);
+lastLine = double(trialTable.lastLine);
+lineRanges = struct();
+lineRanges.firstLine = firstLine;
+lineRanges.lastLine = lastLine;
+lineRanges.nLines = lastLine - firstLine + 1;
+lineRanges.nLines(lineRanges.nLines < 0) = NaN;
+
+valid = ~cellfun(@isempty, filename);
+allFilenames = filename(valid);
+maxTrialLines = max(lineRanges.nLines, [], 1, 'omitnan');
+maxTrialLines(isnan(maxTrialLines) | maxTrialLines < 1) = 1;
+maxTrialLines = round(maxTrialLines);
+
+minimal = struct();
+minimal.filename = filename;
+minimal.firstLine = firstLine;
+minimal.lastLine = lastLine;
+% Preserve scalar/vector trial metadata but intentionally omit large image stacks.
+trialFields = fieldnames(trialTable);
+for tfIdx = 1:numel(trialFields)
+    tfName = trialFields{tfIdx};
+    if any(strcmp(tfName, {'refStack', 'filename', 'firstLine', 'lastLine'}))
+        continue
+    end
+    minimal.(tfName) = trialTable.(tfName);
+end
+
+trialInfo = struct();
+trialInfo.filename = filename;
+trialInfo.firstLine = firstLine;
+trialInfo.lastLine = lastLine;
+trialInfo.lineRanges = lineRanges;
+trialInfo.maxTrialLines = maxTrialLines;
+trialInfo.allFilenames = allFilenames(:);
+trialInfo.minimal = minimal;
+end
+
+function firstValidTrial = findFirstValidTrial(filename, dmdIdx)
+row = filename(dmdIdx, :);
+firstValidTrial = find(~cellfun(@isempty, row), 1, 'first');
+assert(~isempty(firstValidTrial), 'No valid filenames found for DMD%d.', dmdIdx);
+end
+
+function datPath = resolveDataFilePath(dr, filename)
+filename = char(filename);
+if exist(filename, 'file')
+    datPath = filename;
+elseif exist(fullfile(dr, filename), 'file')
+    datPath = fullfile(dr, filename);
+else
+    error('extractDendrites:MissingDataFile', ...
+        'Could not find data file: %s', filename);
+end
+end
+
+function validateParsePlanCompatibility(hMDF, dmdIdx)
+required = {'lineSuperPixelIDs', 'lineFastZIdxs', 'zPixelReplacementMaps'};
+for idx = 1:numel(required)
+    fieldName = required{idx};
+    if ~isprop(hMDF, fieldName)
+        error('extractDendrites:ParsePlanMissingField', ...
+            ['DMD%d MultiDataFiles is missing %s. This usually means ' ...
+             'slap2.util.DataFile/loadParsePlan is incompatible with the .meta file.'], ...
+            dmdIdx, fieldName);
+    end
+end
+if isempty(hMDF.zPixelReplacementMaps) || isempty(hMDF.lineSuperPixelIDs)
+    error('extractDendrites:EmptyParsePlan', ...
+        ['DMD%d has an empty parse plan after DataFile loading. Replace ' ...
+         'loadParsePlan.m with the companion patched version.'], dmdIdx);
+end
+end
+
+function dmdMeta = getDmdMetadata(hMDF)
+dmdMeta = struct();
+dmdMeta.dmdPixelsPerRow = getFieldOrEmpty(hMDF.metaData, 'dmdPixelsPerRow');
+dmdMeta.dmdPixelsPerColumn = getFieldOrEmpty(hMDF.metaData, 'dmdPixelsPerColumn');
+dmdMeta.linePeriod_s = getFieldOrEmpty(hMDF.metaData, 'linePeriod_s');
+dmdMeta.samplesPerLine = getFieldOrEmpty(hMDF.metaData, 'samplesPerLine');
+dmdMeta.channelsSave = getFieldOrEmpty(hMDF.metaData, 'channelsSave');
+dmdMeta.acqDuration_s = getFieldOrEmpty(hMDF.metaData, 'acqDuration_s');
+if isfield(hMDF.metaData, 'AcquisitionContainer') && ...
+        isfield(hMDF.metaData.AcquisitionContainer, 'ParsePlan')
+    pp = hMDF.metaData.AcquisitionContainer.ParsePlan;
+    dmdMeta.parsePlanZs = getFieldOrEmpty(pp, 'zs');
+    dmdMeta.lineRateHz = getFieldOrEmpty(pp, 'lineRateHz');
+    dmdMeta.linesPerCycle = getFieldOrEmpty(pp, 'linesPerCycle');
+    dmdMeta.linesPerFrame = getFieldOrEmpty(pp, 'linesPerFrame');
+    dmdMeta.pixPerLine = getFieldOrEmpty(pp, 'pixPerLine');
+end
+if isempty(dmdMeta.linePeriod_s) && isfield(dmdMeta, 'lineRateHz') && ~isempty(dmdMeta.lineRateHz)
+    dmdMeta.linePeriod_s = 1 ./ double(dmdMeta.lineRateHz);
+end
+end
+
+function val = getFieldOrEmpty(s, fieldName)
+if isstruct(s) && isfield(s, fieldName)
+    val = s.(fieldName);
+else
+    val = [];
+end
+end
+
+% -------------------------------------------------------------------------
+% Status/progress helpers
+% -------------------------------------------------------------------------
+
+function status = initializeStatus(roiTable)
+status = repmat(struct( ...
+    'globalRoiIdx', [], ...
+    'dmdIdx', [], ...
+    'localRoiIdx', [], ...
+    'status', 'pending', ...
+    'startedAt', '', ...
+    'finishedAt', '', ...
+    'nSamplesExtracted', 0, ...
+    'weightClass', '', ...
+    'weightSize', '', ...
+    'errorMessage', ''), height(roiTable), 1);
+
+for idx = 1:height(roiTable)
+    status(idx).globalRoiIdx = roiTable.globalRoiIdx(idx);
+    status(idx).dmdIdx = roiTable.dmdIdx(idx);
+    status(idx).localRoiIdx = roiTable.localRoiIdx(idx);
+end
+end
+
+function batches = makeBatches(items, batchSize)
+if isempty(items)
+    batches = {};
+    return
+end
+batchSize = max(1, round(batchSize));
+nBatches = ceil(numel(items) / batchSize);
+batches = cell(1, nBatches);
+for batchIdx = 1:nBatches
+    startIdx = (batchIdx - 1) * batchSize + 1;
+    stopIdx = min(numel(items), batchIdx * batchSize);
+    batches{batchIdx} = items(startIdx:stopIdx);
+end
+end
+
+function out = sizeToString(sz)
+out = sprintf('%dx', sz);
+out = out(1:end-1);
+end
+
+% -------------------------------------------------------------------------
+% Parameters
+% -------------------------------------------------------------------------
+
+function params = initializeParams(paramsIn)
+params = defaultParams();
+
+% Important distinction:
+%   - initializeParams() with no input should open setParams/optionsGUI.
+%   - initializeParams(paramsIn) should merge paramsIn silently.
+% In MATLAB, struct() is a 1x1 empty-field struct, so isempty(struct()) is
+% false. Therefore use nargin rather than isempty(paramsIn) to decide whether
+% the caller supplied params.
+paramsWereProvided = nargin >= 1;
+
+if ~paramsWereProvided
+    paramsIn = struct();
+end
+
+if paramsWereProvided && (ischar(paramsIn) || isstring(paramsIn))
+    paramsIn = jsondecode(char(paramsIn));
+end
+
+% Pull defaults from the local pipeline GUI using the extractDendrites_new
+% case. If no params were supplied, setParams opens optionsGUI. If paramsIn
+% was supplied, setParams merges those values with GUI defaults and returns
+% without opening the GUI.
+try
+    if exist('setParams', 'file') == 2
+        if ~paramsWereProvided
+            guiParams = setParams('extractDendrites_new');
+        else
+            guiParams = setParams('extractDendrites_new', paramsIn, false);
+        end
+        params = mergeStructs(params, guiParams);
+    end
+catch ME
+    warning('Ignoring setParams(''extractDendrites_new'') defaults: %s', ME.message);
+end
+
+if paramsWereProvided
+    params = mergeStructs(params, paramsIn);
+end
+
+% Accept a common plural typo from early test versions.
+if isfield(params, 'outputMode') && strcmpi(params.outputMode, 'trials')
+    params.outputMode = 'trial';
+end
+
+params.outputMode = validatestring(params.outputMode, {'trial', 'continuous', 'both'});
+params.storageMode = validatestring(params.storageMode, {'h5', 'memory'});
+params.precision = validatestring(params.precision, {'single', 'double'});
+if ~(ischar(params.outputSubfolderName) || isstring(params.outputSubfolderName))
+    error('extractDendrites:InvalidParams', ...
+        'params.outputSubfolderName must be a char vector or string scalar.');
+end
+params.outputSubfolderName = char(params.outputSubfolderName);
+params.maxConcurrentROIs = max(1, round(params.maxConcurrentROIs));
+params.numWorkers = max(1, round(params.numWorkers));
+params.h5ChunkLines = max(1, round(params.h5ChunkLines));
+params.h5Deflate = max(0, min(9, round(params.h5Deflate)));
+end
+
+function params = defaultParams()
+params = struct();
+params.manualROIs = false;
+params.chIdx = 1;
+params.zIdx = 1;
+params.windowWidth_lines = 16;
+params.expectedWindowWidth_lines = 5000;
+params.outputMode = 'trial';
+params.storageMode = 'h5';
+params.precision = 'single';
+params.outputDir = '';
+params.useOutputSubfolder = true;
+params.outputSubfolderName = 'dendriticVoltageExtraction';
+params.timestampOutputSubfolder = false;
+params.useParallel = true;
+params.numWorkers = 4;
+params.restartPool = true;
+params.maxConcurrentROIs = 2;
+params.makePlots = false;
+params.saveRefImages = true;
+params.saveSummaryAfterEachBatch = true;
+params.resume = false;
+params.stopOnError = true;
+params.h5ChunkLines = 100000;
+params.h5Deflate = 0;
+end
+
+function out = mergeStructs(base, overrides)
+out = base;
+if isempty(overrides)
+    return
+end
+if ~isstruct(overrides)
+    error('extractDendrites:InvalidParams', 'paramsIn must be a struct or JSON string.');
+end
+fields = fieldnames(overrides);
+for idx = 1:numel(fields)
+    out.(fields{idx}) = overrides.(fields{idx});
+end
+end
+
+function params = configureParallelPool(params)
+if ~params.useParallel
+    return
+end
+
+try
+    pp = gcp('nocreate');
+    if isempty(pp)
+        fprintf('Starting parallel pool with %d workers...\n', params.numWorkers);
+        parpool(params.numWorkers);
+    elseif pp.NumWorkers ~= params.numWorkers
+        if params.restartPool
+            fprintf('Restarting parallel pool: existing=%d requested=%d\n', ...
+                pp.NumWorkers, params.numWorkers);
+            delete(pp);
+            parpool(params.numWorkers);
+        else
+            warning(['Existing parallel pool has %d workers but params.numWorkers=%d. ' ...
+                'Using existing pool.'], pp.NumWorkers, params.numWorkers);
+        end
+    else
+        fprintf('Using existing parallel pool with %d workers.\n', pp.NumWorkers);
+    end
+catch ME
+    warning('Could not configure parallel pool. Falling back to synchronous extraction: %s', ME.message);
+    params.useParallel = false; %#ok<NASGU>
+end
+end
+
+function tf = wantsTrial(outputMode)
+tf = any(strcmpi(outputMode, {'trial', 'both'}));
+end
+
+function tf = wantsContinuous(outputMode)
+tf = any(strcmpi(outputMode, {'continuous', 'both'}));
+end
+
+function trace = castTrace(trace, precision)
+if strcmpi(precision, 'single')
+    trace = single(trace(:));
+else
+    trace = double(trace(:));
+end
+end

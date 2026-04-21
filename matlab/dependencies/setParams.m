@@ -37,7 +37,12 @@ switch fnName
         params.activityChannel = 1;      tooltips.activityChannel = 'the channel of the original tiff image that contains the glutamate signal';
         params.tau_s = 0.03;             tooltips.tau_s = 'decay time constant of glutamate signal';
         params.tau2_s = 0.15;            tooltips.tau2_s = 'decay time constant of 2nd channel signal at synapses (usually spine calcium)';
-        params.maxSynapseDensity = 0.01; tooltips.maxSynapseDensity = 'maximum synapses per pixel';
+        params.poissBasedStdIM = 0;      tooltips.poissBasedStdIM = 'use Poisson model to estimate stdIM';
+        params.VIF = 1;                  tooltips.VIF = 'variance inflation factor for stdIM estimate (Poiss-based only)';
+        params.peakth = 3.5;             tooltips.peakth = 'peak identification threshold (actIM z-score)';
+        params.peakFuncOpt = 2;             tooltips.peakFuncOpt = 'peak fitting function (1=gaussian, 2=binned gaussian)';
+        params.actImHeteroscedasticNoise = 1;             tooltips.actImHeteroscedasticNoise = 'noise in actIM modeled as heteroscedastic';
+        params.peakBufferSize = 0;             tooltips.peakBufferSize = 'number of pixels to mask around each peak';
         params.nParallelWorkers = 12;    tooltips.nWorkers = 'number of parallel workers';
         params.drawUserRois = true;     tooltips.drawUserRois = 'pop up a GUI to annotate user ROIs?';  
         params.motionThresh = 2.5;       tooltips.motionThresh = 'decrease this to be more stringent on motion correction when censoring frames';
@@ -62,6 +67,7 @@ switch fnName
         params.maxshiftXY = 25; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.maxshiftZ = 10; tooltips.maxshift = 'Maximum frame offset,in pixels';
         params.clipShift = 5; tooltips.clipShift = 'Maximum allowable shift per frame';
+        params.motionMetric = {'''poisson''','''correlation'''}; tooltips.motionMetric = 'Metric for selecting best motion shift';
         params.robust = false; tooltips.robust = 'Use robust likelihood?';
         params.efficientTiffSave = false; tooltips.efficientTiffSave = 'Save Tiffs locally first then transfer?';
         params.tempFileDir = 'C:\temp'; tooltips.tempFileDir = 'Directory for temp files';
@@ -86,6 +92,75 @@ switch fnName
         params.chIdx = 1;           tooltips.chIdx = 'Which channel to analyze?';
         params.windowWidth_lines = 16; tooltips.windowWidth_lines = 'exponential time averaging constant for signal extraction. bandwidth is 11kHz/windowWidth_lines';
         params.expectedWindowWidth_lines = 5000; tooltips.expectedWindowWidth_lines = 'exponential time averaging constant for baseline calculation';
+    case 'extractDendrites_new'
+        params.manualROIs = false; 
+        tooltips.manualROIs = 'Draw ROIs manually? If false, use SLAP2 integration ROIs.';
+
+        params.chIdx = 1;
+        tooltips.chIdx = 'Channel index passed to the SLAP2 Trace object.';
+
+        params.zIdx = 1;
+        tooltips.zIdx = 'Z-plane index passed to the SLAP2 Trace object. Usually 1 for single-plane/DMD voltage extraction.';
+
+        params.windowWidth_lines = 16;
+        tooltips.windowWidth_lines = 'Window width, in SLAP2 lines, passed to Trace.process. Matches the original extractDendrites default.';
+
+        params.expectedWindowWidth_lines = 5000;
+        tooltips.expectedWindowWidth_lines = 'Expected/baseline window width, in SLAP2 lines, passed to Trace.process. Matches the original extractDendrites default.';
+
+        params.outputMode = 'trial';
+        tooltips.outputMode = 'Trace organization: trial, continuous, or both. Trial is recommended for downstream voltage analysis.';
+
+        params.storageMode = 'h5';
+        tooltips.storageMode = 'Storage backend for large trace arrays. h5 is recommended for large recordings.';
+
+        params.precision = 'single';
+        tooltips.precision = 'Numeric precision for saved traces. single reduces memory and disk use relative to double.';
+
+        params.outputDir = '';
+        tooltips.outputDir = 'Custom output directory. Leave empty to save beside trialTable.mat or in the configured subfolder.';
+
+        params.useOutputSubfolder = true;
+        tooltips.useOutputSubfolder = 'Save outputs into a dedicated subfolder beside trialTable.mat. Recommended.';
+
+        params.outputSubfolderName = 'dendriticVoltageExtraction';
+        tooltips.outputSubfolderName = 'Name of the output subfolder created beside trialTable.mat.';
+
+        params.timestampOutputSubfolder = false;
+        tooltips.timestampOutputSubfolder = 'Create a timestamped output subfolder for each extraction run.';
+
+        params.useParallel = true;
+        tooltips.useParallel = 'Use MATLAB parallel workers for ROI extraction. Disable for debugging or lowest-memory runs.';
+
+        params.numWorkers = 4;
+        tooltips.numWorkers = 'Requested number of MATLAB parallel workers. 2-4 is usually safer than 16-24 for this I/O-heavy workflow.';
+
+        params.restartPool = true;
+        tooltips.restartPool = 'Restart the parallel pool if its worker count does not match numWorkers.';
+
+        params.maxConcurrentROIs = 2;
+        tooltips.maxConcurrentROIs = 'Maximum number of ROIs extracted at the same time per DMD. Main memory-throttling parameter.';
+
+        params.makePlots = false;
+        tooltips.makePlots = 'Generate ROI/reference preview plots during extraction. Disable for batch processing.';
+
+        params.saveRefImages = true;
+        tooltips.saveRefImages = 'Save selected reference images in the lightweight summary .mat file.';
+
+        params.saveSummaryAfterEachBatch = true;
+        tooltips.saveSummaryAfterEachBatch = 'Checkpoint the summary .mat file after each ROI batch.';
+
+        params.resume = false;
+        tooltips.resume = 'Reserved for resumable extraction. Currently prevents accidental reuse of old HDF5 outputs.';
+
+        params.stopOnError = true;
+        tooltips.stopOnError = 'Stop immediately when an ROI fails. Set false to log errors and continue.';
+
+        params.h5ChunkLines = 100000;
+        tooltips.h5ChunkLines = 'HDF5 chunk size along the line/time dimension. 50000-200000 is a reasonable range.';
+
+        params.h5Deflate = 0;
+        tooltips.h5Deflate = 'HDF5 compression level. 0 is fastest; 1-9 saves space but slows writing.';
     case 'summarize_Voltage'
         params.tau = 0.001;            tooltips.tau_s = 'decay time constant of voltage signal';
         params.analyzeHz = 1000; %frame rate used for analysis
