@@ -22,12 +22,16 @@ function summary = extractDendrites_new(dr_or_pathToTrialTable, paramsIn)
 %
 %   HDF5 output schema:
 %
-%       /traces/trial_0001         [nLinesThisTrial x nTotalROIs]
-%       /traces/trial_0002         [nLinesThisTrial x nTotalROIs]
+%       /traces/trial_0001         [nAlignedLinesThisTrial x nTotalROIs]
+%       /traces/trial_0002         [nAlignedLinesThisTrial x nTotalROIs]
 %       ...
 %
 %       /traces/continuous/DMD1    [nLinesDMD1 x nROIsDMD1]
 %       /traces/continuous/DMD2    [nLinesDMD2 x nROIsDMD2]
+%
+%   Trial datasets are sized by the union of valid DMD line ranges, and each
+%   DMD is written with a row offset relative to trialFirstLineGlobal to preserve
+%   acquisition-time alignment across DMDs.
 %
 %   The lightweight MAT summary stores masks, metadata, ROI mappings, line
 %   ranges, output paths, and extraction status. Large traces are stored in HDF5.
@@ -52,10 +56,8 @@ else
 end
 
 if nargin < 2
-    % No params input: open the setParams/optionsGUI dialog.
     params = initializeParams();
 else
-    % Params input supplied: merge with defaults without opening the GUI.
     params = initializeParams(paramsIn);
 end
 
@@ -439,14 +441,23 @@ function initializeH5Outputs(h5Path, summary, trialInfo, params)
 if wantsTrial(params.outputMode)
     for trialIdx = 1:summary.nTrials
         dset = trialDatasetName(trialIdx);
-        nRows = trialInfo.maxTrialLines(trialIdx);
+
+        % Size each trial dataset by the union of valid DMD line ranges.
+        % This preserves acquisition-time alignment when DMD1 and DMD2 have
+        % slightly different first/last line values for the same trial.
+        nRows = trialInfo.trialGlobalNLines(trialIdx);
         nCols = summary.nTotalROIs;
         createH5DatasetIfNeeded(h5Path, dset, [nRows, nCols], params);
         h5writeatt(h5Path, dset, 'description', ...
-            'Trial-sliced traces. Columns are global ROI indices from summary.roiTable.');
+            ['Time-aligned trial-sliced traces. Columns are global ROI indices ' ...
+             'from summary.roiTable. Rows are relative to trialFirstLineGlobal.']);
         h5writeatt(h5Path, dset, 'trialIdx', trialIdx);
+        h5writeatt(h5Path, dset, 'trialFirstLineGlobal', trialInfo.trialFirstLineGlobal(trialIdx));
+        h5writeatt(h5Path, dset, 'trialLastLineGlobal', trialInfo.trialLastLineGlobal(trialIdx));
         h5writeatt(h5Path, dset, 'firstLineByDmd', trialInfo.firstLine(:, trialIdx));
         h5writeatt(h5Path, dset, 'lastLineByDmd', trialInfo.lastLine(:, trialIdx));
+        h5writeatt(h5Path, dset, 'firstLineRoundedByDmd', trialInfo.firstLineRounded(:, trialIdx));
+        h5writeatt(h5Path, dset, 'lastLineRoundedByDmd', trialInfo.lastLineRounded(:, trialIdx));
     end
 end
 
@@ -520,12 +531,15 @@ end
 function writeOneTrialSlice(summary, trialInfo, h5Path, trace, dmdIdx, trialIdx, globalRoiIdx, params)
 firstLine = trialInfo.firstLine(dmdIdx, trialIdx);
 lastLine = trialInfo.lastLine(dmdIdx, trialIdx);
-if isnan(firstLine) || isnan(lastLine) || firstLine <= 0 || lastLine < firstLine
+firstLineRounded = trialInfo.firstLineRounded(dmdIdx, trialIdx);
+lastLineRounded = trialInfo.lastLineRounded(dmdIdx, trialIdx);
+if isnan(firstLineRounded) || isnan(lastLineRounded) || ...
+        firstLineRounded <= 0 || lastLineRounded < firstLineRounded
     return
 end
 
-startIdx = max(1, round(firstLine));
-stopIdx = min(numel(trace), round(lastLine));
+startIdx = max(1, firstLineRounded);
+stopIdx = min(numel(trace), lastLineRounded);
 if stopIdx < startIdx
     return
 end
@@ -535,7 +549,30 @@ nWrite = numel(seg);
 
 if strcmpi(params.storageMode, 'h5')
     dset = trialDatasetName(trialIdx);
-    h5write(h5Path, dset, seg(:), [1, globalRoiIdx], [nWrite, 1]);
+
+    % Preserve cross-DMD acquisition-time alignment within the trial dataset.
+    % Each trial dataset starts at the earliest valid line across all DMDs.
+    % This DMD's slice is written at an offset relative to that global start.
+    trialFirstLine = trialInfo.trialFirstLineGlobal(trialIdx);
+    if isnan(trialFirstLine) || trialFirstLine < 1
+        return
+    end
+    rowStart = firstLineRounded - trialFirstLine + 1;
+
+    info = h5info(h5Path, dset);
+    nRows = info.Dataspace.Size(1);
+    if rowStart < 1 || (rowStart + nWrite - 1) > nRows
+        error('extractDendrites:H5TrialWriteOutOfBounds', ...
+            ['Cannot write DMD%d ROI%d trial %d into %s: rowStart=%d, ' ...
+             'nWrite=%d, datasetRows=%d, firstLine=%g, lastLine=%g, ' ...
+             'trialFirstLineGlobal=%g, trialLastLineGlobal=%g, ' ...
+             'firstLineRounded=%d, lastLineRounded=%d.'], ...
+            dmdIdx, globalRoiIdx, trialIdx, dset, rowStart, nWrite, nRows, ...
+            firstLine, lastLine, trialInfo.trialFirstLineGlobal(trialIdx), ...
+            trialInfo.trialLastLineGlobal(trialIdx), firstLineRounded, lastLineRounded);
+    end
+
+    h5write(h5Path, dset, seg(:), [rowStart, globalRoiIdx], [nWrite, 1]);
 else
     error('extractDendrites:MemoryStorageUnsupported', ...
         'Memory storage is not implemented for trial-sliced writes. Use storageMode="h5".');
@@ -702,22 +739,63 @@ end
 
 firstLine = double(trialTable.firstLine);
 lastLine = double(trialTable.lastLine);
+
+% The trial table line values can contain fractional/near-integer values, while
+% Trace output is indexed with integer MATLAB subscripts. Use one consistent
+% integer line-coordinate system everywhere HDF5 trial datasets are sized and
+% written. This avoids off-by-one failures where raw ranges create a dataset
+% that is one row shorter than the rounded write segment.
+firstLineRounded = round(firstLine);
+lastLineRounded = round(lastLine);
+
 lineRanges = struct();
 lineRanges.firstLine = firstLine;
 lineRanges.lastLine = lastLine;
-lineRanges.nLines = lastLine - firstLine + 1;
+lineRanges.firstLineRounded = firstLineRounded;
+lineRanges.lastLineRounded = lastLineRounded;
+lineRanges.nLines = lastLineRounded - firstLineRounded + 1;
 lineRanges.nLines(lineRanges.nLines < 0) = NaN;
 
 valid = ~cellfun(@isempty, filename);
 allFilenames = filename(valid);
+
+% Per-trial union of DMD line ranges. These fields define the row coordinate
+% system for /traces/trial_XXXX datasets. Rows are aligned to the earliest
+% valid firstLine across DMDs for each trial, so DMDs with later starts are
+% written with a positive row offset instead of being forced to row 1.
+validLines = ~isnan(firstLineRounded) & ~isnan(lastLineRounded) & ...
+    firstLineRounded > 0 & lastLineRounded >= firstLineRounded;
+firstForMin = firstLineRounded;
+firstForMin(~validLines) = NaN;
+lastForMax = lastLineRounded;
+lastForMax(~validLines) = NaN;
+
+trialFirstLineGlobal = min(firstForMin, [], 1, 'omitnan');
+trialLastLineGlobal = max(lastForMax, [], 1, 'omitnan');
+invalidTrial = isnan(trialFirstLineGlobal) | isnan(trialLastLineGlobal) | ...
+    trialLastLineGlobal < trialFirstLineGlobal;
+trialFirstLineGlobal(invalidTrial) = 1;
+trialLastLineGlobal(invalidTrial) = 1;
+trialGlobalNLines = trialLastLineGlobal - trialFirstLineGlobal + 1;
+trialGlobalNLines(trialGlobalNLines < 1 | isnan(trialGlobalNLines)) = 1;
+trialGlobalNLines = round(trialGlobalNLines);
+
+% Retain the old maximum per-DMD trial length for reference/backward
+% compatibility, but do not use it to size HDF5 trial datasets.
 maxTrialLines = max(lineRanges.nLines, [], 1, 'omitnan');
 maxTrialLines(isnan(maxTrialLines) | maxTrialLines < 1) = 1;
 maxTrialLines = round(maxTrialLines);
+
+lineRanges.trialFirstLineGlobal = trialFirstLineGlobal;
+lineRanges.trialLastLineGlobal = trialLastLineGlobal;
+lineRanges.trialGlobalNLines = trialGlobalNLines;
 
 minimal = struct();
 minimal.filename = filename;
 minimal.firstLine = firstLine;
 minimal.lastLine = lastLine;
+minimal.firstLineRounded = firstLineRounded;
+minimal.lastLineRounded = lastLineRounded;
 % Preserve scalar/vector trial metadata but intentionally omit large image stacks.
 trialFields = fieldnames(trialTable);
 for tfIdx = 1:numel(trialFields)
@@ -732,8 +810,13 @@ trialInfo = struct();
 trialInfo.filename = filename;
 trialInfo.firstLine = firstLine;
 trialInfo.lastLine = lastLine;
+trialInfo.firstLineRounded = firstLineRounded;
+trialInfo.lastLineRounded = lastLineRounded;
 trialInfo.lineRanges = lineRanges;
 trialInfo.maxTrialLines = maxTrialLines;
+trialInfo.trialFirstLineGlobal = trialFirstLineGlobal;
+trialInfo.trialLastLineGlobal = trialLastLineGlobal;
+trialInfo.trialGlobalNLines = trialGlobalNLines;
 trialInfo.allFilenames = allFilenames(:);
 trialInfo.minimal = minimal;
 end
@@ -855,29 +938,21 @@ end
 function params = initializeParams(paramsIn)
 params = defaultParams();
 
-% Important distinction:
-%   - initializeParams() with no input should open setParams/optionsGUI.
-%   - initializeParams(paramsIn) should merge paramsIn silently.
-% In MATLAB, struct() is a 1x1 empty-field struct, so isempty(struct()) is
-% false. Therefore use nargin rather than isempty(paramsIn) to decide whether
-% the caller supplied params.
-paramsWereProvided = nargin >= 1;
-
-if ~paramsWereProvided
-    paramsIn = struct();
+if nargin < 1
+    paramsIn = [];
 end
 
-if paramsWereProvided && (ischar(paramsIn) || isstring(paramsIn))
+if ischar(paramsIn) || isstring(paramsIn)
     paramsIn = jsondecode(char(paramsIn));
 end
 
 % Pull defaults from the local pipeline GUI using the extractDendrites_new
-% case. If no params were supplied, setParams opens optionsGUI. If paramsIn
-% was supplied, setParams merges those values with GUI defaults and returns
+% case. If paramsIn is empty, setParams opens the GUI. If paramsIn is
+% provided, setParams merges those values with GUI defaults and returns
 % without opening the GUI.
 try
     if exist('setParams', 'file') == 2
-        if ~paramsWereProvided
+        if isempty(paramsIn)
             guiParams = setParams('extractDendrites_new');
         else
             guiParams = setParams('extractDendrites_new', paramsIn, false);
@@ -888,7 +963,7 @@ catch ME
     warning('Ignoring setParams(''extractDendrites_new'') defaults: %s', ME.message);
 end
 
-if paramsWereProvided
+if ~isempty(paramsIn)
     params = mergeStructs(params, paramsIn);
 end
 
