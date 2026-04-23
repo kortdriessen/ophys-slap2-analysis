@@ -16,7 +16,6 @@ sParams.tau_s = 0.03;
 sParams.tau2_s = 0.15;            
 sParams.maxSynapseDensity = 0.01; 
 sParams.nParallelWorkers = 32;    
-sParams.drawUserRois = true;     
 sParams.motionThresh = 2.5;       
 sParams.analyzeHz = 200;          
 sParams.nanThresh = 0.33;         
