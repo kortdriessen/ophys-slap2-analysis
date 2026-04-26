@@ -152,12 +152,12 @@ for eIx = 1:epoch %for each epoch
     isDMD1 = cellfun(@(x)(~isempty(x)), strfind({files.name}, 'DMD1'));
 
     DMD1files = files(isDMD1);
-    [~, sortorder] = sort({DMD1files.name});
+    [~, sortorder] = sort([DMD1files.datenum], 'ascend');
     DMD1files = DMD1files(sortorder);
     numLinesDMD1 = numLines(isDMD1); numLinesDMD1 = numLinesDMD1(sortorder);
 
     DMD2files = files(~isDMD1);
-    [~, sortorder] = sort({DMD2files.name});
+    [~, sortorder] = sort([DMD2files.datenum], 'ascend');
     DMD2files = DMD2files(sortorder);
     numLinesDMD2 = numLines(~isDMD1); numLinesDMD2 = numLinesDMD2(sortorder);
 
