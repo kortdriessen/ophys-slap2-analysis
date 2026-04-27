@@ -3,28 +3,32 @@ function BATCH_MRR()
 
 root = '/data/raw_mirror';
 
-% Walk directory tree and collect directories whose path contains 'acq_'
+% Walk directory tree and collect directories named 'acq_*' whose parent is named 'loc_*'
 items = dir(fullfile(root, '**'));
 items = items([items.isdir] & ~ismember({items.name}, {'.', '..'}));
 
 directoriesToProcess = {};
-if contains(root, 'acq_')
-    directoriesToProcess{end+1} = root;
-end
 for i = 1:length(items)
-    fullPath = fullfile(items(i).folder, items(i).name);
-    if contains(fullPath, 'acq_')
-        directoriesToProcess{end+1} = fullPath;
+    [~, parentName] = fileparts(items(i).folder);
+    if contains(items(i).name, 'acq_') && contains(parentName, 'loc_')
+        directoriesToProcess{end+1} = fullfile(items(i).folder, items(i).name);
     end
 end
 
+
+aParams.operator = 'KD';
+aParams = setParams('multiRoiRegSLAP2', aParams);
 for i = 1:length(directoriesToProcess)
     dr = directoriesToProcess{i};
     fullPathToTrialTable = [dr filesep 'trialTable.mat'];
-    aParams.operator = 'KD';
-    aParams = setParams('multiRoiRegSLAP2', aParams);
+    
     if ~exist(fullPathToTrialTable, 'file')
         buildTrialTableSLAP2(dr);
+    end
+    mrr_done = CHECK_FOR_MRR_COMPLETION(fullPathToTrialTable);
+    if mrr_done
+        fprintf('MRR already done for %s, skipping.\n', dr);
+        continue;
     end
     multiRoiRegSLAP2(fullPathToTrialTable, aParams)
 end
