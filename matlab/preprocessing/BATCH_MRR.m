@@ -17,7 +17,9 @@ end
 
 
 aParams.operator = 'KD';
+aParams.nWorkers = 64;
 aParams = setParams('multiRoiRegSLAP2', aParams);
+
 for i = 1:length(directoriesToProcess)
     dr = directoriesToProcess{i};
     fullPathToTrialTable = [dr filesep 'trialTable.mat'];
@@ -30,5 +32,14 @@ for i = 1:length(directoriesToProcess)
         fprintf('MRR already done for %s, skipping.\n', dr);
         continue;
     end
-    multiRoiRegSLAP2(fullPathToTrialTable, aParams)
+    try
+        multiRoiRegSLAP2(fullPathToTrialTable, aParams)
+    catch ME
+        timestamp = char(datetime('now','Format','yyyyMMdd-HHmmss'));
+        errFile = fullfile(dr, ['MRR_ERROR_' timestamp '.txt']);
+        fid = fopen(errFile, 'w');
+        fprintf(fid, '%s\n', getReport(ME, 'extended', 'hyperlinks', 'off'));
+        fclose(fid);
+        fprintf('ERROR in multiRoiRegSLAP2 for %s — logged to %s\n', dr, errFile);
+    end
 end
