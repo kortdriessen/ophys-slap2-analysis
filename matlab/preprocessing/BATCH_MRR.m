@@ -32,6 +32,14 @@ for i = 1:length(directoriesToProcess)
         fprintf('MRR already done for %s, skipping.\n', dr);
         continue;
     end
+    
+    % check if any MRR error file already exists for this directory
+    errFiles = dir(fullfile(dr, 'MRR_ERROR_*.txt'));
+    if ~isempty(errFiles)
+        fprintf('Previous MRR error detected for %s, skipping. Found error file: %s\n', dr, errFiles(1).name);
+        continue;
+    end
+
     try
         multiRoiRegSLAP2(fullPathToTrialTable, aParams)
     catch ME
