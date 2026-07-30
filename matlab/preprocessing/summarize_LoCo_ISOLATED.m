@@ -345,7 +345,7 @@ for DMDix = nDMDs:-1:1
 
                 batchFile = [tempname '_batch.mat'];
                 outputFile = [tempname '_output.mat'];
-                save(batchFile, 'batchTrials');
+                save(batchFile, 'batchTrials', 'batchIx', 'nBatches');
 
                 fprintf('[BATCH %d/%d] Launching subprocess for trials %d-%d (%d trials)...\n', ...
                     batchIx, nBatches, batchTrials(1), batchTrials(end), numel(batchTrials));
@@ -375,6 +375,8 @@ for DMDix = nDMDs:-1:1
             delete(inputFile);
         else
             % Single batch — no subprocess overhead needed, call directly
+            params.batchIx = 1;
+            params.nBatches = 1;
             E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params);
         end
 

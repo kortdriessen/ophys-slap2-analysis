@@ -1,7 +1,7 @@
 function BATCH_MRR()
 % does multiRoiRegSLAP2 for all directories in the raw mirror that contain 'acq_'.
 
-root = '/data/raw_mirror';
+root = '/data/raw_mirror/miaplacidus/exp_1';
 
 % Walk directory tree and collect directories named 'acq_*' whose parent is named 'loc_*'
 items = dir(fullfile(root, '**'));
