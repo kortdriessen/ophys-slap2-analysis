@@ -8,6 +8,11 @@ numDatasets = numel(fls);
 E = cell(numDatasets,1); 
 for i = 1:numel(validTrials)
     nLoad = validTrials(i);
+    if isfield(params, 'batchIx') && isfield(params, 'nBatches')
+        fprintf('[Batch %d/%d, Trial %d/%d]\n', params.batchIx, params.nBatches, i, numel(validTrials));
+    else
+        fprintf('[Trial %d/%d]\n', i, numel(validTrials));
+    end
     CD = loadTrial(dr, fns{nLoad},fls(nLoad),els(nLoad),selPix,discardFrames{nLoad}, alignData{nLoad}, meanAligned(:,:,:,nLoad), motOutput(:,nLoad), roiData, params);
     E{nLoad}.ROIs = CD.ROIs; E{nLoad}.global = CD.global;
     E{nLoad}.discardFrames = CD.discardFrames;

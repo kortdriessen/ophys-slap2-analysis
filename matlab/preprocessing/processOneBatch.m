@@ -21,7 +21,9 @@ data = load(inputFile, 'dr', 'fns', 'fls', 'els', 'selPix', 'sources', ...
     'roiData', 'params');
 
 % Load batch-specific data
-batch = load(batchFile, 'batchTrials');
+batch = load(batchFile, 'batchTrials', 'batchIx', 'nBatches');
+data.params.batchIx = batch.batchIx;
+data.params.nBatches = batch.nBatches;
 
 fprintf('Processing %d trials...\n', numel(batch.batchTrials));
 
