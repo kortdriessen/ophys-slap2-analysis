@@ -41,6 +41,7 @@ if params.makeJSON
 end
 
 params.startTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+provenance = captureRunProvenance(dr, params);
 
 copyReadDeleteScanImageTiff([]); %make sure we can use the function in parallel loops
 
@@ -109,6 +110,9 @@ for DMDix = nDMDs:-1:1
     numChannels = aData.numChannels;
     params.numChannels = numChannels;
     params.alignHz = aData.alignHz;
+    channelSchema = buildWiscChannelSchema(numChannels, params.activityChannel, ...
+        params.tau_s, params.tau2_s);
+    exptSummary.channelSchema{DMDix} = channelSchema;
     if ~strcmpi(params.microscope, 'SLAP2')
         params.analyzeHz = 1/aData.frametime; %analyze conventional recordings at the acquisitoin framerate
     end
@@ -215,6 +219,10 @@ for DMDix = nDMDs:-1:1
     corrThresh = min(0.90, median(ccf, 'omitnan')-2*std(ccf, 'omitmissing'));
     actValidPix = squeeze(mean(~isnan(actAligned(:,:,1,:)), [1 2]));
     validTrials= find(ccf(:)>corrThresh & actValidPix(:)>mean(actValidPix)/2);
+    assert(~isempty(validTrials), 'slap2:noValidTrials', ...
+        'DMD %d has no valid trials after localization alignment.', DMDix);
+    exptSummary.validTrials{DMDix} = validTrials;
+    exptSummary.inputKeepTrials{DMDix} = find(keepTrials(DMDix,:));
     exptSummary.meanIM{DMDix} = mean(meanAligned(:,:,:,validTrials),4, 'omitnan');
     actIM = prctile(actAligned(:,:,:,validTrials),80,4);  %mean(actAligned(:,:,:,validTrials), 4, 'omitnan');
     nanFrac = mean(isnan(actAligned(:,:,:,validTrials)), 4);
@@ -291,6 +299,9 @@ for DMDix = nDMDs:-1:1
     sources.C = sources.C(keepSources);
     selPix = selPix(:,:,keepSources);
     disp(['Number of sources: ' int2str(sum(keepSources))]);
+    assert(any(keepSources), 'slap2:noValidSources', ...
+        'DMD %d has no sources after selected-pixel pruning.', DMDix);
+    exptSummary.sources{DMDix} = sources;
 
     %for each file, load high res data and refine
     params.tau_full=params.tau_s*params.analyzeHz;
@@ -380,6 +391,8 @@ for DMDix = nDMDs:-1:1
             E = processAllTrials_Async(dr, fns, fls, els, selPix, sources, discardFrames, alignData, meanAligned, motOutput, roiData, validTrials, params);
         end
 
+        validateTrialResults(E, validTrials, numChannels);
+
         %per-trial images
         exptSummary.E(:,DMDix) = E; %experiment data
     end
@@ -397,14 +410,22 @@ for DMDix = nDMDs:-1:1
 end
 
 params.endTime = char(datetime('now','TimeZone','local','Format','yyyy-MM-dd''T''HH:mm:ss.SSSZZZZZ'));
+provenance.endTimestamp = params.endTime;
 
 %prepare file for saving
 exptSummary.params = params;
 exptSummary.trialTable = trialTable;
 exptSummary.dr = dr;
+exptSummary.provenance = provenance;
 
-%save
-save(fnsave, 'exptSummary', "-v7.3");
+% Save atomically: an incomplete or invalid structure never receives a final name.
+partialFnsave = [fnsave(1:end-4) '.partial.mat'];
+save(partialFnsave, 'exptSummary', "-v7.3");
+savedProbe = load(partialFnsave, 'exptSummary');
+validateExperimentSummaryForSave(savedProbe.exptSummary);
+[moveSucceeded, moveMessage] = movefile(partialFnsave, fnsave, 'f');
+assert(moveSucceeded, 'slap2:atomicSummaryRenameFailed', ...
+    'Could not rename validated partial summary: %s', moveMessage);
 
 if params.makeJSON
     try

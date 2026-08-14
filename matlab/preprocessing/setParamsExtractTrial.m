@@ -27,7 +27,11 @@ params.tau2_samps = params.tau2_s*params.analyzeHz;
 params.k2 = [zeros(1, ceil(6*params.tau2_samps)) exp(-(0:ceil(6*params.tau2_samps))/params.tau2_samps)];
 params.k2 = params.k2./sum(params.k2);
 
-params.baselineWindow_samps =  params.baselineWindow_Glu_s .*params.analyzeHz;
+params.baselineWindow_Glu_samps = params.baselineWindow_Glu_s .* params.analyzeHz;
+params.baselineWindow_Ca_samps = params.baselineWindow_Ca_s .* params.analyzeHz;
+params.baselineWindow_samps = params.baselineWindow_Glu_samps; % Deprecated compatibility alias.
+params.analysisBaselineWindows_samps = [params.baselineWindow_Glu_samps, ...
+    repmat(params.baselineWindow_Ca_samps, 1, max(0, params.numChannels-1))];
 params.denoiseWindow_samps = params.denoiseWindow_s .* params.analyzeHz;
 
 if ~isfield(params, 'lambda') || isempty(params.lambda)

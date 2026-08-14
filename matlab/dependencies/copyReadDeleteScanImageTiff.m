@@ -1,7 +1,19 @@
 function [data, meta]= copyReadDeleteScanImageTiff(remotepath, localDir)
+envLocalDir = getenv('SLAP2_TIFF_SCRATCH_DIR');
+if (nargin < 2 || isempty(localDir)) && ~isempty(envLocalDir)
+    localDir = envLocalDir;
+end
+
 if isempty(remotepath) %PASS EMPTY MATRIX TO INITIALIZE
-    thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
-    if ~exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
+    if nargin >= 2 && ~isempty(localDir) || ~isempty(envLocalDir)
+        if ~exist(localDir, 'dir')
+            mkdir(localDir);
+        end
+    else
+        thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
+        if exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
+            return
+        end
         try
             localDir = '/data/temp';
             if ~exist(localDir, 'dir')
@@ -24,7 +36,7 @@ if isempty(remotepath) %PASS EMPTY MATRIX TO INITIALIZE
     return
 end
 
-if nargin<2
+if ~exist('localDir', 'var') || isempty(localDir)
     %read user settings for local directory
     thisDir = fileparts(which('copyReadDeleteScanImageTiff'));
     if exist([thisDir filesep 'pathToFastDrive.mat'], 'file')
@@ -59,6 +71,7 @@ assert(exist(remotepath, 'file'));
 randName = [int2str(round(1e10*rand+0.1)) '.tif'];
 localpath = [localDir  filesep   randName];
 disp(localpath)
+cleanupLocalCopy = onCleanup(@()deleteIfExists(localpath));
 
 
 success = false; retries = 0;
@@ -77,5 +90,10 @@ while ~success
 end
 
 [data, desc, meta] = networkScanImageTiffReader(localpath);
-delete(localpath);
+end
+
+function deleteIfExists(path)
+if exist(path, 'file')
+    delete(path);
+end
 end

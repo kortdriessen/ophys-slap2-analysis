@@ -181,7 +181,8 @@ end
 %initialize B
 params.denoiseWindow_samps = ceil(params.denoiseWindow_s.*params.analyzeHz);
 %denoised = smoothdata(Y_obs,2,"movmean",,'omitmissing');
-B_est = max(params.lambda/10, splitFreq(Y_obs, params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
+B_est = max(params.lambda/10, splitFreq(Y_obs, params.denoiseWindow_samps, ...
+    ceil(params.baselineWindow_Glu_samps/params.denoiseWindow_samps)));
 
 %medRes = median(denoised-LP,2);
 typicalX = sqrt(mean((Y_obs(:,1:100)-B_est(:,1:100)).^2,'all'))*ones(num_sources,num_time_points);
@@ -270,12 +271,13 @@ for outerLoop = 1:params.nmfIter
         break %we stop optimizing after fitting S on last loop
     end
 
-    Xfloor = computeFloor(X_est_new, params.denoiseWindow_samps, params.baselineWindow_samps);
+    Xfloor = computeFloor(X_est_new, params.denoiseWindow_samps, params.baselineWindow_Glu_samps);
     X_est_new = max(0, X_est_new - Xfloor - Xnoise);
 
     %SOLVE FOR B
     if doFitB
-        B_est_new = fitB(B_est, Y_obs,X_est_new,H_est, Finv, selPix, params); %(Y,X, H, Finv, selPix, params)
+        B_est_new = fitB(B_est, Y_obs,X_est_new,H_est, Finv, selPix, ...
+            params, params.baselineWindow_Glu_samps); %(Y,X, H, Finv, selPix, params)
         B_est = B_est_new;
     end
 
@@ -317,7 +319,8 @@ dFls = H_est\(Y_obs-B_est);
 
 if ~isempty(Y2) % two-channel recording, process calcium data with same source footprints
     %fit initial baseline
-    B2 = max(params.lambda/10, splitFreq(Y2, params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps)));
+    B2 = max(params.lambda/10, splitFreq(Y2, params.denoiseWindow_samps, ...
+        ceil(params.baselineWindow_Ca_samps/params.denoiseWindow_samps)));
     opts.HessianMultiplyFcn = @(hinfo, v, flag) hessmult_S_wrapper(hinfo, Y2, H_est, B2, params.k2, Finv, params.lambda, v); %hessmult_S_wrapper takes (Svec, Z, H, B, k, F, lambda, v)
     opts.MaxIterations = 15;
     LS2 = H_est\(Y2-B2);
@@ -363,14 +366,15 @@ phase = 2*pi*T./periods;
 preds = [sin(phase); cos(phase); T./max(T)-0.5];
 end
 
-function B = fitB(B0,Y,X, H, Finv, selPix, params)
+function B = fitB(B0,Y,X, H, Finv, selPix, params, baselineWindow_samps)
 %fits a baseline (i.e. F0) to the measurements in Y, given the current
 %estimate of the activity, HX
 num_time_points = size(Y,2);
-[~, HP] = splitFreq(Y-H*X, 2*params.denoiseWindow_samps, ceil(params.baselineWindow_samps/params.denoiseWindow_samps));
+[~, HP] = splitFreq(Y-H*X, 2*params.denoiseWindow_samps, ...
+    ceil(baselineWindow_samps/params.denoiseWindow_samps));
 HP(isnan(HP)) = 0;
 HPsurround = getSurround(HP,selPix,params);
-sinePreds = sinePredictors(num_time_points,params.baselineWindow_samps);
+sinePreds = sinePredictors(num_time_points,baselineWindow_samps);
 %sqrtF = sqrt(1./Finv);
 %Yweighted = Y.*sqrtF; %multiply in the freshness effect
 opts = optimoptions('lsqlin','Display','none');
