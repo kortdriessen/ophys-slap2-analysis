@@ -77,10 +77,70 @@ fnsave = [savedr filesep 'SummaryLoCo-' datestr(now, 'YYmmDD-HHMMSS') '.mat'];
 
 %call up a GUI for the user to define Soma ROI and regions to exclude
 if params.drawUserRois
+    fnPostAcqAnn = [dr filesep 'postAcqANNOTATIONS.mat'];
     fnAnn = [dr filesep 'ANNOTATIONS.mat'];
-    if exist(fnAnn, 'file')
-        load(fnAnn, 'ROIs')
+    ROIs = [];
+    usingPostAcqAnnotations = false;
+    if exist(fnPostAcqAnn, 'file')
+        annData = load(fnPostAcqAnn);
+        if isfield(annData, 'ROIs')
+            ROIs = annData.ROIs;
+            usingPostAcqAnnotations = ~isempty(ROIs);
+        else
+            warning('postAcqANNOTATIONS.mat exists but does not contain ROIs. Trying legacy ANNOTATIONS.mat.');
+        end
+    end
+
+    if isempty(ROIs) && exist(fnAnn, 'file')
+        annData = load(fnAnn, 'ROIs');
+        if isfield(annData, 'ROIs')
+            ROIs = annData.ROIs;
+        else
+            warning('ANNOTATIONS.mat exists but does not contain ROIs. Opening ROI drawing GUI.');
+        end
+    end
+
+    if ~isempty(ROIs)
+        updatedAnnotations = false;
+        annotationDMDs = 1:nDMDs;
+        if ~usingPostAcqAnnotations
+            annotationDMDs = [];
+        end
+        for DMDix = annotationDMDs
+            %load image data
+            firstValidTrial = find(keepTrials(DMDix,:),1,"first");
+            [~, fn, ext] = fileparts(trialTable.fnRegDS{DMDix,firstValidTrial});
+            ROIs(DMDix).dr = dr;
+            ROIs(DMDix).fn = fn;
+            targetKey = trialTable.fnRegDS{DMDix,firstValidTrial};
+
+            IMtargetRaw = copyReadDeleteScanImageTiff([dr filesep fn ext]);
+            IMtarget = collapseImageForRegistration(IMtargetRaw);
+            [IMann, hasAnnotationImage] = extractAnnotationImage(ROIs(DMDix));
+            alreadyAligned = isfield(ROIs(DMDix), 'alignedToFnRegDS') && strcmp(ROIs(DMDix).alignedToFnRegDS, targetKey);
+            hasRoiData = isfield(ROIs(DMDix), 'roiData') && ~isempty(ROIs(DMDix).roiData);
+            if usingPostAcqAnnotations && hasAnnotationImage && hasRoiData && ~alreadyAligned
+                [shiftRC, ok] = estimateRegistrationShift(IMtarget, IMann);
+                if ok
+                    newRoiData = shiftRoiData(ROIs(DMDix).roiData, shiftRC, size(IMtarget,[1 2]));
+                    ROIs(DMDix).roiData = newRoiData;
+                    ROIs(DMDix).alignedToFnRegDS = targetKey;
+                    ROIs(DMDix).alignmentShiftRC = shiftRC;
+                    updatedAnnotations = true;
+                else
+                    warning(['Could not register ANNOTATIONS image for DMD' int2str(DMDix) '. Using stored ROI coordinates as-is.']);
+                end
+            end
+        end
+        if usingPostAcqAnnotations
+            save(fnAnn, 'ROIs');
+            if ~updatedAnnotations
+                warning('No post-acquisition annotation transforms were applied.');
+            end
+        end
     else
+        warning('No usable post-acquisition or legacy annotations found. Opening ROI drawing GUI.');
+
         for DMDix = 1:nDMDs
             %load image data
             firstValidTrial = find(keepTrials(DMDix,:),1,"first");
@@ -440,4 +500,99 @@ else
 end
 
 disp('Done summarize_LoCo_ISOLATED')
+end
+
+
+function [IMann, hasAnnotationImage] = extractAnnotationImage(roiEntry)
+IMann = [];
+hasAnnotationImage = false;
+candidateFields = {'IM','im','image','annotationImage','annotationIM','refImage','referenceImage'};
+for ix = 1:numel(candidateFields)
+    fnm = candidateFields{ix};
+    if isfield(roiEntry, fnm) && ~isempty(roiEntry.(fnm))
+        IMann = collapseImageForRegistration(roiEntry.(fnm));
+        hasAnnotationImage = ~isempty(IMann) && any(isfinite(IMann(:)));
+        if hasAnnotationImage
+            return
+        end
+    end
+end
+end
+
+function IM = collapseImageForRegistration(IMraw)
+IMraw = double(IMraw);
+if isempty(IMraw)
+    IM = [];
+    return
+end
+if ndims(IMraw)<=2
+    IM = IMraw;
+else
+    avgDims = 3:ndims(IMraw);
+    IM = squeeze(mean(IMraw, avgDims, 'omitnan'));
+end
+end
+
+function [shiftRC, ok] = estimateRegistrationShift(IMtarget, IMann)
+shiftRC = [0 0];
+ok = false;
+if isempty(IMtarget) || isempty(IMann)
+    return
+end
+targetSz = size(IMtarget,[1 2]);
+annSz = size(IMann,[1 2]);
+padSz = max(cat(1,targetSz,annSz),[],1);
+
+targetPad = nan(padSz);
+targetPad(1:targetSz(1),1:targetSz(2)) = IMtarget;
+annPad = nan(padSz);
+annPad(1:annSz(1),1:annSz(2)) = IMann;
+
+fillval = 0;
+targetPad(isnan(targetPad)) = fillval;
+annPad(isnan(annPad)) = fillval;
+
+clipShift = max(2, min([padSz(1)-100 padSz(2)-100]));
+
+output1 = dftregistration_clipped( fft2(targetPad), fft2(annPad), 1, clipShift);
+shiftRC = [-output1(3) -output1(4)];
+corrCoeff = output1(1);
+
+ok = corrCoeff>0.4;
+end
+
+function roiDataOut = shiftRoiData(roiDataIn, shiftRC, targetSz)
+roiDataOut = roiDataIn;
+rowShift = shiftRC(1);
+colShift = shiftRC(2);
+for rix = 1:numel(roiDataIn)
+    roiEntry = roiDataIn{rix};
+    if isfield(roiEntry, 'Center') && ~isempty(roiEntry.Center)
+        roiEntry.Center = roiEntry.Center - [colShift rowShift];
+    end
+    if isfield(roiEntry, 'Position') && ~isempty(roiEntry.Position)
+        roiEntry.Position = roiEntry.Position - [colShift rowShift];
+    end
+    if isfield(roiEntry, 'Vertices') && ~isempty(roiEntry.Vertices)
+        roiEntry.Vertices = roiEntry.Vertices - [colShift rowShift];
+    end
+    if isfield(roiEntry, 'mask') && ~isempty(roiEntry.mask)
+        roiEntry.mask = shiftMaskToTarget(roiEntry.mask, shiftRC, targetSz);
+    end
+    roiDataOut{rix} = roiEntry;
+end
+end
+
+function maskOut = shiftMaskToTarget(maskIn, shiftRC, targetSz)
+maskOut = false(targetSz);
+if isempty(maskIn)
+    return
+end
+[rr,cc] = find(maskIn);
+rr2 = round(rr - shiftRC(1));
+cc2 = round(cc - shiftRC(2));
+valid = rr2>=1 & rr2<=targetSz(1) & cc2>=1 & cc2<=targetSz(2);
+if any(valid)
+    maskOut(sub2ind(targetSz, rr2(valid), cc2(valid))) = true;
+end
 end

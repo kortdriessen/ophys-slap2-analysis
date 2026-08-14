@@ -66,18 +66,33 @@ if params.drawUserRois
     fnPostAcqAnn = [dr filesep 'postAcqANNOTATIONS.mat'];
     fnAnn = [dr filesep 'ANNOTATIONS.mat'];
     ROIs = [];
+    usingPostAcqAnnotations = false;
     if exist(fnPostAcqAnn, 'file')
         annData = load(fnPostAcqAnn);
         if isfield(annData, 'ROIs')
             ROIs = annData.ROIs;
+            usingPostAcqAnnotations = ~isempty(ROIs);
         else
-            warning('postAcqANNOTATIONS.mat exists but does not contain ROIs. Opening ROI drawing GUI.');
+            warning('postAcqANNOTATIONS.mat exists but does not contain ROIs. Trying legacy ANNOTATIONS.mat.');
+        end
+    end
+
+    if isempty(ROIs) && exist(fnAnn, 'file')
+        annData = load(fnAnn, 'ROIs');
+        if isfield(annData, 'ROIs')
+            ROIs = annData.ROIs;
+        else
+            warning('ANNOTATIONS.mat exists but does not contain ROIs. Opening ROI drawing GUI.');
         end
     end
 
     if ~isempty(ROIs)
         updatedAnnotations = false;
-        for DMDix = 1:nDMDs
+        annotationDMDs = 1:nDMDs;
+        if ~usingPostAcqAnnotations
+            annotationDMDs = [];
+        end
+        for DMDix = annotationDMDs
             %load image data
             firstValidTrial = find(keepTrials(DMDix,:),1,"first");
             [~, fn, ext] = fileparts(trialTable.fnRegDS{DMDix,firstValidTrial});
@@ -90,7 +105,7 @@ if params.drawUserRois
             [IMann, hasAnnotationImage] = extractAnnotationImage(ROIs(DMDix));
             alreadyAligned = isfield(ROIs(DMDix), 'alignedToFnRegDS') && strcmp(ROIs(DMDix).alignedToFnRegDS, targetKey);
             hasRoiData = isfield(ROIs(DMDix), 'roiData') && ~isempty(ROIs(DMDix).roiData);
-            if hasAnnotationImage && hasRoiData && ~alreadyAligned
+            if usingPostAcqAnnotations && hasAnnotationImage && hasRoiData && ~alreadyAligned
                 [shiftRC, ok] = estimateRegistrationShift(IMtarget, IMann);
                 if ok
                     newRoiData = shiftRoiData(ROIs(DMDix).roiData, shiftRC, size(IMtarget,[1 2]));
@@ -103,14 +118,14 @@ if params.drawUserRois
                 end
             end
         end
-        save(fnAnn, 'ROIs');
-        if ~updatedAnnotations
-            warning('No post-acquisition annotation transforms were applied.');
+        if usingPostAcqAnnotations
+            save(fnAnn, 'ROIs');
+            if ~updatedAnnotations
+                warning('No post-acquisition annotation transforms were applied.');
+            end
         end
     else
-        if ~exist(fnPostAcqAnn, 'file')
-            warning('postAcqANNOTATIONS.mat not found. Opening ROI drawing GUI.');
-        end
+        warning('No usable post-acquisition or legacy annotations found. Opening ROI drawing GUI.');
 
         for DMDix = 1:nDMDs
             %load image data
