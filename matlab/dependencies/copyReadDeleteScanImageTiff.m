@@ -89,7 +89,13 @@ while ~success
     end
 end
 
-[data, desc, meta] = networkScanImageTiffReader(localpath);
+%pass localDir so the reader's second staging copy stays inside this
+%process's private scratch directory. Without it the reader falls back to a
+%cwd-relative shared folder, and because same-index parallel workers in
+%concurrent MATLAB processes draw identical "random" filename sequences,
+%their staging copies collide there and one process reads a half-written or
+%deleted file (surfacing as a spurious corrupt-TIFF error).
+[data, desc, meta] = networkScanImageTiffReader(localpath, localDir);
 end
 
 function deleteIfExists(path)
