@@ -131,6 +131,10 @@ switch params.microscope
         sumFAnalysis = sum(meanPxAnalysis,1,'omitmissing');
         IMsel = nan(sum(selPx2D(:)),numChannels, nFrames);
         Finvsel = nan(sum(selPx2D(:)),nFrames);
+        %preallocate so an empty roiData yields an empty (0 x nCh x nFrames)
+        %ROIs.F rather than letting the discard-frame assignment below grow a
+        %malformed nonempty array from a nonexistent field
+        CD.ROIs.F = nan(length(roiData), numChannels, nFrames);
         for bix = nBlocks:-1:1
             fIxs  = blockEdges(bix):(blockEdges(bix+1)-1);
             [Yraw, Fresh] = S2data.getImages(rawChannelOrder,frameLines(fIxs),ceil(dt),1,1);
@@ -226,6 +230,10 @@ switch params.microscope
         sumFAnalysis = sum(meanPxAnalysis,1,'omitmissing');
         IMsel = nan(sum(selPx2D(:)),numChannels, nFrames);
         Finvsel = nan(sum(selPx2D(:)),nFrames);
+        %preallocate so an empty roiData yields an empty (0 x nCh x nFrames)
+        %ROIs.F rather than letting the discard-frame assignment below grow a
+        %malformed nonempty array from a nonexistent field
+        CD.ROIs.F = nan(length(roiData), numChannels, nFrames);
         Fresh = ones(size(IM,1), size(IM,2), 'single'); %freshness currently unused for bergamo
         for bix = nBlocks:-1:1
             fIxs  = blockEdges(bix):(blockEdges(bix+1)-1);
